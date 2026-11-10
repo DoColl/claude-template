@@ -108,7 +108,7 @@ Files marked "yours" are created once and never touched again. The others are th
 
 ## How installation works
 
-- **Seeds and kit files.** A seed is a skeleton the project fills in. It is created once and never overwritten, not even with `--force`. A kit file is recorded with a hash in `.claude/harness.json`, which is how `status` shows the ones you edited and `update` knows which it may refresh.
+- **Seeds and kit files.** A seed is a skeleton the project fills in. It is created once and never overwritten, not even with `--force`. A kit file is recorded with a hash in `.claude/harness.json`, which is how `status` shows the ones you edited and `update` knows which it may refresh. In the project, without the kit, the advisory guard HD-1 lists the same edited files on every run of the gate: a kit file still identical to its hash was reviewed in the kit and need not be reviewed again in the project.
 - **Slots.** Seeds carry comment lines such as `<!-- harness:slot delegation -->`. A module inserts its section there, once, and the line stays so that a module added later finds it. Claude Code does not send block-level HTML comments in `CLAUDE.md` to the model, so they cost nothing in context.
 - **Placeholders.** A few values (project name, default branch, the name of your CI workflow) are asked at install time and checked against a strict pattern before anything is written.
 - **Gaps.** What the kit cannot know is a `TODO(harness)` comment. `status` and an advisory guard count them.

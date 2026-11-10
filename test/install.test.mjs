@@ -51,6 +51,27 @@ test("all modules together: one gate, every fragment placed, CLAUDE.md well unde
   assert.deepEqual([again.created, again.updated, again.appended, again.fragmentsInserted, again.conflicts, again.outdated], [[], [], [], [], [], []], "a second run writes nothing");
   assert.deepEqual(drift(dir, readManifest(dir)), { modified: [], missing: [] });
   assert.deepEqual(readManifest(dir).modules, plan.selected);
+  const hashed = Object.values(readManifest(dir).files).filter((f) => f.sha256).length;
+  assert.match(r.stdout, new RegExp(`HD-1: ${hashed} kit file\\(s\\) identical`), "the guard hashes every kit-owned file the way the installer does");
+  assert.doesNotMatch(r.stdout, /HD-1: \d+ kit file\(s\) differ/);
+});
+
+// HD-1 lists, without the kit, what `status` lists with it. A note, never a failure: a project may edit a kit file.
+test("HD-1: the gate lists the kit files that drifted from their recorded hash, and stays green", () => {
+  const dir = tmp();
+  install(dir, []);
+  write(dir, "scripts/guards.d/_lib.sh", `${read(dir, "scripts/guards.d/_lib.sh")}# edited in the project\n`);
+  fs.rmSync(path.join(dir, "docs/conventions/claude-md.md"));
+  write(dir, "CLAUDE.md", read(dir, "CLAUDE.md").replace("docs/conventions/claude-md.md", "docs/conventions/local-gate.md"));
+  assert.deepEqual(drift(dir, readManifest(dir)), { modified: ["scripts/guards.d/_lib.sh"], missing: ["docs/conventions/claude-md.md"] });
+  const r = gate(dir);
+  assert.equal(r.status, 0, output(r));
+  const listed = /HD-1: 2 kit file\(s\) differ[^\n]*\n((?: {10}[^\n]+\n)+)/.exec(r.stdout)?.[1].trim().split("\n").map((l) => l.trim());
+  assert.deepEqual(listed, ["docs/conventions/claude-md.md  (missing)", "scripts/guards.d/_lib.sh"], output(r));
+  assert.doesNotMatch(r.stdout, /CLAUDE\.md  /, "a seed carries no hash: filling it is not drift");
+  // a manifest the awk cannot read says so instead of reporting a clean tree
+  write(dir, MANIFEST, JSON.stringify(readManifest(dir)));
+  assert.match(gate(dir).stdout, /HD-1: no hashed file could be read/);
 });
 
 test("core alone says nothing about what is not installed", () => {
