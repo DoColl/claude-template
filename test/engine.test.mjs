@@ -156,6 +156,21 @@ test("CLAUDE.md bullets stay short and point to a page the module installs", () 
   }
 });
 
+// CLAUDE.md § Before pushing grades the review by tier: a pass that does not say which tiers it belongs to
+// would run on every diff, which is the cost the tiers exist to avoid.
+test("a review pass added to \"Before pushing\" names its tiers, and the slot keeps the list whole", () => {
+  for (const [id, mod] of kit.modules) {
+    const file = path.join(mod.dir, "fragments/CLAUDE.md/before-pushing.frag");
+    if (!fs.existsSync(file)) continue;
+    for (const line of read(file).trim().split("\n")) assert.match(line, /^1\. \*\*[^*]+\*\* \((tier [23]|tiers 2, 3)[,)]/, `${id}: a before-pushing row is "1. **<pass>** (tier 3)" or "(tiers 2, 3)"`);
+  }
+  // A comment at the left margin would end the numbered list; indented to the items' text it stays inside it.
+  const lines = read(kit.modules.get("core").dir, "files/CLAUDE.md").split("\n");
+  const at = lines.findIndex((l) => l.includes("harness:rows before-pushing"));
+  assert.match(lines[at], /^ {3}<!-- harness:rows before-pushing -->$/);
+  assert.match(lines[at + 1], /^1\. /, "the built-in passes follow the marker directly");
+});
+
 test("guards follow the contract and scripts are executable", () => {
   for (const [id, mod] of kit.modules) for (const rel of walk(path.join(mod.dir, "files"))) {
     const abs = path.join(mod.dir, "files", rel);

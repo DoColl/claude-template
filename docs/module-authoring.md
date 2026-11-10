@@ -65,6 +65,8 @@ A seed file exposes slots: a line containing `harness:slot <name>` or `harness:r
 - `slot` — a block (a section, a paragraph). One blank line is added after it.
 - `rows` — contiguous lines (table rows, list items). No blank line.
 
+A comment line at the left margin ends a Markdown list or table. A `rows` marker therefore sits after the last row of a table, and inside a list it is indented to the items' text (three spaces under `1. `), so that it belongs to the item above it and the items on both sides stay one list.
+
 Fragments may only target seed files. If the target file belongs to a module that is not installed, the fragment waits; if the slot line has been removed from the project's file, the installer says so and the fragment is pasted by hand.
 
 Slots provided by `core`:
@@ -74,7 +76,7 @@ Slots provided by `core`:
 | `CLAUDE.md` | `delegation` | slot | the "Delegation" section (agents) |
 | `CLAUDE.md` | `conventions` | rows | one bullet per rule: `- **Name**: rule, at most five lines. → \`docs/conventions/<slug>.md\`` |
 | `CLAUDE.md` | `security-workflow` | slot | paragraphs or `###` sections at the top of "Security workflow" |
-| `CLAUDE.md` | `before-pushing` | rows | review steps that run before the built-in ones, each starting with `1. ` |
+| `CLAUDE.md` | `before-pushing` | rows | review passes that run before the built-in ones, each written `1. **<pass>** (tier 3)` or `(tiers 2, 3)` — the tiers of "Before pushing" it applies to |
 | `CLAUDE.md` | `doc-maintenance` | rows | `- <change> → <doc>` lines |
 | `docs/conventions/README.md` | `conventions-index` | rows | `| \`file.md\` | topic | source |` |
 

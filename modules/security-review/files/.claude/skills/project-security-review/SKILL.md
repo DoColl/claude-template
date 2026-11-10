@@ -1,8 +1,9 @@
 ---
 name: project-security-review
 description: >-
-  Project-aware security review. Run BEFORE pushing any diff that touches the
-  sensitive areas CLAUDE.md lists under "Before pushing". Layers this project's
+  Project-aware security review. Run once BEFORE pushing a tier 3 diff: one
+  that touches the sensitive areas CLAUDE.md lists under "Before pushing".
+  Layers this project's
   findings catalogue (SECURITY_REVIEW*.md) and its invariants on top of the
   generic /security-review, and names the scanner to run for the area touched.
 ---
@@ -13,9 +14,9 @@ The generic `/security-review` is a floor, not full coverage: it does not know t
 
 ## When to run
 
-Any diff touching the areas below — the same list as CLAUDE.md § "Before pushing"; keep the two identical.
+A tier 3 diff: one touching the areas below — the same list as CLAUDE.md § "Before pushing"; keep the two identical. Tiers 1 and 2 (documentation, instruction files, harness scripts, hooks and workflows) do not need this skill run on its own: the `security-reviewer` agent, which covers tier 2, already has it in context.
 
-TODO(harness): list the sensitive areas with their paths — authentication and authorization; writes on user data; external I/O (controllers, exports, integrations); configuration (environment variables, container files, CI workflows); the instruction files (`CLAUDE.md`, `.claude/**`, `.githooks/**`).
+TODO(harness): list the sensitive areas with their paths — authentication and authorization; writes on user data; external I/O (controllers, exports, integrations); configuration (environment variables, container files).
 
 ## Step 1 — The findings catalogue (blocking)
 

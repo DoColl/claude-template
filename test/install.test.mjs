@@ -47,6 +47,9 @@ test("all modules together: one gate, every fragment placed, CLAUDE.md well unde
   const budget = Number(/harness:budget (\d+)/.exec(read(dir, "CLAUDE.md"))[1]);
   const size = fs.statSync(path.join(dir, "CLAUDE.md")).size;
   assert.ok(size <= budget * 0.6, `CLAUDE.md is ${size} bytes with every module: leave the project at least 40% of its ${budget}-byte budget`);
+  const passes = /\n\n((?:(?:1\. | {3})[^\n]*\n)+)\nInstruction files are executed/.exec(read(dir, "CLAUDE.md"))?.[1].split("\n").filter((l) => l.startsWith("1. "));
+  assert.ok(passes?.length >= 5, "the review passes of every module and the built-in ones form one numbered list, with nothing at the left margin between them");
+  for (const p of passes) assert.match(p, /^1\. \*\*[^*]+\*\* \(tiers? [23]/, p);
   const again = summarize(buildPlan({ kit, target: dir }));
   assert.deepEqual([again.created, again.updated, again.appended, again.fragmentsInserted, again.conflicts, again.outdated], [[], [], [], [], [], []], "a second run writes nothing");
   assert.deepEqual(drift(dir, readManifest(dir)), { modified: [], missing: [] });

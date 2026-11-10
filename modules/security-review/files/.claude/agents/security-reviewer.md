@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Fresh-context security review of a diff against this repository's catalogue (SECURITY_REVIEW*.md, the invariants of CLAUDE.md and of the project-security-review skill). Use before pushing any diff that touches the sensitive areas CLAUDE.md lists under "Before pushing", a workflow, or Claude configuration. Read-only, desk-only; the orchestrator verifies every finding and still runs the review chain.
+description: Fresh-context security review of a diff against this repository's catalogue (SECURITY_REVIEW*.md, the invariants of CLAUDE.md and of the project-security-review skill). Use once, on the complete diff, before pushing a change of tier 2 or 3 of CLAUDE.md § "Before pushing": harness code that runs (scripts, hooks, workflows), a change to what a session may do, or application code in a sensitive area. Not for documentation or the wording of instructions. Read-only, desk-only; the orchestrator verifies every finding and still runs the review chain.
 model: opus
 effort: xhigh
 tools: Read, Grep, Glob, Bash
