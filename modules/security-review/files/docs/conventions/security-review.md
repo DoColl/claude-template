@@ -15,7 +15,7 @@
 - **`security-reviewer`** (`.claude/agents/`) — Opus, read-only, confined by the Bash allowlist (`agent-bash-guard.md`), desk-only: it never calls a running service and never executes the code under review. A finding needs a lower-trust actor, an accepted input, a crossed boundary and an observable result; `CONFIRMED` findings carry a severity, `NEEDS_VALIDATION` ones name the missing fact. The orchestrator verifies every finding at the line it names.
 - **`/project-security-review`** (`.claude/skills/project-security-review/SKILL.md`) — yours to fill: the trigger list, the invariants, the scanner routing. The agent preloads it.
 - **The chain** — by tier (`docs/conventions/review-tiers.md`). Tier 1, documentation and the wording of instructions: no pass. Tier 2, harness code that runs or a change to what a session may do: `security-reviewer` → `/security-review`. Tier 3, application code in a sensitive area: `security-reviewer` → `/project-security-review` → `/security-review` → `/code-review` → `/simplify` when the fixes added code. The gate runs in every tier. The agent's findings feed the passes after it; they never replace them. Each pass runs once, on the complete diff.
-- **The findings policy** — CLAUDE.md § Findings policy. Every finding is fixed before merge or carries a written derogation.
+- **The findings policy** — CLAUDE.md § Findings policy. Every finding is fixed before merge or carries a derogation written in the Derogations table of `SECURITY_REVIEW.md`.
 
 ## Scope: what was already reviewed in the kit
 

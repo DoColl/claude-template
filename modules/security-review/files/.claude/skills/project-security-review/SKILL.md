@@ -58,4 +58,4 @@ A scanner is run from a pinned release verified by checksum, never `curl … | s
 
 ## Step 4 — Findings policy
 
-Per CLAUDE.md § "Findings policy": every finding from this skill, a scanner, `/security-review` or CI is fixed before merge, or carries an explicit, motivated derogation recorded in the pull request. A fixed finding gets its ID, its row in `SECURITY_REVIEW.md` and its guard — and, when it reveals a rule the architecture relies on, a bullet in Step 2.
+Per CLAUDE.md § "Findings policy": every finding from this skill, a scanner, `/security-review` or CI is fixed before merge, or carries an explicit, motivated derogation recorded in the Derogations table of `SECURITY_REVIEW.md` and named in the pull request. A fixed finding gets its ID, its row in `SECURITY_REVIEW.md` and its guard — and, when it reveals a rule the architecture relies on, a bullet in Step 2.

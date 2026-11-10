@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The local gate. Runs every guard in scripts/guards.d/ (NN-name.sh, in
-# order). CI's enforcing job runs this same script, so a green gate here is a
-# green gate there (docs/conventions/local-gate.md).
+# order). A CI workflow is meant to run this same script, so that a green gate
+# here is a green gate there; until one does, this run is the only one
+# (docs/conventions/local-gate.md).
 #
 #   ./scripts/security-checks.sh            everything
 #   ./scripts/security-checks.sh --offline  skip what needs the network

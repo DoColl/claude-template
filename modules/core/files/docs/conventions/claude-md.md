@@ -6,7 +6,7 @@
 
 `CLAUDE.md` is injected into every session and into every sub-agent that does not opt out. Each line is paid for on every turn, by every agent, and competes for attention with the task at hand. Left alone the file only grows: each incident adds a paragraph, nobody removes one, and the rules that matter end up buried in the history of the ones that no longer do.
 
-A size target written in a document does not hold either. The budget is therefore a check (CM-1): going over fails the gate and CI, and raising the budget is a visible, reviewed change to `CLAUDE.md` itself rather than a slow drift.
+A size target written in a document does not hold either. The budget is therefore a check (CM-1): going over fails the gate — and CI, once a workflow runs the gate — and raising the budget is a visible, reviewed change to `CLAUDE.md` itself rather than a slow drift.
 
 ## Details
 

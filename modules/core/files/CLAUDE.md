@@ -35,7 +35,7 @@ Guidance for Claude Code in the __HARNESS_PROJECT_NAME__ repository. This file h
 <!-- One bullet per rule — **Name**: the rule, at most five lines. → `docs/conventions/<slug>.md` -->
 <!-- TODO(harness): the project's own conventions (data model invariants, API error format, naming, what must never be logged). -->
 - **CLAUDE.md stays a budgeted index**: operative rules only, under the byte budget on its `harness:budget` line (CM-1); every `docs/` path it names must exist (CM-2). A new rule is a short bullet here plus its detail file. → `docs/conventions/claude-md.md`
-- **A rule that matters is a check**: every fixed bug or review finding gets an ID, a line in `SECURITY_REVIEW.md` and a guard in `scripts/guards.d/`; the gate and CI run the same guards. → `docs/conventions/local-gate.md`
+- **A rule that matters is a check**: every fixed bug or review finding gets an ID, a line in `SECURITY_REVIEW.md` and a guard in `scripts/guards.d/`; one gate runs them, before a push and in CI where a workflow calls it. → `docs/conventions/local-gate.md`
 <!-- harness:rows conventions -->
 
 ## Environment variables
@@ -68,7 +68,7 @@ Instruction files are executed by every session: in doubt between tiers 1 and 2,
 
 ### Findings policy
 
-Every finding raised by a review pass, by the gate or by CI is fixed before the change is merged. The only exception is an explicit, motivated derogation from the project owner, recorded in the pull request (which finding, why not now, the follow-up). A rejected finding needs a stated reason. Once fixed, a finding gets its ID, its line in `SECURITY_REVIEW.md` and its guard.
+Every finding raised by a review pass, by the gate or by CI is fixed before the change is merged. The only exception is an explicit, motivated derogation from the project owner, recorded in the Derogations table of `SECURITY_REVIEW.md` (which finding, why not now, who decided, the review date) and named in the pull request. A rejected finding needs a stated reason. Once fixed, a finding gets its ID, its line in `SECURITY_REVIEW.md` and its guard.
 
 ### Conventions for new code
 

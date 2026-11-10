@@ -1,12 +1,14 @@
 # The local gate and its guards
 
-**Rule (CLAUDE.md § Key conventions):** a rule that matters is a check. Every fixed bug or review finding gets an ID, a line in `SECURITY_REVIEW.md` and a guard in `scripts/guards.d/`; the gate and CI run the same guards.
+**Rule (CLAUDE.md § Key conventions):** a rule that matters is a check. Every fixed bug or review finding gets an ID, a line in `SECURITY_REVIEW.md` and a guard in `scripts/guards.d/`; one gate runs them, before a push and in CI where a workflow calls it.
 
 ## Why
 
 A rule written as a sentence is followed until the day it is not, and nothing says which day that was. A model reading instructions is no different from a person here: wording does not enforce anything. What holds is a check that fails loudly, names the rule by its ID and points at its story.
 
-The second half of the rule is that the check runs in two places from one source. A gate that exists only in CI is discovered after the push; a gate that exists only on a laptop is skipped. `scripts/security-checks.sh` is the single entry point: run it before pushing, and CI's enforcing job calls the very same script.
+The second half of the rule is that the check runs in two places from one source. A gate that exists only in CI is discovered after the push; a gate that exists only on a laptop is skipped. `scripts/security-checks.sh` is the single entry point: run it before pushing, and have CI call the very same script.
+
+That second place is not installed with this page. The gate is local until a CI workflow runs it (the kit's `ci-security` module ships one). Until then nothing checks a push that skipped the local run: read every sentence here about CI as "once a workflow calls the gate".
 
 ## Details
 
