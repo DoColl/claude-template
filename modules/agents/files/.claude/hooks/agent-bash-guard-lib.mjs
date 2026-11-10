@@ -43,7 +43,7 @@ const READERS = {
 };
 const NUMBER = /^-?\d+$/;
 const SAFE_VALUE = /^[\w .\/@:^,=+*?%{}\[\]()~!-]*$/;           // option values: never $ ` ; | & < > \ ' "
-const UNSAFE_PATTERN = /[$`\\<>]/;                                  // grep patterns: free text minus anything a tokenizer slip could turn into a redirection
+const UNSAFE_PATTERN = /[$`\\<>\n\r]/;                              // grep patterns: free text minus anything a tokenizer slip could turn into a redirection or a second line
 const DOTDOT = /(^|\/)\.\.(\/|$)/;
 const safeArg = (a) => a.length <= 512 && !/^[-\/~$]/.test(a) && !DOTDOT.test(a) && /^[\w.\/@:^,=+*?{}\[\]~!%-]+$/.test(a);
 
@@ -90,6 +90,13 @@ export function normalizeConfig(raw) {
 // ---- tokenising ------------------------------------------------------------
 // Segments split on | && || ; newline, honouring quotes. Anything that can nest
 // or spawn is rejected — the agents never need it.
+//
+// An unquoted `#` is rejected outright. The shell drops everything from it to
+// the end of the line, QUOTES INCLUDED, while this loop would go on tracking
+// them: a quote "opened" inside a comment would hide the following lines from
+// the guard, and the shell would run them. No allowed shape needs a comment;
+// a `#` inside quotes or after a backslash is a plain character and passes.
+const COMMENT = "comments (#) are not allowed — quote the # if it is part of a pattern";
 function splitSegments(src) {
   if (/\$'|\$"/.test(src)) throw new Error("$'…' / $\"…\" quoting is not allowed");
   if (/`/.test(src)) throw new Error("backticks are not allowed");
@@ -101,6 +108,7 @@ function splitSegments(src) {
     if (q) { if (c === "\\" && q === '"') { cur += c + (n ?? ""); i++; continue; } cur += c; if (c === q) q = null; continue; }
     if (c === "\\") { cur += c + (n ?? ""); i++; continue; }
     if (c === "'" || c === '"') { q = c; cur += c; continue; }
+    if (c === "#") throw new Error(COMMENT);
     if (c === "(" || c === ")" || c === "{" || c === "}") throw new Error("subshells and brace groups are not allowed");
     if (c === "|" && n === "|") { push("||"); i++; continue; }
     if (c === "&" && n === "&") { push("&&"); i++; continue; }
@@ -132,6 +140,7 @@ function words(segment) {
     if (c === "'" || c === '"') { q = c; had = true; quotedPart = true; continue; }
     if (c === "\\") { const n = segment[i + 1] ?? ""; if (n === "<" || n === ">") throw new Error("escaped redirection characters are not allowed"); cur += n; i++; had = true; quotedPart = true; continue; }
     if (/\s/.test(c)) { flush(); continue; }
+    if (c === "#") throw new Error(COMMENT); // splitSegments already refuses it; the two loops must agree
     if (c === "<" || c === ">") live = true;
     cur += c; had = true;
   }
@@ -196,14 +205,17 @@ const CD_RULE = "cd is only allowed as `cd <dir> && <command>`, for a verificati
 
 // verifyShapes: the argv list valid at this position (after `cd <dir> &&`, or at
 // the root as long as no cd came before), or null when none is.
-function checkSegment(argv, { first, profile, verifyShapes, cfg }) {
+function checkSegment(argv, { first, profile, verifyShapes, cfg, atRoot }) {
   while (argv.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[0])) { if (!SAFE_PREFIX.has(argv[0])) return `environment prefix '${argv[0].split("=")[0]}=…' is not allowed`; argv.shift(); }
   if (!argv.length) return "empty command";
   const cmd = argv[0];
   if (cmd === "cd") return profile === "verify" ? CD_RULE : "cd is not allowed (paths are project-relative from the root)";
   if (first) {
     const gate = /^(?:\.\/)?scripts\/([^/]+)$/.exec(projectRelative(cmd));
-    if (gate && Object.hasOwn(GATE_SHAPES, gate[1])) return sameArgv(argv.slice(1), GATE_SHAPES[gate[1]]) ? null : `${gate[1]} takes exactly: ${GATE_SHAPES[gate[1]].join(" ") || "(no argument)"}`;
+    if (gate && Object.hasOwn(GATE_SHAPES, gate[1])) {
+      if (!atRoot) return `${gate[1]} runs from the project root: after a cd, the same relative path would be another script`;
+      return sameArgv(argv.slice(1), GATE_SHAPES[gate[1]]) ? null : `${gate[1]} takes exactly: ${GATE_SHAPES[gate[1]].join(" ") || "(no argument)"}`;
+    }
     if (cmd === "git") return checkGit(argv);
     if (profile === "verify") {
       if (verifyShapes?.some(s => sameArgv(argv, s))) return null;
@@ -231,7 +243,7 @@ export function decide(command, profile, config = EMPTY_CONFIG) {
         cdDir = dir; continue;
       }
       const verifyShapes = cdDir === null ? cfg.root : i === 1 ? cfg.byDir.get(cdDir) : null; // after a cd, only the segment right behind it, and never a root command
-      const why = checkSegment(argv, { first: segs[i].op !== "|", profile, verifyShapes, cfg });
+      const why = checkSegment(argv, { first: segs[i].op !== "|", profile, verifyShapes, cfg, atRoot: cdDir === null });
       if (why) return { allow: false, reason: `${why} — in: ${segs[i].text.slice(0, 80)}` };
     }
     return { allow: true };

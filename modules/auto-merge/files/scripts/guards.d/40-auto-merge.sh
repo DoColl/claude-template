@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# AM-1, AM-4, AM-5, AM-6 — invariants of .github/workflows/auto-merge.yml
+# AM-1, AM-4, AM-5, AM-6, AM-7 — invariants of .github/workflows/auto-merge.yml
 # (docs/conventions/auto-merge-policy.md). That workflow merges pull requests
 # with nobody watching, so what it must never do is pinned here.
 #
 #   AM-1  the Claude-config gate. CLAUDE_GATE_RE is run on a table of paths —
-#         its BEHAVIOUR is tested, not its text — every job that merges applies
-#         it, and every one refuses a claude/issue-* head.
+#         its BEHAVIOUR is tested, not its text — it is defined exactly once,
+#         every job that merges applies it, and every one refuses a
+#         claude/issue-* head.
+#   AM-7  the gate judges the range that is merged: files and commits come
+#         from compare/<base commit>...<validated head>, never from the pull
+#         request's current state, and the base is re-read before each merge.
 #   AM-4  marking a pull request ready never merges it. The two ready lines are
 #         pinned to their exact text, and every merge call in the file, however
 #         it is spelled, is one of the gated REST calls AM-1 counts.
@@ -56,16 +60,24 @@ else
            .husky/pre-commit sub/.ripgreprc \
            .github/workflows/claude.yml .github/workflows/claude-review.yml \
            .github/workflows/auto-merge.yml scripts/guards.d/40-auto-merge.sh \
-           scripts/guards.d/44-claude-ci.sh scripts/reviewed-plugins.json; do
+           scripts/guards.d/44-claude-ci.sh scripts/reviewed-plugins.json \
+           scripts/security-checks.sh scripts/guards.d/50-project.sh \
+           scripts/guards.d/_lib.sh scripts/guards.d/60-new.sh; do
     if ! grep -qiE "$RE" <<< "$p"; then bad 1 "gated path NOT matched by CLAUDE_GATE_RE: $p"; fi
   done
-  # Must not be gated: ordinary docs and code, the rest of the gate.
+  # Must not be gated: ordinary docs, code and scripts.
   for p in README.md docs/foo.md docs/conventions/auto-merge-policy.md x/claudette.md \
            src/claude.service.ts .gitignore LICENSE src/claude/x.ts \
-           .github/workflows/ci.yml .github/dependabot.yml scripts/security-checks.sh \
-           scripts/guards.d/50-project.sh scripts/guards.d/_lib.sh; do
+           .github/workflows/ci.yml .github/dependabot.yml scripts/build.sh \
+           scripts/security-checks.sh.md scripts/guards.dx/a.sh src/scripts/guards.d/a.sh; do
     if grep -qiE "$RE" <<< "$p"; then bad 1 "non-gated path matched by CLAUDE_GATE_RE: $p"; fi
   done
+fi
+# One definition, at the workflow level: a job- or step-level `env:` could
+# otherwise shadow it with a weaker pattern and this check would not see it.
+defined=$(grep -cE '^ *CLAUDE_GATE_RE:' "$AM" || true)
+if [ "$defined" != "1" ]; then
+  bad 1 "CLAUDE_GATE_RE is defined $defined time(s) in $AM — exactly one definition, in the workflow-level env"
 fi
 # Every job that merges a pull request (one PUT .../pulls/N/merge call each) applies the gate.
 merging=$(grep -cF 'pulls/${PR}/merge"' "$AM" || true)
@@ -489,6 +501,34 @@ if [ "$foreign" != "0" ]; then
   bad 6 "HEAD_SHA must come from the triggering event (workflow_run.head_sha or pull_request.head.sha) in every step"
 fi
 pass 6 "the merge is pinned to the SHA of the event, for the one workflow waited for"
+
+# ── AM-7 — the gate judges the range that is merged ─────────────────────────
+# The merge is pinned to HEAD_SHA; the gate must read the same thing. A listing
+# of the pull request's CURRENT files or commits can be made to show another
+# diff for an instant (a head or a base moved and put back). So: no such
+# listing, one read of the immutable range per merging job, a head check and a
+# base re-check in each, and the base taken from the event or from the gate.
+live=$(grep -cE 'pulls/\$\{?PR\}?/(files|commits)' "$AM" || true)
+if [ "$live" != "0" ]; then
+  bad 7 "$live listing(s) of the pull request's current files or commits — the gate must read compare/\${BASE_SHA}...\${HEAD_SHA}"
+fi
+ranges=$(grep -cF 'compare/${BASE_SHA}...${HEAD_SHA}"' "$AM" || true)
+if [ "$ranges" != "$merging" ]; then
+  bad 7 "$merging merging job(s) but $ranges read the immutable range compare/\${BASE_SHA}...\${HEAD_SHA}"
+fi
+heads_checked=$(grep -cF 'if [ "$PR_HEAD" != "$HEAD_SHA" ]' "$AM" || true)
+if [ "$heads_checked" != "$merging" ]; then
+  bad 7 "$merging merging job(s) but $heads_checked check that the pull request's head is still the event's before reading its file count"
+fi
+rechecked=$(grep -cxF '          if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then' "$AM" || true)
+if [ "$rechecked" != "$merging" ]; then
+  bad 7 "$merging merging job(s) but $rechecked re-read the base branch right before merging"
+fi
+foreign_base=$(grep -E '^ +BASE_(SHA|REF): ' "$AM" | grep -cvE '^ +(BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}|BASE_REF: \$\{\{ (github\.event\.pull_request\.base\.ref|steps\.gate\.outputs\.base_ref) \}\})$' || true)
+if [ "$foreign_base" != "0" ]; then
+  bad 7 "BASE_SHA / BASE_REF must come from the triggering event or from the gate step's output"
+fi
+pass 7 "the gate reads the immutable range that is merged, and the base is re-read before each merge"
 
 # Advisory: nothing merges code until the workflow waited for exists.
 ci_name=$(sed -n 's/^    workflows: \["\(.*\)"]$/\1/p' "$AM")

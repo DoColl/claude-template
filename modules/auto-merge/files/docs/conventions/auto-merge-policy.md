@@ -29,7 +29,7 @@ The merge is a synchronous server-side call (`PUT /repos/…/pulls/N/merge`, squ
 
 `CLAUDE.md`, `.claude/agents/*.md`, `.claude/skills/**`, `.claude/settings.json`, a git hook: these are executed, not read. Every session that opens the repository loads them, an agent definition decides which tools a sub-agent may run, a settings hook runs a shell command on every matching tool call. Most of them are Markdown, so without a gate they would ride the docs fast path and merge in seconds with no CI and no human look — and a green CI proves nothing about them anyway. A session steered by content it read could widen an agent's tools or delete a rule, and every later session would load the result.
 
-So neither job merges a pull request that touches a path matched by `CLAUDE_GATE_RE` (one pattern in the workflow's `env`, applied by both jobs): any `.claude/` directory at any depth and a bare `.claude` entry (a symlink); `CLAUDE.md` and `CLAUDE.local.md` anywhere; `.githooks/`; `.mcp.json`; the other files a Claude CI action reads as configuration from its working directory (`.claude.json`, `.ripgreprc`, `.gitmodules`, `.husky/`); and what runs Claude in CI or enforces all this — `.github/workflows/claude*.yml`, `auto-merge.yml` itself, and their two guards under `scripts/guards.d/`; and `scripts/reviewed-plugins.json`, the record of which Claude Code plugin commits were reviewed. The match is case-insensitive per path segment, because a case-insensitive file system turns `.Claude/agents/x.md` into `.claude/agents/x.md`. Review the list once and add what else your tooling executes.
+So neither job merges a pull request that touches a path matched by `CLAUDE_GATE_RE` (one pattern in the workflow's `env`, applied by both jobs): any `.claude/` directory at any depth and a bare `.claude` entry (a symlink); `CLAUDE.md` and `CLAUDE.local.md` anywhere; `.githooks/`; `.mcp.json`; the other files a Claude CI action reads as configuration from its working directory (`.claude.json`, `.ripgreprc`, `.gitmodules`, `.husky/`); what runs Claude in CI and this workflow — `.github/workflows/claude*.yml`, `auto-merge.yml` itself; the gate and every guard — `scripts/security-checks.sh` and `scripts/guards.d/**`, which git runs on each push through the pre-push hook, which the read-only agents run, and which enforce all of this; and `scripts/reviewed-plugins.json`, the record of which Claude Code plugin commits were reviewed. A pull request that adds a regression guard is therefore merged by hand too. The match is case-insensitive per path segment, because a case-insensitive file system turns `.Claude/agents/x.md` into `.claude/agents/x.md`. Review the list once and add what else your tooling executes.
 
 Such a pull request stays open until someone merges it from the GitHub UI. A mixed one (code plus a `CLAUDE.md` bullet) waits too; keep the instruction change in the same pull request anyway, the hand merge is the price of the rule.
 
@@ -55,6 +55,12 @@ Once the gate has decided, `promote-from-ci` marks the pull request ready — wh
 ## The merge is the commit CI validated (AM-6)
 
 `find-pr` keeps only the open pull request whose head *is* the SHA of the green run (a `sha:` search also returns stacked and sibling pull requests), and every merge call passes that SHA. A commit pushed after CI finished gets a 409: no retry, no merge, the job ends green with a notice, and the new head's own run merges it. The SHA always comes from the triggering event, never from the pull request's current state — reading the current head would merge exactly the commit nobody tested.
+
+## The gate judges what is merged (AM-7)
+
+Pinning the merge is half of it. The gate must read the same commit. A listing of the pull request's *current* files describes whatever its head and base are at the instant of the call: someone with push rights — a steered session is enough — could move the head or retarget the base, let the gate list an innocent diff, and put things back before the merge call, which only checks that the head equals the validated SHA.
+
+So the gate never lists the pull request live. One read gives its base, its head, its file count and its author; if the head is no longer the event's, the job stops. Files and commits then come from the immutable range `compare/<base commit>...<validated head>`, which no later push can change, and the file count must match the one read with that head: a truncated range (300 files, 250 commits) holds. The merge step re-reads the base branch right before merging and stops if the pull request was retargeted since.
 
 `workflow_run` fires once per workflow it lists, so the list holds **one** name. Two names would merge as soon as either is green. Keep security checks in their own file if you like, but call it from the CI workflow as a reusable workflow so that one conclusion covers both.
 
@@ -99,7 +105,9 @@ A session still working on a merged branch is unaffected: a push before the clea
 ## Residual risks, accepted
 
 - Documentation other than the gated files rides the docs fast path, including the convention pages `CLAUDE.md` sends sessions to: they are read, not executed, but nobody reviews them before they land.
-- The gate covers `auto-merge.yml` and its guard, not the gate runner (`scripts/security-checks.sh`) nor the other guards: the checks stop a regression, not a deliberate edit of the script that runs them.
+- The gate holds the gate runner and the guards, but not the workflows that call them (`security.yml`, the CI workflow): GitHub usually refuses to merge a workflow change with the job token, which is not a guarantee. The checks stop a regression, not a deliberate edit by someone who can change what runs them.
+- The API pins the head of a merge, not its base. The base is re-read right before the merge call; a pull request retargeted in the instant between the two would be merged into its new base, against which the gate did not judge it.
+- A pull request of 300 files or more, or of more than 250 commits for a Dependabot one, cannot be listed completely from the immutable range: it is held for a hand merge.
 - A Dependabot entry's `indirect` type is trusted from the commit text; it is not cross-checked against an open alert.
 - Security updates are not subject to `cooldown` (GitHub documents it as a version-updates option): a fix version merges as soon as its CI is green.
 - Without a post-merge dispatch, the default branch is tested before the merge only (§ After the merge).
@@ -112,9 +120,13 @@ A session still working on a merged branch is unaffected: a push before the clea
 - **AM-4** — the two "mark ready" lines are pinned to their exact text, and every merge call in the file, however spelled, is one of the gated ones.
 - **AM-5** — the workflow's own `dependabot_verdict` and `bump_level` are extracted and run on the commit-body shapes that must merge and the ones that must hold; the author check, the exact `merge` verdict and `MAJOR_HOLD_RE` are pinned; `dependabot.yml` sets no `allow` and has no `.yaml` twin.
 - **AM-6** — one workflow is waited for, the pull request is selected by its head SHA, every merge passes that SHA, and it comes from the triggering event.
+- **AM-7** — the gate judges the range that is merged: no listing of the pull request's current files or commits, one read of `compare/<base commit>...<validated head>` per merging job, a head check before the file count is trusted, the base re-read right before each merge, and the base taken from the event or from the gate.
+
+AM-1 also requires `CLAUDE_GATE_RE` to be defined exactly once, in the workflow-level `env`: a job- or step-level definition would shadow it.
 
 AM-2 and AM-3 are unused: they belong to a post-merge dispatch (§ After the merge).
 
 ## History
 
 - Installed with the kit.
+- After a security review of the kit: the gate reads the immutable range instead of the pull request's live file and commit listings (AM-7); the gate runner, every guard and the plugin registry are held for a hand merge; `CLAUDE_GATE_RE` must be defined once.

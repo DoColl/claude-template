@@ -19,7 +19,9 @@ jobs:
     # A comment on a pull request fires issue_comment too, and the action would
     # check out the pull request's head. The refused labels mark issues whose
     # text no collaborator wrote (advisory summaries, titles gathered from pull
-    # requests). Issue and comment must both come from someone with write access.
+    # requests). Issue and comment must both come from an owner, a member or a
+    # collaborator: an association, not a permission level — a read-only
+    # collaborator passes, and the other comments of the issue are not checked.
     if: ${{ !github.event.issue.pull_request && !contains(github.event.issue.labels.*.name, 'dependabot-alert') && !contains(github.event.issue.labels.*.name, 'weekly-digest') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) && contains(github.event.comment.body, '@claude') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30

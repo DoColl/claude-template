@@ -71,14 +71,16 @@ env:
   # git hooks directory, a project MCP config at any depth, the other paths a
   # Claude CI action treats as configuration read from the working directory
   # (`.claude.json`, `.ripgreprc`, `.gitmodules`, `.husky/`), what runs Claude
-  # in CI or enforces all this (those workflows, this one, their guards), and
-  # the record of which Claude Code plugin commits were reviewed.
+  # in CI and this workflow, the gate and every guard (git runs them on each
+  # push through the pre-push hook, the read-only agents run them, and they
+  # are what enforces all this), and the record of which Claude Code plugin
+  # commits were reviewed.
   # Single source for both jobs; AM-1 (scripts/guards.d/40-auto-merge.sh) tests
   # the pattern on a table of paths and asserts both jobs use it.
   # TODO(harness): review this list once, add whatever else your tooling
   # executes (another agent's instruction file, a page of install commands that
   # sessions follow, another hooks directory), then delete this three-line note.
-  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)claude(\.local)?\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^scripts/guards\.d/[0-9]+-(auto-merge|claude-ci)[^/]*\.sh$|^scripts/reviewed-plugins\.json$'
+  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)claude(\.local)?\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^scripts/security-checks\.sh$|^scripts/guards\.d/|^scripts/reviewed-plugins\.json$'
   # Where a Dependabot major is held even when it is an indirect dependency's
   # security update (ERE on the changed paths; `.github/` is always held).
   # `.` matches every path: as shipped, every Dependabot major waits for a hand
@@ -161,15 +163,37 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.find-pr.outputs.pr }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          # File listing through REST + --paginate: `gh pr view --json files` stops
-          # at 100 files. Each row carries `previous_filename` too, so a rename OUT
-          # of a gated path (CLAUDE.md → docs/legacy.md) is still seen. The count
-          # is checked against the PR's changed_files: any gap fails closed.
-          ROWS=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" \
-                   --jq '.[] | [.filename, (.previous_filename // "")] | @tsv')
-          IFS=$'\t' read -r CHANGED AUTHOR <<< "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.changed_files, .user.login] | @tsv')"
+          # The gate judges what the merge below will bring in, not what the
+          # pull request shows at this instant. The merge is pinned to HEAD_SHA,
+          # so files and commits are read from the immutable range between the
+          # base commit and HEAD_SHA (compare API): a head or a base moved and
+          # put back while this step runs changes nothing to it (AM-7). One
+          # read of the pull request gives its base, its head, its file count
+          # and its author. Any doubt holds: a head that is no longer HEAD_SHA,
+          # a file count that does not match the range (the compare lists 300
+          # files at most), a commit list cut short.
+          IFS=$'\t' read -r BASE_REF BASE_SHA PR_HEAD CHANGED AUTHOR <<< "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .base.sha, .head.sha, .changed_files, .user.login] | @tsv')"
+          if [ "$PR_HEAD" != "$HEAD_SHA" ]; then
+            echo "::notice::PR #${PR}: head moved since the validated SHA — left as is, its own run decides."
+            exit 0
+          fi
+          if ! [[ "$BASE_SHA" =~ ^[0-9a-f]{40,64}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::notice::PR #${PR}: unreadable base or head commit — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The base the range is judged against: the merge step refuses a pull
+          # request retargeted since.
+          echo "base_ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
+          # Each file row carries `previous_filename` too, so a rename OUT of a
+          # gated path (CLAUDE.md → docs/legacy.md) is still seen. The count is
+          # checked against the pull request's changed_files: any gap holds.
+          RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
+                    --jq '{total: .total_commits, commits: [.commits[] | {login: (.author.login // "unknown"), message: .commit.message}], files: [.files[]? | [.filename, (.previous_filename // "")]]}')
+          ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
           if [ "$LISTED" != "$CHANGED" ]; then
             echo "::notice::PR #${PR}: file listing incomplete (${LISTED} of ${CHANGED}) — leaving it for a hand merge."
@@ -284,15 +308,21 @@ jobs:
           # <<< dependabot_verdict
 
           # Every commit must be Dependabot's: a commit pushed onto its branch
-          # would otherwise ride this exception unreviewed.
-          COMMITS=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/commits")
-          AUTHORS=$(jq -r '.[].author.login // "unknown"' <<< "$COMMITS")
+          # would otherwise ride this exception unreviewed. The commits are
+          # those of the same immutable range; a list cut short (the compare
+          # returns 250 commits at most) holds.
+          if [ "$(jq -r '.total' <<< "$RANGE")" != "$(jq -r '.commits | length' <<< "$RANGE")" ]; then
+            echo "::notice::PR #${PR} (Dependabot): commit list incomplete — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          AUTHORS=$(jq -r '.commits[].login' <<< "$RANGE")
           if grep -qvxF 'dependabot[bot]' <<< "$AUTHORS"; then
             echo "::notice::PR #${PR} (Dependabot): a commit not authored by Dependabot — leaving it for a hand merge."
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          MSGS=$(jq -r '.[].commit.message' <<< "$COMMITS")
+          MSGS=$(jq -r '.commits[].message' <<< "$RANGE")
           VERDICT=$(dependabot_verdict "$PATHS" <<< "$MSGS")
           if [ "$VERDICT" != merge ]; then
             echo "::notice::PR #${PR} (Dependabot): ${VERDICT#hold: } — leaving it for a hand merge."
@@ -330,8 +360,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.find-pr.outputs.pr }}
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          BASE_REF: ${{ steps.gate.outputs.base_ref }}
         run: |
           set -euo pipefail
+          # The gate judged the range against the base it read. A pull request
+          # retargeted since would carry those changes somewhere the gate did
+          # not look at: stop. The API pins the head of a merge, not its base,
+          # so a retarget in the instant between this read and the call below
+          # cannot be excluded (docs/conventions/auto-merge-policy.md).
+          NOW_BASE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.base.ref')
+          if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
+            echo "::notice::PR #${PR}: its base branch changed since the gate — leaving it for a hand merge."
+            exit 0
+          fi
           # Server-side merge via REST API — no local git needed. Try
           # --squash first (cleanest linear history), fall back to a merge
           # commit if squash is disabled in the repository settings. Retry on
@@ -452,6 +493,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
           # GitHub's pull_request `paths` filter matches when ANY changed file
@@ -464,10 +507,20 @@ jobs:
           # Claude instruction files (`.claude/**`, `CLAUDE.md`) are `.md` too
           # but never merge unattended (see promote-from-ci's gate): no CI runs
           # on them either, so such a PR waits for a hand merge.
-          # Same listing and gate as promote-from-ci (comments there).
-          ROWS=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" \
-                   --jq '.[] | [.filename, (.previous_filename // "")] | @tsv')
-          CHANGED=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.changed_files')
+          # Same listing and gate as promote-from-ci (comments there): the
+          # immutable range this event carries, never the pull request's
+          # current files; a head or a base that is no longer the event's holds.
+          IFS=$'\t' read -r NOW_BASE PR_HEAD CHANGED <<< "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .head.sha, .changed_files] | @tsv')"
+          if [ "$PR_HEAD" != "$HEAD_SHA" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
+            echo "::notice::PR #${PR}: head or base changed since this event — left as is."
+            exit 0
+          fi
+          if ! [[ "$BASE_SHA" =~ ^[0-9a-f]{40,64}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::notice::PR #${PR}: unreadable base or head commit — leaving it for a hand merge."
+            exit 0
+          fi
+          ROWS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
+                   --jq '.files[]? | [.filename, (.previous_filename // "")] | @tsv')
           LISTED=$(grep -c . <<< "$ROWS" || true)
           if [ "$LISTED" != "$CHANGED" ]; then
             echo "::notice::PR #${PR}: file listing incomplete (${LISTED} of ${CHANGED}) — leaving it for a hand merge."
@@ -491,6 +544,12 @@ jobs:
             exit 0
           fi
           gh pr ready "$PR" || true
+          # Retargeted since the range was read: stop (see promote-from-ci).
+          NOW_BASE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.base.ref')
+          if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
+            echo "::notice::PR #${PR}: its base branch changed since the gate — leaving it for a hand merge."
+            exit 0
+          fi
           # `sha=` pins the merge to the head this event carries (a head pushed
           # since gets a 409 and its own run). `merged=true` only on an actual
           # merge: the deferral above and a failed merge leave it unset, so the

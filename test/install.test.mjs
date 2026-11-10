@@ -172,6 +172,45 @@ test("the CLI refuses bad input and --dry-run writes nothing", () => {
   assert.ok(fs.existsSync(path.join(dir, MANIFEST)));
 });
 
+// A cloned repository can carry a directory symlink that points out of it: the installer must not write
+// through it (it would drop agents and hooks into, say, a user-level config directory).
+test("nothing is written through a symlink that leaves the project", () => {
+  const cases = { "a symlinked scripts/": "scripts", "a symlinked .claude/": ".claude", "a symlinked docs/": "docs" };
+  for (const [label, link] of Object.entries(cases)) {
+    const dir = tmp(), outside = tmp("harness-outside-");
+    fs.symlinkSync(outside, path.join(dir, link), "dir");
+    const r = cli("init", dir, "--all");
+    assert.equal(r.status, 1, `${label}: ${output(r)}`);
+    assert.match(r.stderr, /resolves outside the project/, label);
+    assert.deepEqual(fs.readdirSync(outside), [], `${label}: nothing landed outside`);
+    assert.deepEqual(fs.readdirSync(dir), [link], `${label}: nothing was written in the project either — the plan is refused as a whole`);
+    assert.equal(cli("init", dir, "--all", "--force").status, 1, `${label}: --force does not change that`);
+    assert.deepEqual(fs.readdirSync(outside), []);
+  }
+  // the manifest itself as a link, and a link to nowhere
+  const dir = tmp(), outside = tmp("harness-outside-");
+  write(outside, "harness.json", "{}");
+  fs.mkdirSync(path.join(dir, ".claude"));
+  fs.symlinkSync(path.join(outside, "harness.json"), path.join(dir, ".claude/harness.json"));
+  const linked = cli("init", dir, "--modules", "core");
+  assert.equal(linked.status, 1); assert.match(linked.stderr, /harness\.json exists and is not a regular file/);
+  assert.equal(read(outside, "harness.json"), "{}");
+  const broken = tmp();
+  fs.symlinkSync(path.join(broken, "nowhere"), path.join(broken, "docs"));
+  assert.equal(cli("init", broken, "--modules", "core").status, 1);
+  // a file where a directory is expected is refused before anything is written
+  const blocked = tmp();
+  write(blocked, "scripts", "not a directory\n");
+  const b = cli("init", blocked, "--modules", "core");
+  assert.equal(b.status, 1); assert.match(b.stderr, /scripts exists and is not a directory/); assert.deepEqual(fs.readdirSync(blocked), ["scripts"]);
+  // a project reached through a symlink is still a project; so is one whose subdirectory links inside itself
+  const real = tmp(), viaLink = path.join(tmp(), "link");
+  fs.symlinkSync(real, viaLink, "dir");
+  fs.mkdirSync(path.join(real, "documentation")); fs.symlinkSync(path.join(real, "documentation"), path.join(real, "docs"), "dir");
+  const ok = cli("init", viaLink, "--modules", "core"); assert.equal(ok.status, 0, output(ok));
+  assert.ok(fs.existsSync(path.join(real, "documentation/conventions/README.md")), "a link that stays inside the project is followed");
+});
+
 test("the gate: a failing guard fails it, a skipped one does not, an empty one is an error", () => {
   const dir = tmp();
   install(dir, []);

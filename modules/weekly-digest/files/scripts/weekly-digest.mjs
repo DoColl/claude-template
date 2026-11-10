@@ -64,7 +64,7 @@ export const SELF = 'weekly-digest.yml';
 // Claude Code or git EXECUTE rather than read, and the docs-only set a CI
 // workflow usually ignores. With auto-merge.yml, its own declarations are read
 // instead, so the digest and the merge gate cannot drift.
-export const DEFAULT_GATE_RE = '(^|/)\\.claude(/|$)|(^|/)claude(\\.local)?\\.md$|^\\.githooks(/|$)|(^|/)\\.mcp\\.json$|(^|/)\\.claude\\.json$|(^|/)\\.ripgreprc$|(^|/)\\.gitmodules$|(^|/)\\.husky(/|$)|^\\.github/workflows/(auto-merge|claude[^/]*)\\.ya?ml$';
+export const DEFAULT_GATE_RE = '(^|/)\\.claude(/|$)|(^|/)claude(\\.local)?\\.md$|^\\.githooks(/|$)|(^|/)\\.mcp\\.json$|(^|/)\\.claude\\.json$|(^|/)\\.ripgreprc$|(^|/)\\.gitmodules$|(^|/)\\.husky(/|$)|^\\.github/workflows/(auto-merge|claude[^/]*)\\.ya?ml$|^scripts/security-checks\\.sh$|^scripts/guards\\.d/|^scripts/reviewed-plugins\\.json$';
 export const DEFAULT_DOCS_RE = '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)';
 
 /** CLAUDE_GATE_RE as auto-merge.yml defines it (the AM-1 source of truth). */

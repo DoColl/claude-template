@@ -1,6 +1,6 @@
 # The security workflow: two tiers, pinned scanners
 
-**Rule (CLAUDE.md § Security workflow):** `.github/workflows/security.yml` has an enforcing tier that blocks merges (gitleaks over the full history, then `./scripts/security-checks.sh`) and an advisory tier that only logs (Semgrep, Trivy, a Syft SBOM) and runs on standalone triggers. Every scanner is a pinned release verified by sha256, bumped by hand with the procedure below.
+**Rule (CLAUDE.md § Security workflow):** `.github/workflows/security.yml` has an enforcing tier that blocks merges (gitleaks over the full history, then `./scripts/security-checks.sh`) and an advisory tier that only logs (Semgrep, Trivy, a Syft SBOM) and runs on standalone triggers. Every scanner binary the workflow downloads is a pinned release verified by sha256; zizmor, which the gate runs, is pinned to an exact version on PyPI, without a hash. All are bumped by hand with the procedure below.
 
 ## Why
 

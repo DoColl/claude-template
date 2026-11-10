@@ -13,7 +13,8 @@ A CI session holds a token and executes what it reads. The question is therefore
 - On a **pull request**, the checkout is the pull request's tree: its code, but also its instruction files, settings and hooks — the files a session executes. Running an agent there hands the job's token to whoever wrote the pull request. The action has mechanisms to put trusted configuration back before a session starts; this kit does not rely on them as a boundary, and does not run Claude on pull requests at all. If you want that, evaluate it yourself at the action version you pin.
 - `issue_comment` runs the **default branch's** workflow file, and on a plain issue the tree is the default branch. No unmerged file reaches a run.
 - An issue whose text was not written by a collaborator is refused by its **label**: `dependabot-alert` (advisory summaries) and `weekly-digest` (titles gathered from pull requests). If another workflow of yours files third-party text as issues, give those issues one of these labels or add its label to the job's `if:`.
-- Issue author and commenter must both have write access (`author_association`), on top of the action's own refusal of actors without write access. Never set the action's `allowed_non_write_users`.
+- The issue author and the commenter must both be an owner, a member or a collaborator of the repository (`author_association`). That is an association, not a permission level: a collaborator with read-only access passes it. On top of it, the action itself refuses to start for an actor without write access; never set its `allowed_non_write_users`.
+- **Every comment of the issue reaches the session**, whoever wrote it. Only the issue's author and the author of the `@claude` comment are checked.
 
 `@claude` in an issue's title or body does nothing: follow up with a comment.
 
@@ -21,10 +22,12 @@ A CI session holds a token and executes what it reads. The question is therefore
 
 On a public repository anyone can comment on an issue, and a session reads the issue's comments. The conditions above stop an outsider from *starting* a run; they do not stop an outsider's comment from being *read* by a run a collaborator starts. The run log (`show_full_output: true`) is also as visible as the repository. Do not enable this workflow on a public repository as it stands.
 
+Private is not enough by itself. Anyone who can write in an issue of the repository — a client or a contractor with read-only access included — can put text in front of a session that a maintainer starts, in the issue body or in a comment, and an HTML comment there is invisible in the rendered view. Use the workflow only where every person with access is trusted to that degree.
+
 ## What a run holds
 
 - **One GitHub credential, the job token.** `github_token` skips the App token exchange, so the job's `permissions:` are the real bound (`contents: write` to push a branch, `issues: write` to comment), there is no `id-token: write`, the token dies with the job, and its pushes start no workflow. The price: comments come from `github-actions[bot]`.
-- **It can push, and only its own branches.** A session produces a `claude/issue-N-*` branch. A global pre-push hook, installed in `$RUNNER_TEMP` before the session starts, refuses every other ref — including the default branch, which a plan without enforced branch protection would otherwise leave open. It cannot open a pull request.
+- **With the tools the action allows, it pushes its own branches only.** A session produces a `claude/issue-N-*` branch. A global pre-push hook, installed in `$RUNNER_TEMP` before the session starts, refuses every other ref. That holds as long as the session can neither change git's configuration, nor skip hooks, nor call the API by itself: properties of the action's tool allowlist at the pinned commit, to re-read on every bump — not of the token, which can write any branch. The hook stops a push made by mistake or by a steered session using its tools; it is not a boundary around the token. Where your plan allows it, add a branch ruleset that refuses direct pushes to the default branch. The token cannot open a pull request (no `pull-requests` permission).
 - **git is hardened.** `safe.bareRepository=explicit`: git will not adopt a repository layout found inside the workspace, whose configuration could run commands.
 - **Assume the session can read every credential the job holds** (the job token, the Claude token). What bounds the risk is the input, not the output: no third party's text reaches a session.
 - A session's branch **never merges unattended**. With the `auto-merge` module that is enforced (`claude/issue-*` heads and any change to `claude.yml` are held for a human); without it, do not auto-merge them.
@@ -50,4 +53,4 @@ They stop a regression, not a deliberate edit by someone who can change the guar
 
 ## History
 
-- Installed with the kit. Differences from the workflow it was ported from: the issue author and the commenter must both have write access; `weekly-digest` issues are refused as well; the two zizmor exceptions (`dangerous-triggers` on `issue_comment`, `artipacked` on the checkout) are inline comments next to their justification instead of entries in `.github/zizmor.yml`.
+- Installed with the kit. Differences from the workflow it was ported from: the issue author and the commenter must both be an owner, a member or a collaborator; `weekly-digest` issues are refused as well; the two zizmor exceptions (`dangerous-triggers` on `issue_comment`, `artipacked` on the checkout) are inline comments next to their justification instead of entries in `.github/zizmor.yml`.

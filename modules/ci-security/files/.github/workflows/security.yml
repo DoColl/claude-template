@@ -18,11 +18,14 @@ name: Security
 #    github.workflow reads the caller's name. Renaming this workflow means
 #    changing those guards.
 #
-# Every scanner binary is a pinned release checked against a sha256 written
-# in its step's `env:` (scripts/fetch-pinned-release.sh) — never an install
+# Every scanner binary this workflow downloads is a pinned release checked
+# against a sha256 written in its step's `env:`
+# (scripts/fetch-pinned-release.sh) — never an install
 # script or a binary fetched from a moving ref (`curl …/install.sh | sh`):
 # whoever controls that ref then decides what runs here. How to bump a pin:
-# docs/conventions/security-workflow.md § Pinned scanners.
+# docs/conventions/security-workflow.md § Pinned scanners. One exception:
+# zizmor, which the gate runs, is pinned to an exact version on PyPI, without
+# a hash (scripts/guards.d/30-github-actions.sh).
 #
 # Meant to be called from the project's CI workflow as its FIRST job on every
 # pull request and push to the default branch, so the rest of CI (lint, tests,
