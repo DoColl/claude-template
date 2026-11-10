@@ -30,8 +30,9 @@
 # already covers it.
 #
 # Never merged unattended, by either job: a pull request touching a path
-# CLAUDE_GATE_RE matches (what Claude Code or git EXECUTES), or coming from a
-# claude/issue-* head (what a CI Claude session wrote).
+# CLAUDE_GATE_RE or PROJECT_GATE_RE matches (what Claude Code or git
+# EXECUTES), or coming from a claude/issue-* head (what a CI Claude session
+# wrote).
 
 name: Auto-merge after CI
 
@@ -71,16 +72,24 @@ env:
   # git hooks directory, a project MCP config at any depth, the other paths a
   # Claude CI action treats as configuration read from the working directory
   # (`.claude.json`, `.ripgreprc`, `.gitmodules`, `.husky/`), what runs Claude
-  # in CI and this workflow, the gate and every guard (git runs them on each
-  # push through the pre-push hook, the read-only agents run them, and they
-  # are what enforces all this), and the record of which Claude Code plugin
-  # commits were reviewed.
+  # in CI and this workflow, and the gate with everything it runs or reads: the
+  # runner, every guard (git runs them on each push through the pre-push hook,
+  # the read-only agents run them, and they are what enforces all this), the
+  # scripts the kit's guards and the security workflow call, the scanner
+  # configs that decide what gitleaks and zizmor report, the record of which
+  # Claude Code plugin commits were reviewed, and the table AM-1 reads.
   # Single source for both jobs; AM-1 (scripts/guards.d/40-auto-merge.sh) tests
-  # the pattern on a table of paths and asserts both jobs use it.
-  # TODO(harness): review this list once, add whatever else your tooling
-  # executes (another agent's instruction file, a page of install commands that
-  # sessions follow, another hooks directory), then delete this three-line note.
-  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)claude(\.local)?\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^scripts/security-checks\.sh$|^scripts/guards\.d/|^scripts/reviewed-plugins\.json$'
+  # the pattern on a table of paths and asserts both jobs use it. This is the
+  # kit's list: leave it as it is, so an update of the kit can refresh it.
+  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)claude(\.local)?\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^\.github/zizmor\.ya?ml$|^\.gitleaks(\.toml|ignore)$|^scripts/guards\.d/|^scripts/(security-checks\.sh|fetch-pinned-release\.sh|plugin-pins(\.test)?\.mjs|reviewed-plugins\.json|auto-merge-paths\.txt)$'
+  # The project's own additions to the list above, applied with it by both
+  # jobs (same syntax, same matching). `^$` matches no path: nothing is added
+  # as shipped. An empty or unusable pattern holds every pull request.
+  # TODO(harness): add whatever else your tooling executes (another agent's
+  # instruction file, a page of install commands that sessions follow, another
+  # hooks directory, a script one of your own guards runs), with a `hold` row
+  # per path in scripts/auto-merge-paths.txt, then delete this note.
+  PROJECT_GATE_RE: '^$'
   # Where a Dependabot major is held even when it is an indirect dependency's
   # security update (ERE on the changed paths; `.github/` is always held).
   # `.` matches every path: as shipped, every Dependabot major waits for a hand
@@ -175,7 +184,15 @@ jobs:
           # and its author. Any doubt holds: a head that is no longer HEAD_SHA,
           # a file count that does not match the range (the compare lists 300
           # files at most), a commit list cut short.
-          IFS=$'\t' read -r BASE_REF BASE_SHA PR_HEAD CHANGED AUTHOR <<< "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .base.sha, .head.sha, .changed_files, .user.login] | @tsv')"
+          # A failed read is an error, never "the head moved": inside
+          # `read … <<< "$(…)"` a failing call leaves every variable empty and
+          # the job green.
+          PR_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .base.sha, .head.sha, .changed_files, .user.login] | @tsv') || PR_INFO=""
+          IFS=$'\t' read -r BASE_REF BASE_SHA PR_HEAD CHANGED AUTHOR <<< "$PR_INFO"
+          if [ -z "$PR_HEAD" ]; then
+            echo "::error::PR #${PR} could not be read from the API — nothing was decided and nothing was merged. Re-run this job."
+            exit 1
+          fi
           if [ "$PR_HEAD" != "$HEAD_SHA" ]; then
             echo "::notice::PR #${PR}: head moved since the validated SHA — left as is, its own run decides."
             exit 0
@@ -203,10 +220,11 @@ jobs:
           PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
           # Per path segment and case-folded: on a case-insensitive file system
           # `.Claude/agents/x.md` lands in `.claude/agents/`; `(/|$)` also
-          # catches a `.claude` symlink entry. Pattern: CLAUDE_GATE_RE (workflow env).
-          CLAUDE_FILES=$(grep -i -E -c "$CLAUDE_GATE_RE" <<< "$PATHS" || true)
+          # catches a `.claude` symlink entry. Patterns: CLAUDE_GATE_RE and
+          # PROJECT_GATE_RE (workflow env).
+          CLAUDE_FILES=$(grep -i -E -c -e "$CLAUDE_GATE_RE" -e "$PROJECT_GATE_RE" <<< "$PATHS" || true)
           if [ "$CLAUDE_FILES" != "0" ]; then
-            echo "::notice::PR #${PR} touches ${CLAUDE_FILES} file(s) matched by CLAUDE_GATE_RE — never merged unattended, merge it by hand."
+            echo "::notice::PR #${PR} touches ${CLAUDE_FILES} file(s) matched by CLAUDE_GATE_RE or PROJECT_GATE_RE — never merged unattended, merge it by hand."
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -510,7 +528,13 @@ jobs:
           # Same listing and gate as promote-from-ci (comments there): the
           # immutable range this event carries, never the pull request's
           # current files; a head or a base that is no longer the event's holds.
-          IFS=$'\t' read -r NOW_BASE PR_HEAD CHANGED <<< "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .head.sha, .changed_files] | @tsv')"
+          # A failed read is an error, not a changed head (see promote-from-ci).
+          PR_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .head.sha, .changed_files] | @tsv') || PR_INFO=""
+          IFS=$'\t' read -r NOW_BASE PR_HEAD CHANGED <<< "$PR_INFO"
+          if [ -z "$PR_HEAD" ]; then
+            echo "::error::PR #${PR} could not be read from the API — nothing was decided and nothing was merged. Re-run this job."
+            exit 1
+          fi
           if [ "$PR_HEAD" != "$HEAD_SHA" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
             echo "::notice::PR #${PR}: head or base changed since this event — left as is."
             exit 0
@@ -530,9 +554,9 @@ jobs:
           # Old AND new paths count: a rename out of code into docs/ is a code
           # change (the code file disappears) and must go through CI.
           NON_DOCS=$(grep -E -v -c '(\.md$|^docs/|^LICENSE$|^\.gitignore$)' <<< "$PATHS" || true)
-          CLAUDE_FILES=$(grep -i -E -c "$CLAUDE_GATE_RE" <<< "$PATHS" || true)
+          CLAUDE_FILES=$(grep -i -E -c -e "$CLAUDE_GATE_RE" -e "$PROJECT_GATE_RE" <<< "$PATHS" || true)
           if [ "$CLAUDE_FILES" != "0" ]; then
-            echo "::notice::PR #${PR} touches ${CLAUDE_FILES} file(s) matched by CLAUDE_GATE_RE — never merged unattended, merge it by hand."
+            echo "::notice::PR #${PR} touches ${CLAUDE_FILES} file(s) matched by CLAUDE_GATE_RE or PROJECT_GATE_RE — never merged unattended, merge it by hand."
             # Docs-only: no CI will run, so this is its hold point — hand it
             # over (see promote-from-ci). A PR with code stays draft until its
             # CI is green, where promote-from-ci hands it over.

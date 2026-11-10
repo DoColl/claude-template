@@ -35,7 +35,7 @@ Guidance for Claude Code in the __HARNESS_PROJECT_NAME__ repository. This file h
 <!-- One bullet per rule — **Name**: the rule, at most five lines. → `docs/conventions/<slug>.md` -->
 <!-- TODO(harness): the project's own conventions (data model invariants, API error format, naming, what must never be logged). -->
 - **CLAUDE.md stays a budgeted index**: operative rules only, under the byte budget on its `harness:budget` line (CM-1); every `docs/` path it names must exist (CM-2). A new rule is a short bullet here plus its detail file. → `docs/conventions/claude-md.md`
-- **A rule that matters is a check**: every fixed bug or review finding gets an ID, a line in `SECURITY_REVIEW.md` and a guard in `scripts/guards.d/`; the gate and CI run the same guards. → `docs/conventions/local-gate.md`
+- **A rule that matters is a check**: every fixed bug or review finding gets an ID, a line in `SECURITY_REVIEW.md` and a guard in `scripts/guards.d/`; one gate runs them, before a push and in CI where a workflow calls it. → `docs/conventions/local-gate.md`
 <!-- harness:rows conventions -->
 
 ## Environment variables
@@ -47,20 +47,28 @@ Guidance for Claude Code in the __HARNESS_PROJECT_NAME__ repository. This file h
 <!-- harness:slot security-workflow -->
 ### Before pushing
 
-If the diff touches any of the areas below, run the review chain, in order, then the gate. Size is no proxy for risk: removing a guard is one line.
+Always run `./scripts/security-checks.sh`. The review before it depends on what the diff touches; the highest tier that applies wins. Size is no proxy for risk: removing a guard is one line. → `docs/conventions/review-tiers.md`
 
-<!-- TODO(harness): list the sensitive areas with their paths — authentication and authorization, writes on user data, external I/O (controllers, exports, integrations), configuration (env vars, CI workflows, container files). -->
+| Tier | The diff touches | Review |
+|---|---|---|
+| 1 | Documentation and the wording of instructions: `docs/**`, `**.md`, the prose of `CLAUDE.md`, of an agent or of a skill | Re-read the diff once. No review pass. |
+| 2 | Harness code that runs: `scripts/**`, `.githooks/**`, `.claude/hooks/**`, `.github/workflows/**`; and any change to what a session may do — an agent's or a skill's frontmatter, `.claude/settings.json`, `.mcp.json`, a rule of this section or of a merge gate removed or weakened | The passes marked 2. |
+| 3 | Application code in a sensitive area, listed below | Every pass. |
 
-<!-- harness:rows before-pushing -->
-1. **`/security-review`** — security review of the pending changes.
-1. **`/code-review`** — correctness and maintainability.
-1. **`/simplify`** — duplication or premature abstraction introduced by the fixes.
+<!-- TODO(harness): list the sensitive areas with their paths — authentication and authorization, writes on user data, external I/O (controllers, exports, integrations), configuration (env vars, container files). -->
 
-Then `./scripts/security-checks.sh`. Changes to the instruction files themselves (`CLAUDE.md`, `.claude/**`, `.githooks/**`) count as sensitive: every session executes them.
+Passes, in this order, each **once**, on the complete diff; after fixing a finding, re-run the gate, not the chain:
+
+   <!-- harness:rows before-pushing -->
+1. **`/security-review`** (tiers 2, 3) — security review of the pending changes.
+1. **`/code-review`** (tier 3) — correctness and maintainability.
+1. **`/simplify`** (tier 3, only when the fixes of the earlier passes added code) — duplication or premature abstraction they introduced.
+
+Instruction files are executed by every session: in doubt between tiers 1 and 2, it is tier 2.
 
 ### Findings policy
 
-Every finding raised by a review pass, by the gate or by CI is fixed before the change is merged. The only exception is an explicit, motivated derogation from the project owner, recorded in the pull request (which finding, why not now, the follow-up). A rejected finding needs a stated reason. Once fixed, a finding gets its ID, its line in `SECURITY_REVIEW.md` and its guard.
+Every finding raised by a review pass, by the gate or by CI is fixed before the change is merged. The only exception is an explicit, motivated derogation from the project owner, recorded in the Derogations table of `SECURITY_REVIEW.md` (which finding, why not now, who decided, the review date) and named in the pull request. A rejected finding needs a stated reason. Once fixed, a finding gets its ID, its line in `SECURITY_REVIEW.md` and its guard.
 
 ### Conventions for new code
 

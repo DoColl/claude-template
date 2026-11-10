@@ -8,8 +8,8 @@
 // scripts/reviewed-plugins.json. A local gate only: a CI runner has no plugins,
 // so a missing installed file is a skip.
 //
-// Exit 1 on a retained plugin at another commit than the one recorded, or on a
-// rejected plugin being installed. A plugin installed on this machine but absent
+// Exit 1 on a retained plugin with any installation record at another commit
+// than the one recorded, or on a rejected plugin being installed. A plugin installed on this machine but absent
 // from the registry is reported, not failed: the developer's other plugins are
 // not this repository's business. Overrides for the tests: PLUGIN_PINS_INSTALLED,
 // PLUGIN_PINS_REGISTRY.
@@ -40,19 +40,30 @@ if (!existsSync(installedPath)) {
 }
 const installed = JSON.parse(readFileSync(installedPath, "utf8")).plugins ?? {};
 
+// A plugin can have several installation records (one per scope: user, project,
+// local), each with its own commit. Every one of them is compared: a reviewed
+// copy in one scope says nothing about the copy another scope loads.
+const recordsOf = (record) => (Array.isArray(record) ? record : [record]).filter((r) => r !== null && r !== undefined);
+const shaOf = (r) => r?.gitCommitSha ?? "(no gitCommitSha)";
+const label = (r) => `${shaOf(r).slice(0, 7)}${typeof r?.scope === "string" ? ` (${r.scope} scope)` : ""}`;
+
 let failed = 0;
+const present = new Set();
 for (const [id, record] of Object.entries(installed)) {
   const entry = Object.hasOwn(registry, id) ? registry[id] : null;
-  const sha = (Array.isArray(record) ? record[0] : record)?.gitCommitSha ?? "(no gitCommitSha)";
-  if (!entry) { console.log(`  PL-1: note — ${id} installed but not in reviewed-plugins.json (${sha.slice(0, 7)})`); continue; }
+  const records = recordsOf(record);
+  if (records.length === 0) continue; // an id left behind with no installation: not installed
+  present.add(id);
+  if (!entry) { console.log(`  PL-1: note — ${id} installed but not in reviewed-plugins.json (${records.map(label).join(", ")})`); continue; }
   if (entry.status === "rejected") { console.error(`  PL-1: FAIL — ${id} is installed but rejected: ${entry.reason}`); failed++; continue; }
-  if (sha !== entry.installed) {
-    console.error(`  PL-1: FAIL — ${id} installed from ${sha.slice(0, 7)}, registry records ${String(entry.installed).slice(0, 7)} (reviewed ${String(entry.reviewed).slice(0, 7)}). Compare the two commits under the plugin's directory, re-read what changed, then update the registry.`);
+  const wrong = records.filter((r) => shaOf(r) !== entry.installed);
+  if (wrong.length) {
+    console.error(`  PL-1: FAIL — ${id} installed from ${wrong.map(label).join(", ")}${records.length > 1 ? ` in ${wrong.length} of its ${records.length} installation records` : ""}, registry records ${String(entry.installed).slice(0, 7)} (reviewed ${String(entry.reviewed).slice(0, 7)}). Compare the two commits under the plugin's directory, re-read what changed, then update the registry.`);
     failed++; continue;
   }
-  console.log(`  PL-1: ok — ${id} at ${sha.slice(0, 7)}`);
+  console.log(`  PL-1: ok — ${id} at ${entry.installed.slice(0, 7)}${records.length > 1 ? ` (${records.length} installation records)` : ""}`);
 }
 for (const [id, entry] of Object.entries(registry)) {
-  if (entry.status === "retained" && !Object.hasOwn(installed, id)) console.log(`  PL-1: note — ${id} retained but not installed here`);
+  if (entry.status === "retained" && !present.has(id)) console.log(`  PL-1: note — ${id} retained but not installed here`);
 }
 process.exit(failed ? 1 : 0);

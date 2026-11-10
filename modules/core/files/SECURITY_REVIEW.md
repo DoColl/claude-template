@@ -1,6 +1,6 @@
 # Security review — findings catalogue
 
-What has already gone wrong here once, and the check that keeps it from coming back. Reviewers read this file before a diff; `scripts/guards.d/50-project.sh` replays it on every push and in CI.
+What has already gone wrong here once, and the check that keeps it from coming back. Reviewers read this file before a diff; `scripts/guards.d/50-project.sh` replays it on every run of the gate.
 
 ## How to use it
 

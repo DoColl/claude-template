@@ -65,6 +65,8 @@ A seed file exposes slots: a line containing `harness:slot <name>` or `harness:r
 - `slot` — a block (a section, a paragraph). One blank line is added after it.
 - `rows` — contiguous lines (table rows, list items). No blank line.
 
+A comment line at the left margin ends a Markdown list or table. A `rows` marker therefore sits after the last row of a table, and inside a list it is indented to the items' text (three spaces under `1. `), so that it belongs to the item above it and the items on both sides stay one list.
+
 Fragments may only target seed files. If the target file belongs to a module that is not installed, the fragment waits; if the slot line has been removed from the project's file, the installer says so and the fragment is pasted by hand.
 
 Slots provided by `core`:
@@ -74,7 +76,7 @@ Slots provided by `core`:
 | `CLAUDE.md` | `delegation` | slot | the "Delegation" section (agents) |
 | `CLAUDE.md` | `conventions` | rows | one bullet per rule: `- **Name**: rule, at most five lines. → \`docs/conventions/<slug>.md\`` |
 | `CLAUDE.md` | `security-workflow` | slot | paragraphs or `###` sections at the top of "Security workflow" |
-| `CLAUDE.md` | `before-pushing` | rows | review steps that run before the built-in ones, each starting with `1. ` |
+| `CLAUDE.md` | `before-pushing` | rows | review passes that run before the built-in ones, each written `1. **<pass>** (tier 3)` or `(tiers 2, 3)` — the tiers of "Before pushing" it applies to |
 | `CLAUDE.md` | `doc-maintenance` | rows | `- <change> → <doc>` lines |
 | `docs/conventions/README.md` | `conventions-index` | rows | `| \`file.md\` | topic | source |` |
 
@@ -88,7 +90,7 @@ A module that enforces something ships a guard: `files/scripts/guards.d/NN-<name
 - One line per check, starting with its ID (`AM-3: …`). IDs are stable; the header comment of the guard says what each one checks and why.
 - A guard that needs the network checks `offline` and skips. A guard whose tool is missing skips locally and fails when `$CI` is set, if the check is mandatory.
 - A freshly installed module passes its own guard, in a project that contains only that module and what it requires.
-- Numbers: `10` core, `20` agents, `25` security-review, `30` ci-security, `35` node-audit, `40` auto-merge, `42` weekly-digest, `44` claude-ci, `46` openspec, `50` the project's own, `90` advisory.
+- Numbers: `10` core, `20` agents, `25` security-review, `30` ci-security, `35` node-audit, `40` auto-merge, `42` weekly-digest, `44` claude-ci, `46` openspec, `50` the project's own, `90`–`99` advisory (`90` the gaps left to fill, `91` the kit files that drifted from their recorded hash).
 
 Tests a guard runs ship with the module, next to the code they test. Always name the test file (`node --test scripts/x.test.mjs`), never a directory: an older Node takes a directory argument for a module to run and fails.
 

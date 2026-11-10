@@ -13,7 +13,11 @@ const kit = loadKit();
 const CLI = path.join(KIT_ROOT, "bin/harness.mjs");
 const ALL = listModules(kit).map((m) => m.id);
 const tmp = (prefix = "harness-e2e-") => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-const run = (cwd, cmd, args, opts = {}) => spawnSync(cmd, args, { cwd, encoding: "utf8", ...opts });
+// Under `node --test`, NODE_TEST_CONTEXT is set, and a `node --test` started with it in its environment exits 0
+// whatever its tests do. The gate runs the modules' self-tests that way (AG-1, PL-1, WD-1…): without this, a
+// broken self-test would pass here and fail in every project.
+const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "NODE_TEST_CONTEXT"));
+const run = (cwd, cmd, args, opts = {}) => spawnSync(cmd, args, { cwd, encoding: "utf8", env: ENV, ...opts });
 const cli = (...args) => spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", input: "" });
 const read = (dir, rel) => fs.readFileSync(path.join(dir, rel), "utf8");
 const write = (dir, rel, text, mode) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); if (mode) fs.chmodSync(path.join(dir, rel), mode); };
@@ -23,7 +27,7 @@ const install = (target, moduleIds, extra = {}) => { const plan = buildPlan({ ki
 function gate(dir, ...args) {
   assert.equal(run(dir, "git", ["init", "-q", "-b", "main"]).status, 0, "git init");
   assert.equal(run(dir, "git", ["add", "-A"]).status, 0, "git add");
-  return run(dir, "bash", ["scripts/security-checks.sh", ...(args.length ? args : ["--offline"])], { env: { ...process.env, CI: "" } });
+  return run(dir, "bash", ["scripts/security-checks.sh", ...(args.length ? args : ["--offline"])], { env: { ...ENV, CI: "" } });
 }
 const output = (r) => `${r.stdout}\n${r.stderr}`;
 
@@ -47,10 +51,50 @@ test("all modules together: one gate, every fragment placed, CLAUDE.md well unde
   const budget = Number(/harness:budget (\d+)/.exec(read(dir, "CLAUDE.md"))[1]);
   const size = fs.statSync(path.join(dir, "CLAUDE.md")).size;
   assert.ok(size <= budget * 0.6, `CLAUDE.md is ${size} bytes with every module: leave the project at least 40% of its ${budget}-byte budget`);
+  const passes = /\n\n((?:(?:1\. | {3})[^\n]*\n)+)\nInstruction files are executed/.exec(read(dir, "CLAUDE.md"))?.[1].split("\n").filter((l) => l.startsWith("1. "));
+  assert.ok(passes?.length >= 5, "the review passes of every module and the built-in ones form one numbered list, with nothing at the left margin between them");
+  for (const p of passes) assert.match(p, /^1\. \*\*[^*]+\*\* \(tiers? [23]/, p);
   const again = summarize(buildPlan({ kit, target: dir }));
   assert.deepEqual([again.created, again.updated, again.appended, again.fragmentsInserted, again.conflicts, again.outdated], [[], [], [], [], [], []], "a second run writes nothing");
   assert.deepEqual(drift(dir, readManifest(dir)), { modified: [], missing: [] });
   assert.deepEqual(readManifest(dir).modules, plan.selected);
+  const hashed = Object.values(readManifest(dir).files).filter((f) => f.sha256).length;
+  assert.match(r.stdout, new RegExp(`HD-1: ${hashed} kit file\\(s\\) identical`), "the guard hashes every kit-owned file the way the installer does");
+  assert.doesNotMatch(r.stdout, /HD-1: \d+ kit file\(s\) differ/);
+});
+
+// HD-1 lists, without the kit, what `status` lists with it. A note, never a failure: a project may edit a kit file.
+test("HD-1: the gate lists the kit files that drifted from their recorded hash, and stays green", () => {
+  const dir = tmp();
+  install(dir, []);
+  write(dir, "scripts/guards.d/_lib.sh", `${read(dir, "scripts/guards.d/_lib.sh")}# edited in the project\n`);
+  fs.rmSync(path.join(dir, "docs/conventions/claude-md.md"));
+  write(dir, "CLAUDE.md", read(dir, "CLAUDE.md").replace("docs/conventions/claude-md.md", "docs/conventions/local-gate.md"));
+  assert.deepEqual(drift(dir, readManifest(dir)), { modified: ["scripts/guards.d/_lib.sh"], missing: ["docs/conventions/claude-md.md"] });
+  const r = gate(dir);
+  assert.equal(r.status, 0, output(r));
+  const listed = /HD-1: 2 kit file\(s\) differ[^\n]*\n((?: {10}[^\n]+\n)+)/.exec(r.stdout)?.[1].trim().split("\n").map((l) => l.trim());
+  assert.deepEqual(listed, ["docs/conventions/claude-md.md  (missing)", "scripts/guards.d/_lib.sh"], output(r));
+  assert.doesNotMatch(r.stdout, /CLAUDE\.md  /, "a seed carries no hash: filling it is not drift");
+  // a manifest the awk cannot read says so instead of reporting a clean tree
+  write(dir, MANIFEST, JSON.stringify(readManifest(dir)));
+  assert.match(gate(dir).stdout, /HD-1: no hashed file could be read/);
+});
+
+// The one-run installation the README and the harness-init skill give for a new repository: day-1 set, CI, unattended merge.
+test("day-1 and the pull-request flow install in one run, and the CI workflow carries the name auto-merge waits for", () => {
+  const command = /init \. --modules (git-hooks,agents,security-review,ci-security,ci-workflow,auto-merge)\n/;
+  const ids = command.exec(read(KIT_ROOT, "README.md"))?.[1];
+  assert.ok(ids, "the README gives the command");
+  assert.equal(command.exec(read(KIT_ROOT, "skills/harness-init/SKILL.md"))?.[1], ids, "the skill gives the same one");
+  const dir = tmp();
+  const r = cli("init", dir, "--modules", ids, "--set", "CI_WORKFLOW=Build and test");
+  assert.equal(r.status, 0, output(r));
+  assert.match(read(dir, ".github/workflows/ci.yml"), /^name: Build and test\n/);
+  assert.match(read(dir, ".github/workflows/auto-merge.yml"), /^    workflows: \["Build and test"\]$/m);
+  const g = gate(dir);
+  assert.equal(g.status, 0, output(g));
+  assert.doesNotMatch(g.stdout, /security\.yml is not called by any workflow|no workflow named/, "nothing is left to wire by hand");
 });
 
 test("core alone says nothing about what is not installed", () => {
@@ -214,6 +258,11 @@ test("nothing is written through a symlink that leaves the project", () => {
 test("the gate: a failing guard fails it, a skipped one does not, an empty one is an error", () => {
   const dir = tmp();
   install(dir, []);
+  // a self-test run with `node --test` that fails must fail the gate from inside this test run too
+  write(dir, "scripts/red.test.mjs", 'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("red", () => assert.equal(1, 2));\n');
+  write(dir, "scripts/guards.d/96-self-test.sh", '#!/usr/bin/env bash\n. "$(dirname "$0")/_lib.sh"\nif node --test scripts/red.test.mjs >/dev/null 2>&1; then ok "self-test"; else fail "self-test"; fi\nfinish\n', 0o755);
+  let nested = gate(dir); assert.equal(nested.status, 1, "a nested test run reports its failures"); assert.match(nested.stderr, /FAILED: 96-self-test/);
+  fs.rmSync(path.join(dir, "scripts/guards.d/96-self-test.sh"));
   write(dir, "scripts/guards.d/97-skipped.sh", "#!/usr/bin/env bash\nexit 77\n", 0o755);
   let r = gate(dir); assert.equal(r.status, 0, output(r)); assert.match(r.stdout, /skipped: 97-skipped/);
   write(dir, "scripts/guards.d/98-broken.sh", "#!/usr/bin/env bash\nexit 1\n", 0o755);
@@ -237,12 +286,38 @@ test("CM-1 and CM-2: the budget and the pointers of CLAUDE.md are enforced", () 
   assert.equal(gate(dir).status, 0);
 });
 
+// Right after an installation nothing is staged: AG-2 must say what to do, not turn the first gate red.
+// Once the harness is in git (its manifest is tracked), a hook file left out is the failure it always was.
+test("AG-2: untracked hook files are a note before the first git add, a failure after it and on a runner", () => {
+  if (!kit.modules.has("agents")) return;
+  const dir = tmp();
+  install(dir, ["agents"]);
+  assert.equal(run(dir, "git", ["init", "-q", "-b", "main"]).status, 0);
+  const bare = (env = {}) => run(dir, "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "", ...env } });
+  let r = bare();
+  assert.equal(r.status, 0, output(r));
+  assert.match(r.stdout, /note\s+AG-2: \d+ hook file\(s\) not in git yet[^\n]*git add -A/);
+  r = bare({ CI: "true" });
+  assert.equal(r.status, 1, "a runner only has tracked files: no leniency there");
+  assert.match(r.stderr, /AG-2: [^\n]* is not tracked by git/);
+  assert.equal(run(dir, "git", ["add", ".claude/harness.json", "scripts"]).status, 0);
+  r = bare();
+  assert.equal(r.status, 1, "the harness is in git and the hooks are not");
+  assert.match(r.stderr, /AG-2: \.claude\/hooks\/agent-bash-guard\.mjs is not tracked by git/);
+  write(dir, ".gitignore", `${read(dir, ".gitignore")}.claude/hooks/\n`);
+  fs.rmSync(path.join(dir, ".git"), { recursive: true });
+  assert.equal(run(dir, "git", ["init", "-q", "-b", "main"]).status, 0);
+  r = bare();
+  assert.equal(r.status, 1, "an ignored hook file fails even before anything is staged");
+  assert.match(r.stderr, /AG-2: [^\n]* matches a \.gitignore rule/);
+});
+
 test("git-hooks: pre-push blocks on a red gate and lets a deletion through", () => {
   if (!kit.modules.has("git-hooks")) return;
   const dir = tmp();
   install(dir, ["git-hooks"]);
   assert.equal(gate(dir).status, 0);
-  const push = (line) => run(dir, "sh", [".githooks/pre-push"], { input: line, env: { ...process.env, CI: "" } });
+  const push = (line) => run(dir, "sh", [".githooks/pre-push"], { input: line, env: { ...ENV, CI: "" } });
   const real = `refs/heads/main ${"1".repeat(40)} refs/heads/main ${"0".repeat(40)}\n`;
   assert.equal(push(real).status, 0);
   write(dir, "scripts/guards.d/98-broken.sh", "#!/usr/bin/env bash\nexit 1\n", 0o755);

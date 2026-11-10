@@ -1,0 +1,12 @@
+# Paths of this project that the merge gate must hold, and neighbours it must
+# let through (docs/conventions/auto-merge-policy.md § Paths of your own).
+#
+# AM-1 runs the two patterns of .github/workflows/auto-merge.yml — the kit's
+# CLAUDE_GATE_RE and your PROJECT_GATE_RE — on every row:
+#
+#   hold <path>   one of the two patterns must match: never merged unattended
+#   pass <path>   neither may match: keeps merging on green
+#
+# One `hold` row per kind of path you add to PROJECT_GATE_RE, and a `pass` row
+# for a neighbour the pattern must not catch. This file is yours: the kit never
+# overwrites it. It is itself held for a hand merge.

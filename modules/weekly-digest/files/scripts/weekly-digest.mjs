@@ -64,14 +64,19 @@ export const SELF = 'weekly-digest.yml';
 // Claude Code or git EXECUTE rather than read, and the docs-only set a CI
 // workflow usually ignores. With auto-merge.yml, its own declarations are read
 // instead, so the digest and the merge gate cannot drift.
-export const DEFAULT_GATE_RE = '(^|/)\\.claude(/|$)|(^|/)claude(\\.local)?\\.md$|^\\.githooks(/|$)|(^|/)\\.mcp\\.json$|(^|/)\\.claude\\.json$|(^|/)\\.ripgreprc$|(^|/)\\.gitmodules$|(^|/)\\.husky(/|$)|^\\.github/workflows/(auto-merge|claude[^/]*)\\.ya?ml$|^scripts/security-checks\\.sh$|^scripts/guards\\.d/|^scripts/reviewed-plugins\\.json$';
+export const DEFAULT_GATE_RE = '(^|/)\\.claude(/|$)|(^|/)claude(\\.local)?\\.md$|^\\.githooks(/|$)|(^|/)\\.mcp\\.json$|(^|/)\\.claude\\.json$|(^|/)\\.ripgreprc$|(^|/)\\.gitmodules$|(^|/)\\.husky(/|$)|^\\.github/workflows/(auto-merge|claude[^/]*)\\.ya?ml$|^\\.github/zizmor\\.ya?ml$|^\\.gitleaks(\\.toml|ignore)$|^scripts/guards\\.d/|^scripts/(security-checks\\.sh|fetch-pinned-release\\.sh|plugin-pins(\\.test)?\\.mjs|reviewed-plugins\\.json|auto-merge-paths\\.txt)$';
 export const DEFAULT_DOCS_RE = '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)';
 
-/** CLAUDE_GATE_RE as auto-merge.yml defines it (the AM-1 source of truth). */
+/**
+ * What auto-merge.yml never merges unattended (the AM-1 source of truth):
+ * CLAUDE_GATE_RE, the kit's list, joined with PROJECT_GATE_RE, the project's
+ * additions, when the workflow declares one.
+ */
 export function readGateRe(autoMergeYml) {
   const m = autoMergeYml.match(/^ {2}CLAUDE_GATE_RE: '(.*)'$/m);
   if (!m) throw new Error('CLAUDE_GATE_RE not found in auto-merge.yml');
-  return new RegExp(m[1], 'i');
+  const own = autoMergeYml.match(/^ {2}PROJECT_GATE_RE: '(.*)'$/m);
+  return new RegExp(own ? `(?:${m[1]})|(?:${own[1]})` : m[1], 'i');
 }
 
 /** The docs-only path set as auto-merge.yml's NON_DOCS grep defines it (same set as the CI workflow's paths-ignore). */

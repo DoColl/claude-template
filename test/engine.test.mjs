@@ -156,6 +156,21 @@ test("CLAUDE.md bullets stay short and point to a page the module installs", () 
   }
 });
 
+// CLAUDE.md § Before pushing grades the review by tier: a pass that does not say which tiers it belongs to
+// would run on every diff, which is the cost the tiers exist to avoid.
+test("a review pass added to \"Before pushing\" names its tiers, and the slot keeps the list whole", () => {
+  for (const [id, mod] of kit.modules) {
+    const file = path.join(mod.dir, "fragments/CLAUDE.md/before-pushing.frag");
+    if (!fs.existsSync(file)) continue;
+    for (const line of read(file).trim().split("\n")) assert.match(line, /^1\. \*\*[^*]+\*\* \((tier [23]|tiers 2, 3)[,)]/, `${id}: a before-pushing row is "1. **<pass>** (tier 3)" or "(tiers 2, 3)"`);
+  }
+  // A comment at the left margin would end the numbered list; indented to the items' text it stays inside it.
+  const lines = read(kit.modules.get("core").dir, "files/CLAUDE.md").split("\n");
+  const at = lines.findIndex((l) => l.includes("harness:rows before-pushing"));
+  assert.match(lines[at], /^ {3}<!-- harness:rows before-pushing -->$/);
+  assert.match(lines[at + 1], /^1\. /, "the built-in passes follow the marker directly");
+});
+
 test("guards follow the contract and scripts are executable", () => {
   for (const [id, mod] of kit.modules) for (const rel of walk(path.join(mod.dir, "files"))) {
     const abs = path.join(mod.dir, "files", rel);
@@ -179,6 +194,37 @@ test("guard numbers are unique across modules", () => {
     assert.ok(!seen.has(n) || seen.get(n) === id, `guard number ${n} is used by ${seen.get(n)} and ${id}`);
     seen.set(n, id);
   }
+});
+
+// The documentation set is skipped by CI and merged at once by auto-merge: written in four places, it must be
+// one set. And what the CI skeleton takes back after skipping it must be held by the merge gate — a path
+// re-included but not held would be merged, as documentation, while the CI run it started is in flight.
+test("the docs paths agree across the shipped workflows, and CI re-includes only what the merge gate holds", () => {
+  const list = (text, re) => { const m = re.exec(text); assert.ok(m, `${re} not found`); return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]); };
+  const ci = read(kit.modules.get("ci-workflow").dir, "files/.github/workflows/ci.yml");
+  const security = read(kit.modules.get("ci-security").dir, "files/.github/workflows/security.yml");
+  const autoMerge = read(kit.modules.get("auto-merge").dir, "files/.github/workflows/auto-merge.yml");
+  const docs = ["docs/**", "**.md", "LICENSE", ".gitignore"];
+  assert.deepEqual(list(ci, /\n  push:\n(?:.*\n)*?    paths-ignore: \[(.*)\]\n/), docs, "ci.yml, push");
+  const pr = list(ci, /\n  pull_request:\n(?:    .*\n)*?    paths:\n((?:      - .*\n)+)/);
+  assert.equal(pr[0], "**", "ci.yml, pull_request: a paths list needs a positive pattern first");
+  const lastExclusion = pr.findLastIndex((p) => p.startsWith("!"));
+  assert.deepEqual(pr.slice(1, lastExclusion + 1), docs.map((p) => `!${p}`), "ci.yml, pull_request: the exclusions, in one run");
+  assert.deepEqual(list(security, /\n  push:\n(?:.*\n)*?    paths:\n((?:      - .*\n)+)/), docs, "security.yml, push");
+  assert.deepEqual(list(autoMerge, /\n  pull_request:\n(?:.*\n)*?    paths:\n((?:      - .*\n)+)/), docs, "auto-merge.yml, pull_request");
+  assert.ok(autoMerge.includes("grep -E -v -c '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)'"), "auto-merge.yml, NON_DOCS");
+  const gate = new RegExp(/^  CLAUDE_GATE_RE: '(.*)'$/m.exec(autoMerge)[1], "i");
+  const back = pr.slice(lastExclusion + 1);
+  assert.deepEqual(back, [".claude/**", "**/.claude/**", "CLAUDE.md", "**/CLAUDE.md"], "ci.yml, pull_request: the instruction files come back after the exclusions");
+  for (const p of back) assert.match(p.replaceAll("**/", "sub/").replaceAll("**", "agents/x.md"), gate, `${p} is re-included by CI, so the merge gate must hold it`);
+});
+
+// Without auto-merge.yml the digest falls back to its own copy of the kit's gate pattern: one list, two files.
+test("the weekly digest's built-in gate pattern is the one auto-merge ships", () => {
+  const shipped = /^  CLAUDE_GATE_RE: '(.*)'$/m.exec(read(kit.modules.get("auto-merge").dir, "files/.github/workflows/auto-merge.yml"))[1];
+  const digest = read(kit.modules.get("weekly-digest").dir, "files/scripts/weekly-digest.mjs");
+  const builtin = /^export const DEFAULT_GATE_RE = '(.*)';$/m.exec(digest)[1].replaceAll("\\\\", "\\");
+  assert.equal(builtin, shipped);
 });
 
 // An older Node takes `node --test <directory>` for a module to run and fails; a newer one searches the

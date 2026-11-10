@@ -4,9 +4,11 @@
 # Opt in once per clone:   git config core.hooksPath .githooks
 #
 # Runs scripts/security-checks.sh --offline (no network, fast). It checks the
-# working tree — what you are about to push in the common case; CI runs the
-# full gate on the pushed commit and is the check that cannot be skipped. To
-# push once without it, knowingly: git push --no-verify.
+# working tree — what you are about to push in the common case. A CI workflow
+# that runs the full gate on the pushed commit is the check that cannot be
+# skipped; where there is none, this hook is the last one. Do not pass
+# --no-verify to get past a failure: fix what the gate names, or report it
+# (docs/conventions/git-hooks.md).
 set -eu
 
 # Nothing to check when the push only deletes refs (or pushes nothing).

@@ -5,9 +5,10 @@
 #
 # Uses the repository's .gitleaks.toml (built-in rules plus the project's own
 # credential formats) and .gitleaksignore. This hook is the early warning: a
-# secret caught here never enters the history. The gate that cannot be skipped
-# is the CI scan of the pushed commits. Output is redacted, so a hit never
-# prints the secret itself.
+# secret caught here never enters the history. A hook can be skipped; a scan
+# of the pushed commits in CI cannot — if the project has one. Without it,
+# this hook is the only secret scan. Output is redacted, so a hit never prints
+# the secret itself.
 set -eu
 
 if ! command -v gitleaks >/dev/null 2>&1; then
