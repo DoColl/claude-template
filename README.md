@@ -37,7 +37,7 @@ node /path/to/claude-template/bin/harness.mjs init . --modules git-hooks,agents,
 The installer prints what it wrote and what is left for you. Then:
 
 1. Fill the gaps it lists (`status .` shows them again): the project overview, the commands, the sensitive areas and the conventions in `CLAUDE.md`, the verification commands of the agents.
-2. Run `./scripts/security-checks.sh --offline`. It must pass.
+2. Run `git add -A`, then `./scripts/security-checks.sh --offline`. It must pass. (Several guards read what git tracks; before the first `git add` they only say so.)
 3. Read what was installed before committing it. Every session will execute these files.
 
 Later, as the project grows:

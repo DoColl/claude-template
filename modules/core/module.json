@@ -22,7 +22,7 @@
   "append": [{ "file": ".gitignore", "from": "append/gitignore", "marker": "claude-template" }],
   "postInstall": [
     "Fill CLAUDE.md: project overview, architecture map, commands, the sensitive areas under \"Before pushing\" and the conventions for new code (each gap is a TODO(harness) comment).",
-    "Run ./scripts/security-checks.sh --offline once: it must pass before the first commit.",
+    "Run `git add -A`, then ./scripts/security-checks.sh --offline: several guards read what git tracks, and the gate must pass before the first commit.",
     "When a bug or a review finding is fixed, give it an ID: one line in SECURITY_REVIEW.md, one check in scripts/guards.d/50-project.sh."
   ]
 }

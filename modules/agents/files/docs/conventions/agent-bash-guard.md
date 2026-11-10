@@ -63,7 +63,7 @@ What follows from it:
 
 This is the one place where the guard fails open, and it is outside the hook's reach. If your project needs the allowlist in headless sessions, evaluate enforcing it from a `PreToolUse` hook in `.claude/settings.json` as well — settings hooks follow a different trust rule — keyed on the sub-agent the call comes from. The kit does not ship that second layer.
 
-**Checks:** `scripts/guards.d/20-agent-guards.sh` — AG-1 runs the specification (tables, config, CLI exit codes, and the real hook line of every agent that has Bash and no editing tool); AG-2 checks that the hook files are tracked and not ignored. Both run in the gate and in CI.
+**Checks:** `scripts/guards.d/20-agent-guards.sh` — AG-1 runs the specification (tables, config, CLI exit codes, and the real hook line of every agent that has Bash and no editing tool); AG-2 checks that the hook files are tracked and not ignored (right after an installation, while `.claude/harness.json` itself is not tracked yet, an untracked hook file is a note asking for `git add -A`; once the manifest is tracked, or on a CI runner, it fails). Both run in the gate and in CI.
 
 ## Live check
 

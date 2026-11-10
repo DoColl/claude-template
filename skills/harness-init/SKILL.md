@@ -53,7 +53,7 @@ The installer prints "Next steps" and counts the `TODO(harness)` markers; `statu
 - `.claude/hooks/agent-bash-guard.config.json` (agents module) — the exact verification commands: tests, build, type-check. Nothing that writes, installs or reaches the network.
 - `.claude/skills/project-security-review/SKILL.md` (security-review module) — the same sensitive areas, and the invariants.
 
-Then run the gate: `./scripts/security-checks.sh --offline` must pass.
+Then stage the installation (`git add -A` — staging is not committing) and run the gate: `./scripts/security-checks.sh --offline` must pass. Several guards read what git tracks; run before the first `git add`, they report notes instead of checking.
 
 ## 6. Hand over
 

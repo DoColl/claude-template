@@ -277,6 +277,32 @@ test("CM-1 and CM-2: the budget and the pointers of CLAUDE.md are enforced", () 
   assert.equal(gate(dir).status, 0);
 });
 
+// Right after an installation nothing is staged: AG-2 must say what to do, not turn the first gate red.
+// Once the harness is in git (its manifest is tracked), a hook file left out is the failure it always was.
+test("AG-2: untracked hook files are a note before the first git add, a failure after it and on a runner", () => {
+  if (!kit.modules.has("agents")) return;
+  const dir = tmp();
+  install(dir, ["agents"]);
+  assert.equal(run(dir, "git", ["init", "-q", "-b", "main"]).status, 0);
+  const bare = (env = {}) => run(dir, "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...process.env, CI: "", ...env } });
+  let r = bare();
+  assert.equal(r.status, 0, output(r));
+  assert.match(r.stdout, /note\s+AG-2: \d+ hook file\(s\) not in git yet[^\n]*git add -A/);
+  r = bare({ CI: "true" });
+  assert.equal(r.status, 1, "a runner only has tracked files: no leniency there");
+  assert.match(r.stderr, /AG-2: [^\n]* is not tracked by git/);
+  assert.equal(run(dir, "git", ["add", ".claude/harness.json", "scripts"]).status, 0);
+  r = bare();
+  assert.equal(r.status, 1, "the harness is in git and the hooks are not");
+  assert.match(r.stderr, /AG-2: \.claude\/hooks\/agent-bash-guard\.mjs is not tracked by git/);
+  write(dir, ".gitignore", `${read(dir, ".gitignore")}.claude/hooks/\n`);
+  fs.rmSync(path.join(dir, ".git"), { recursive: true });
+  assert.equal(run(dir, "git", ["init", "-q", "-b", "main"]).status, 0);
+  r = bare();
+  assert.equal(r.status, 1, "an ignored hook file fails even before anything is staged");
+  assert.match(r.stderr, /AG-2: [^\n]* matches a \.gitignore rule/);
+});
+
 test("git-hooks: pre-push blocks on a red gate and lets a deletion through", () => {
   if (!kit.modules.has("git-hooks")) return;
   const dir = tmp();
