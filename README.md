@@ -84,7 +84,7 @@ Each module's convention page says where its piece comes from and what has actua
 | `auto-merge` | The original runs in production. This generic variant has not: its first pull requests are its test. |
 | `weekly-digest` | Unit-tested. Never run live, in the project it comes from either. |
 | `claude-ci` | Not exercised end to end; only its push hook was replayed locally, against the push wrapper of the pinned action. For private repositories only. |
-| `openspec` guard | Not run against the OpenSpec CLI by the kit's authors. |
+| `openspec` guard | Its validation command was run against OpenSpec CLI 1.10.0 in one installed project (an empty project, a scaffolded change, a valid change, a spec alone). Not run in CI: the kit installs no CLI there. |
 
 Treat anything marked "has not run" as a draft until you have watched it work once.
 

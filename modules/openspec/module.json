@@ -1,13 +1,14 @@
 {
   "id": "openspec",
   "title": "Spec-driven changes with OpenSpec",
-  "summary": "The convention for keeping current behaviour in openspec/specs/ and work in flight in openspec/changes/ (propose, apply, archive), plus a guard that validates them. The OpenSpec CLI generates its own commands and skills.",
+  "summary": "The convention for keeping current behaviour in openspec/specs/ and work in flight in openspec/changes/ (propose, apply, sync, archive), plus a guard that validates them. The OpenSpec CLI generates its own commands and skills.",
   "phase": "on-demand",
   "order": 46,
   "requires": ["core"],
   "postInstall": [
-    "Install the OpenSpec CLI at a pinned version (the convention was written against @fission-ai/openspec 1.10.0) and run `openspec init` in the project.",
-    "Commit what it generates (.claude/commands/opsx/, .claude/skills/openspec-*) and never hand-edit those files: `openspec update` regenerates them.",
+    "Install the OpenSpec CLI at a pinned version (the convention was written against @fission-ai/openspec 1.10.0) and run `openspec init --tools claude` in the project: the non-interactive form.",
+    "Commit what it generates — six commands under .claude/commands/opsx/ (propose, explore, apply, update, sync, archive) and six skills under .claude/skills/openspec-* — and never hand-edit those files: `openspec update` regenerates them.",
+    "Close a change in two steps, sync then archive: archiving alone can leave its deltas out of the specs (docs/conventions/openspec-workflow.md).",
     "If the agents module is installed, add the validation command to .claude/hooks/agent-bash-guard.config.json so the verifier can run it."
   ]
 }
