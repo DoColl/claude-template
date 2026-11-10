@@ -29,7 +29,17 @@ The merge is a synchronous server-side call (`PUT /repos/…/pulls/N/merge`, squ
 
 `CLAUDE.md`, `.claude/agents/*.md`, `.claude/skills/**`, `.claude/settings.json`, a git hook: these are executed, not read. Every session that opens the repository loads them, an agent definition decides which tools a sub-agent may run, a settings hook runs a shell command on every matching tool call. Most of them are Markdown, so without a gate they would ride the docs fast path and merge in seconds with no CI and no human look — and a green CI proves nothing about them anyway. A session steered by content it read could widen an agent's tools or delete a rule, and every later session would load the result.
 
-So neither job merges a pull request that touches a path matched by `CLAUDE_GATE_RE` (one pattern in the workflow's `env`, applied by both jobs): any `.claude/` directory at any depth and a bare `.claude` entry (a symlink); `CLAUDE.md` and `CLAUDE.local.md` anywhere; `.githooks/`; `.mcp.json`; the other files a Claude CI action reads as configuration from its working directory (`.claude.json`, `.ripgreprc`, `.gitmodules`, `.husky/`); what runs Claude in CI and this workflow — `.github/workflows/claude*.yml`, `auto-merge.yml` itself; the gate and every guard — `scripts/security-checks.sh` and `scripts/guards.d/**`, which git runs on each push through the pre-push hook, which the read-only agents run, and which enforce all of this; and `scripts/reviewed-plugins.json`, the record of which Claude Code plugin commits were reviewed. A pull request that adds a regression guard is therefore merged by hand too. The match is case-insensitive per path segment, because a case-insensitive file system turns `.Claude/agents/x.md` into `.claude/agents/x.md`. Review the list once and add what else your tooling executes.
+So neither job merges a pull request that touches a path matched by `CLAUDE_GATE_RE` or `PROJECT_GATE_RE` (two patterns in the workflow's `env`, applied together by both jobs). `CLAUDE_GATE_RE` is the kit's list: any `.claude/` directory at any depth and a bare `.claude` entry (a symlink); `CLAUDE.md` and `CLAUDE.local.md` anywhere; `.githooks/`; `.mcp.json`; the other files a Claude CI action reads as configuration from its working directory (`.claude.json`, `.ripgreprc`, `.gitmodules`, `.husky/`); what runs Claude in CI and this workflow — `.github/workflows/claude*.yml`, `auto-merge.yml` itself; and the gate with everything it runs or reads. That last group is `scripts/security-checks.sh` and `scripts/guards.d/**`, which git runs on each push through the pre-push hook, which the read-only agents run, and which enforce all of this; the scripts the kit's guards and the security workflow call (`scripts/plugin-pins.mjs` and its test, `scripts/fetch-pinned-release.sh`); the scanner configs that decide what is reported (`.gitleaks.toml`, `.gitleaksignore`, `.github/zizmor.yml` — an ignore added there silences a finding for everyone); `scripts/reviewed-plugins.json`, the record of which Claude Code plugin commits were reviewed; and `scripts/auto-merge-paths.txt`, the table below. A pull request that adds a regression guard is therefore merged by hand too. The match is case-insensitive per path segment, because a case-insensitive file system turns `.Claude/agents/x.md` into `.claude/agents/x.md`.
+
+#### Paths of your own
+
+What else your tooling executes — another agent's instruction file, a page of install commands that sessions follow, another hooks directory, a script one of your own guards runs — goes in `PROJECT_GATE_RE`, never in `CLAUDE_GATE_RE`: the kit's list then stays what the kit ships. It is the same kind of pattern, matched the same way; as shipped it is `^$`, which matches no path. An empty or unusable pattern holds every pull request.
+
+Each addition comes with rows in `scripts/auto-merge-paths.txt`, which is yours: `hold <path>` for a path the gate must hold, `pass <path>` for a neighbour that must keep merging on green. AM-1 runs the two patterns together on every row, so a pattern that misses its target, or catches too much, fails the gate — there is no need to copy the check into `50-project.sh`.
+
+The pattern lives in the workflow file because the workflow checks nothing out: it has no file of the repository to read. Editing that one line makes `auto-merge.yml` a kit file edited in the project — the kit's `update` will report it rather than refresh it, and HD-1 lists it. That is the cost of a gate that executes nothing from the repository.
+
+What is not in the kit's list, and is yours to decide: any other script a guard runs or reads (a dependency-audit gate and its list of derogations, a reporting script), and the workflows that call the gate (§ Residual risks).
 
 Such a pull request stays open until someone merges it from the GitHub UI. A mixed one (code plus a `CLAUDE.md` bullet) waits too; keep the instruction change in the same pull request anyway, the hand merge is the price of the rule.
 
@@ -100,7 +110,7 @@ A session still working on a merged branch is unaffected: a push before the clea
 - **The CI workflow.** A workflow named `__HARNESS_CI_WORKFLOW__` must exist and run on `pull_request`; until it does, only docs-only pull requests are merged (the guard notes it).
 - **The docs paths live in three places that must agree:** `on.pull_request.paths` in `auto-merge.yml`, the `NON_DOCS` pattern in `promote-docs`, and what the CI workflow skips on both `push` and `pull_request` (a `paths-ignore` list, or `paths` with `!` exclusions). If CI does not skip them, a docs-only pull request is still merged at once, while its CI run is in flight.
 - **CI may take instruction files back, and nothing else.** A CI workflow that skips `**.md` also skips `CLAUDE.md` and the agent definitions, so the gate never runs on a pull request that only edits them. Its `pull_request` filter may therefore re-include paths after the exclusions (`.claude/**`, `CLAUDE.md` at any depth). Every re-included path must be one `CLAUDE_GATE_RE` holds: `promote-docs` merges a docs-only pull request without waiting, so a re-included path it does not hold would be merged while the run CI just started is still in flight. For a held path there is no race — both jobs refuse it, and the CI run is there for whoever merges by hand.
-- **Three decisions are left as to-do comments in the workflow:** the paths that are executed (`CLAUDE_GATE_RE`), where a Dependabot major may go through (`MAJOR_HOLD_RE`), and whether something must be dispatched after a merge.
+- **Three decisions are left as to-do comments in the workflow:** the paths of your own that are executed (`PROJECT_GATE_RE`, with their rows in `scripts/auto-merge-paths.txt`), where a Dependabot major may go through (`MAJOR_HOLD_RE`), and whether something must be dispatched after a merge.
 - **Forks are out of scope by design**: both jobs act on branches of this repository only.
 
 ## Residual risks, accepted
@@ -117,13 +127,13 @@ A session still working on a merged branch is unaffected: a push before the clea
 
 `scripts/guards.d/40-auto-merge.sh`, run by the gate, locally and wherever CI runs it:
 
-- **AM-1** — `CLAUDE_GATE_RE` gates a table of paths that must be held and lets a table of ordinary paths through; every job that merges applies it and refuses `claude/issue-*` heads.
+- **AM-1** — `CLAUDE_GATE_RE` gates a table of paths that must be held and lets a table of ordinary paths through; `CLAUDE_GATE_RE` and `PROJECT_GATE_RE` together give every row of `scripts/auto-merge-paths.txt` its stated outcome; every job that merges applies both and refuses `claude/issue-*` heads.
 - **AM-4** — the two "mark ready" lines are pinned to their exact text, and every merge call in the file, however spelled, is one of the gated ones.
 - **AM-5** — the workflow's own `dependabot_verdict` and `bump_level` are extracted and run on the commit-body shapes that must merge and the ones that must hold; the author check, the exact `merge` verdict and `MAJOR_HOLD_RE` are pinned; `dependabot.yml` sets no `allow` and has no `.yaml` twin.
 - **AM-6** — one workflow is waited for, the pull request is selected by its head SHA, every merge passes that SHA, and it comes from the triggering event.
 - **AM-7** — the gate judges the range that is merged: no listing of the pull request's current files or commits, one read of `compare/<base commit>...<validated head>` per merging job, a head check before the file count is trusted, the base re-read right before each merge, and the base taken from the event or from the gate.
 
-AM-1 also requires `CLAUDE_GATE_RE` to be defined exactly once, in the workflow-level `env`: a job- or step-level definition would shadow it.
+AM-1 also requires `CLAUDE_GATE_RE` and `PROJECT_GATE_RE` to be defined exactly once each, in the workflow-level `env`: a job- or step-level definition would shadow them.
 
 AM-2 and AM-3 are unused: they belong to a post-merge dispatch (§ After the merge).
 
@@ -131,3 +141,4 @@ AM-2 and AM-3 are unused: they belong to a post-merge dispatch (§ After the mer
 
 - Installed with the kit.
 - After a security review of the kit: the gate reads the immutable range instead of the pull request's live file and commit listings (AM-7); the gate runner, every guard and the plugin registry are held for a hand merge; `CLAUDE_GATE_RE` must be defined once.
+- After reviews of an installed project: the gate also holds the scripts the kit's guards call, the gitleaks and zizmor configs and the AM-1 table; a project's own paths have their own pattern (`PROJECT_GATE_RE`) and their own table instead of an edit to the kit's.

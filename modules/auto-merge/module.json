@@ -5,12 +5,13 @@
   "phase": "pr-flow",
   "order": 40,
   "requires": ["core"],
+  "seed": ["scripts/auto-merge-paths.txt"],
   "placeholders": {
     "CI_WORKFLOW": { "prompt": "Name of the CI workflow that must be green before a merge (its `name:`)", "default": "CI", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}" }
   },
   "postInstall": [
     "The workflow auto-merge waits for (the name given at install, \"CI\" by default) must exist under that exact `name:`, run on pull_request, and skip docs/**, **.md, LICENSE and .gitignore on push and pull_request (it may re-include Claude instruction files, which are never merged unattended) — otherwise a docs-only pull request merges while its CI is still running.",
-    "Fill the three TODO(harness) comments in .github/workflows/auto-merge.yml: the paths that are executed (CLAUDE_GATE_RE), where a Dependabot major may go through (MAJOR_HOLD_RE, every major is held as shipped), and whether something must be dispatched after a merge.",
+    "Fill the three TODO(harness) comments in .github/workflows/auto-merge.yml: the paths of your own that are executed (PROJECT_GATE_RE, with a row each in scripts/auto-merge-paths.txt — CLAUDE_GATE_RE is the kit's list, leave it), where a Dependabot major may go through (MAJOR_HOLD_RE, every major is held as shipped), and whether something must be dispatched after a merge.",
     "A merge made by this workflow emits no push event: anything that deploys or tests on push to the default branch will not run after it. docs/conventions/auto-merge-policy.md § After the merge says how to add a dispatch.",
     "This workflow has not run in your repository yet: watch the first \"Auto-merge after CI\" runs, on a docs-only pull request and on a code one, before relying on it."
   ]

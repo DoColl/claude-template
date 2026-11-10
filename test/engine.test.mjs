@@ -219,6 +219,14 @@ test("the docs paths agree across the shipped workflows, and CI re-includes only
   for (const p of back) assert.match(p.replaceAll("**/", "sub/").replaceAll("**", "agents/x.md"), gate, `${p} is re-included by CI, so the merge gate must hold it`);
 });
 
+// Without auto-merge.yml the digest falls back to its own copy of the kit's gate pattern: one list, two files.
+test("the weekly digest's built-in gate pattern is the one auto-merge ships", () => {
+  const shipped = /^  CLAUDE_GATE_RE: '(.*)'$/m.exec(read(kit.modules.get("auto-merge").dir, "files/.github/workflows/auto-merge.yml"))[1];
+  const digest = read(kit.modules.get("weekly-digest").dir, "files/scripts/weekly-digest.mjs");
+  const builtin = /^export const DEFAULT_GATE_RE = '(.*)';$/m.exec(digest)[1].replaceAll("\\\\", "\\");
+  assert.equal(builtin, shipped);
+});
+
 // An older Node takes `node --test <directory>` for a module to run and fails; a newer one searches the
 // directory. Written on the newer, it breaks on a runner: name the files, everywhere.
 test("node --test is always given test files, never a directory", () => {

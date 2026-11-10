@@ -6,7 +6,9 @@
 #   AM-1  the Claude-config gate. CLAUDE_GATE_RE is run on a table of paths —
 #         its BEHAVIOUR is tested, not its text — it is defined exactly once,
 #         every job that merges applies it, and every one refuses a
-#         claude/issue-* head.
+#         claude/issue-* head. PROJECT_GATE_RE, the project's additions, is
+#         defined once too and applied in the same grep; the rows of
+#         scripts/auto-merge-paths.txt are run on the two patterns together.
 #   AM-7  the gate judges the range that is merged: files and commits come
 #         from compare/<base commit>...<validated head>, never from the pull
 #         request's current state, and the base is re-read before each merge.
@@ -62,35 +64,66 @@ else
            .github/workflows/auto-merge.yml scripts/guards.d/40-auto-merge.sh \
            scripts/guards.d/44-claude-ci.sh scripts/reviewed-plugins.json \
            scripts/security-checks.sh scripts/guards.d/50-project.sh \
-           scripts/guards.d/_lib.sh scripts/guards.d/60-new.sh; do
+           scripts/guards.d/_lib.sh scripts/guards.d/60-new.sh \
+           scripts/plugin-pins.mjs scripts/plugin-pins.test.mjs \
+           scripts/fetch-pinned-release.sh .gitleaks.toml .gitleaksignore \
+           .github/zizmor.yml .github/zizmor.yaml scripts/auto-merge-paths.txt; do
     if ! grep -qiE "$RE" <<< "$p"; then bad 1 "gated path NOT matched by CLAUDE_GATE_RE: $p"; fi
   done
   # Must not be gated: ordinary docs, code and scripts.
   for p in README.md docs/foo.md docs/conventions/auto-merge-policy.md x/claudette.md \
            src/claude.service.ts .gitignore LICENSE src/claude/x.ts \
            .github/workflows/ci.yml .github/dependabot.yml scripts/build.sh \
-           scripts/security-checks.sh.md scripts/guards.dx/a.sh src/scripts/guards.d/a.sh; do
+           scripts/security-checks.sh.md scripts/guards.dx/a.sh src/scripts/guards.d/a.sh \
+           scripts/plugin-pins.md scripts/plugin-pins-report.mjs scripts/fetch.sh \
+           src/.gitleaks.toml .gitleaks.toml.md docs/zizmor.yml .github/zizmor.md \
+           scripts/auto-merge-paths.txt.md; do
     if grep -qiE "$RE" <<< "$p"; then bad 1 "non-gated path matched by CLAUDE_GATE_RE: $p"; fi
   done
 fi
+# The project's additions: one definition, a usable pattern, and its own table.
+# Run together with the kit's pattern, exactly as the two jobs do.
+PROJECT_RE=$(sed -n "s/^  PROJECT_GATE_RE: '\(.*\)'$/\1/p" "$AM")
+if [ -z "$PROJECT_RE" ]; then
+  bad 1 "PROJECT_GATE_RE is not defined (single-quoted, non-empty; '^\$' adds nothing) in the workflow env of $AM"
+else
+  rc=0
+  grep -qiE "$PROJECT_RE" <<< "x" 2> /dev/null || rc=$?
+  [ "$rc" -le 1 ] || bad 1 "PROJECT_GATE_RE is not a usable extended regular expression: $PROJECT_RE"
+fi
+TABLE=scripts/auto-merge-paths.txt
+if [ -n "$RE" ] && [ -n "$PROJECT_RE" ] && [ -f "$TABLE" ]; then
+  while read -r want p rest; do
+    case "$want" in ''|'#'*) continue ;; esac
+    if [ -z "$p" ] || [ -n "$rest" ]; then bad 1 "$TABLE: expected 'hold <path>' or 'pass <path>', got: $want $p $rest"; continue; fi
+    got=pass
+    if grep -qiE -e "$RE" -e "$PROJECT_RE" <<< "$p" 2> /dev/null; then got=hold; fi
+    case "$want" in
+      hold|pass) [ "$got" = "$want" ] || bad 1 "$TABLE says '$want $p' but the gate would $got it — fix PROJECT_GATE_RE or the row" ;;
+      *) bad 1 "$TABLE: expected 'hold <path>' or 'pass <path>', got: $want $p" ;;
+    esac
+  done < "$TABLE"
+fi
 # One definition, at the workflow level: a job- or step-level `env:` could
 # otherwise shadow it with a weaker pattern and this check would not see it.
-defined=$(grep -cE '^ *CLAUDE_GATE_RE:' "$AM" || true)
-if [ "$defined" != "1" ]; then
-  bad 1 "CLAUDE_GATE_RE is defined $defined time(s) in $AM — exactly one definition, in the workflow-level env"
-fi
+for var in CLAUDE_GATE_RE PROJECT_GATE_RE; do
+  defined=$(grep -cE "^ *$var:" "$AM" || true)
+  if [ "$defined" != "1" ]; then
+    bad 1 "$var is defined $defined time(s) in $AM — exactly one definition, in the workflow-level env"
+  fi
+done
 # Every job that merges a pull request (one PUT .../pulls/N/merge call each) applies the gate.
 merging=$(grep -cF 'pulls/${PR}/merge"' "$AM" || true)
-gated=$(grep -cF 'grep -i -E -c "$CLAUDE_GATE_RE"' "$AM" || true)
+gated=$(grep -cF 'grep -i -E -c -e "$CLAUDE_GATE_RE" -e "$PROJECT_GATE_RE" <<< "$PATHS"' "$AM" || true)
 if [ "$merging" = "0" ] || [ "$merging" != "$gated" ]; then
-  bad 1 "$merging job(s) merge but $gated apply the CLAUDE_GATE_RE gate — every merging job must"
+  bad 1 "$merging job(s) merge but $gated apply the CLAUDE_GATE_RE and PROJECT_GATE_RE gate — every merging job must"
 fi
 # And every one refuses a head a CI Claude session wrote, in its job `if:`.
 heads=$(grep -cE "^ +!startsWith\(github\.event\.[a-z_.]+, 'claude/issue-'\)$" "$AM" || true)
 if [ "$merging" != "$heads" ]; then
   bad 1 "$merging job(s) merge but $heads refuse claude/issue-* heads — every merging job must"
 fi
-pass 1 "CLAUDE_GATE_RE gates what is executed; the $merging merging job(s) apply it and refuse claude/issue-* heads"
+pass 1 "CLAUDE_GATE_RE and PROJECT_GATE_RE gate what is executed; the $merging merging job(s) apply them and refuse claude/issue-* heads"
 
 # ── AM-4 — marking ready never merges ───────────────────────────────────────
 # Held pull requests (green CI, hand merge pending; gated docs-only ones) are
