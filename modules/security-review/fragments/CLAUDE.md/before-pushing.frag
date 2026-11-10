@@ -1,2 +1,2 @@
-1. **`security-reviewer` agent** — a fresh-context pass on the diff, unless it is docs-only. Verify each finding; it feeds the steps below and never replaces them.
+1. **`security-reviewer` agent** — a fresh-context pass on the diff, unless it is docs-only. Verify each finding; it feeds the steps below and never replaces them. Scope of every step: a kit file still identical to its hash in `.claude/harness.json` was reviewed in the kit — read the seeds, the project's own files and the files HD-1 lists, also in a pull request that installs or updates the kit. → `docs/conventions/security-review.md`
 1. **`/project-security-review`** — this project's catalogue and invariants, and the scanner to run for the area touched.

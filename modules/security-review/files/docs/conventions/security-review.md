@@ -17,6 +17,17 @@
 - **The chain** — `security-reviewer` → `/project-security-review` → `/security-review` → `/code-review` → `/simplify` → `./scripts/security-checks.sh`. The agent's findings feed the chain; they never replace it. Skip the agent only for a docs-only diff: size is no proxy for risk.
 - **The findings policy** — CLAUDE.md § Findings policy. Every finding is fixed before merge or carries a written derogation.
 
+## Scope: what was already reviewed in the kit
+
+The harness files are privileged code, and their review belongs where they are written: in the kit, whose README says what that review covered and what it did not. Reading them again in every project that installs them costs the most and finds the least: an installation is dozens of files, nearly all of them byte-for-byte what the kit shipped.
+
+- **Out of scope**: a kit-owned file still identical to the hash `.claude/harness.json` recorded for it. The gate's advisory guard HD-1 lists the ones that are not (`docs/conventions/local-gate.md` § Kit files and their hashes).
+- **In scope**: the seeds (`"seed": true` in the manifest — `CLAUDE.md`, the review skill, the configs — once the project has filled them), every file of the project's own, and each kit file HD-1 lists.
+- **A pull request that installs or updates the kit** writes the manifest, so its hashes are part of the change and prove nothing alone. The reference is then the kit: from the checkout the files came from, `node <kit>/bin/harness.mjs update . --dry-run` must print `nothing to write` with no `left alone`, `would be updated` or `CONFLICTS` list. Whoever opens the pull request runs it, names the kit commit in the description and gives both to the reviewer. The review then covers the seeds as filled, the `modules` and `values` of the manifest, and the project's own files — not the kit's.
+- The scope applies to every pass of the chain, not only to the agent.
+
+What this does not cover: the kit itself. A project that wants more than the kit's own review reads the kit at the commit it installs, once, as it would a plugin — in the kit's checkout, not file by file in the project's pull request.
+
 ## Plugins
 
 - A marketplace is registered deliberately and a plugin is **never auto-installed**: the trust prompt is the control.
