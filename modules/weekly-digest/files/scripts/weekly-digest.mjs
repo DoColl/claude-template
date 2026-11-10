@@ -424,6 +424,15 @@ async function mapLimit(items, limit, fn) {
 const openIssues = (gh, label) =>
   gh.all(`/issues?state=open&labels=${label}&per_page=100`, (d) => d.filter((i) => !i.pull_request));
 
+// WD-1 fails on a CI trigger the digest cannot read. A scheduled run must not:
+// a digest that says less is worth more than no digest.
+function ciAlsoOrWarn() {
+  try { return loadCiAlso(); } catch (e) {
+    console.log(`::warning::${e.message} — until then, a missing CI run on a documentation path may be listed as a hand merge`);
+    return null;
+  }
+}
+
 async function collect(gh, repo, now) {
   const rules = loadRules();
   const ciFile = ciWorkflowFile(CI_WORKFLOW); // null: no workflow carries that name
@@ -447,7 +456,7 @@ async function collect(gh, repo, now) {
     })),
     mainCi,
     ...rules,
-    ciAlso: loadCiAlso(),
+    ciAlso: ciAlsoOrWarn(),
     hasCi: ciFile !== null,
   };
 }
