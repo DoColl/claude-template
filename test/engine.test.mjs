@@ -196,6 +196,29 @@ test("guard numbers are unique across modules", () => {
   }
 });
 
+// The documentation set is skipped by CI and merged at once by auto-merge: written in four places, it must be
+// one set. And what the CI skeleton takes back after skipping it must be held by the merge gate — a path
+// re-included but not held would be merged, as documentation, while the CI run it started is in flight.
+test("the docs paths agree across the shipped workflows, and CI re-includes only what the merge gate holds", () => {
+  const list = (text, re) => { const m = re.exec(text); assert.ok(m, `${re} not found`); return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]); };
+  const ci = read(kit.modules.get("ci-workflow").dir, "files/.github/workflows/ci.yml");
+  const security = read(kit.modules.get("ci-security").dir, "files/.github/workflows/security.yml");
+  const autoMerge = read(kit.modules.get("auto-merge").dir, "files/.github/workflows/auto-merge.yml");
+  const docs = ["docs/**", "**.md", "LICENSE", ".gitignore"];
+  assert.deepEqual(list(ci, /\n  push:\n(?:.*\n)*?    paths-ignore: \[(.*)\]\n/), docs, "ci.yml, push");
+  const pr = list(ci, /\n  pull_request:\n(?:    .*\n)*?    paths:\n((?:      - .*\n)+)/);
+  assert.equal(pr[0], "**", "ci.yml, pull_request: a paths list needs a positive pattern first");
+  const lastExclusion = pr.findLastIndex((p) => p.startsWith("!"));
+  assert.deepEqual(pr.slice(1, lastExclusion + 1), docs.map((p) => `!${p}`), "ci.yml, pull_request: the exclusions, in one run");
+  assert.deepEqual(list(security, /\n  push:\n(?:.*\n)*?    paths:\n((?:      - .*\n)+)/), docs, "security.yml, push");
+  assert.deepEqual(list(autoMerge, /\n  pull_request:\n(?:.*\n)*?    paths:\n((?:      - .*\n)+)/), docs, "auto-merge.yml, pull_request");
+  assert.ok(autoMerge.includes("grep -E -v -c '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)'"), "auto-merge.yml, NON_DOCS");
+  const gate = new RegExp(/^  CLAUDE_GATE_RE: '(.*)'$/m.exec(autoMerge)[1], "i");
+  const back = pr.slice(lastExclusion + 1);
+  assert.deepEqual(back, [".claude/**", "**/.claude/**", "CLAUDE.md", "**/CLAUDE.md"], "ci.yml, pull_request: the instruction files come back after the exclusions");
+  for (const p of back) assert.match(p.replaceAll("**/", "sub/").replaceAll("**", "agents/x.md"), gate, `${p} is re-included by CI, so the merge gate must hold it`);
+});
+
 // An older Node takes `node --test <directory>` for a module to run and fails; a newer one searches the
 // directory. Written on the newer, it breaks on a runner: name the files, everywhere.
 test("node --test is always given test files, never a directory", () => {

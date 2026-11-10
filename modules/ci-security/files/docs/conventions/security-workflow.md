@@ -24,7 +24,7 @@ The dependency audit that blocks is not in this workflow: it is a guard of the g
 
 ### Wiring into CI
 
-The kit ships no CI workflow — yours depends on the stack. Call `security.yml` as the first job and make the others wait for it, so that "CI is green" includes the enforcing tier:
+This module ships no CI workflow: the jobs depend on the stack. The kit's `ci-workflow` module installs the file below as `.github/workflows/ci.yml`, a skeleton that is yours from then on; without it, write the call into your own workflow. Either way, call `security.yml` as the first job and make the others wait for it, so that "CI is green" includes the enforcing tier:
 
 ```yaml
 name: CI
@@ -35,7 +35,18 @@ on:
     paths-ignore: ['docs/**', '**.md', 'LICENSE', '.gitignore']
   pull_request:
     branches: [__HARNESS_DEFAULT_BRANCH__]
-    paths-ignore: ['docs/**', '**.md', 'LICENSE', '.gitignore']
+    # The same set, as `paths` with negations: `paths-ignore` cannot take
+    # anything back, and the last four lines must.
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!**.md'
+      - '!LICENSE'
+      - '!.gitignore'
+      - '.claude/**'
+      - '**/.claude/**'
+      - 'CLAUDE.md'
+      - '**/CLAUDE.md'
 
 permissions: {}
 
@@ -54,7 +65,8 @@ jobs:
     # … the project's own jobs
 ```
 
-- The `paths-ignore` list and the `push.paths` list of `security.yml` mirror each other: a docs-only push skips CI and is scanned by the standalone trigger; a push touching code is scanned through the call. If your CI does not skip docs-only pushes, remove the `push` trigger from `security.yml`, or both will scan them.
+- The `paths-ignore` list of `push` and the `push.paths` list of `security.yml` mirror each other: a docs-only push skips CI and is scanned by the standalone trigger; a push touching code is scanned through the call. If your CI does not skip docs-only pushes, remove the `push` trigger from `security.yml`, or both will scan them.
+- **Pull requests have no such second trigger**, so the `pull_request` filter must not skip the Claude instruction files with the rest of the Markdown. `CLAUDE.md` and the agent definitions under `.claude/` end in `.md`, and the gate has checks made for them (the `CLAUDE.md` budget and pointers, the hook line of each read-only agent where those are installed): with a plain `paths-ignore: ['**.md']`, a pull request that only edits them never runs the gate. Hence `paths` with `!` exclusions followed by the re-inclusions; a later pattern overrides an earlier one. The filter is written from GitHub's documented rules and has not been observed on a run of this kit: check it once, with a pull request that only touches `CLAUDE.md`.
 - A called workflow cannot hold more permissions than the calling job grants. A job of `security.yml` that asked for more than `contents: read` would fail the whole CI run at startup.
 - Until a workflow calls it, the enforcing job does not run on pull requests. The `30-github-actions` guard prints a note while that is the case.
 - Do not rename the workflow (`name: Security`) without changing the `if:` of the advisory jobs.

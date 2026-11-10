@@ -98,7 +98,8 @@ A session still working on a merged branch is unaffected: a push before the clea
 ## Setting it up
 
 - **The CI workflow.** A workflow named `__HARNESS_CI_WORKFLOW__` must exist and run on `pull_request`; until it does, only docs-only pull requests are merged (the guard notes it).
-- **The docs paths live in three places that must agree:** `on.pull_request.paths` in `auto-merge.yml`, the `NON_DOCS` pattern in `promote-docs`, and the CI workflow's `paths-ignore` on both `push` and `pull_request`. If CI does not ignore them, a docs-only pull request is still merged at once, while its CI run is in flight.
+- **The docs paths live in three places that must agree:** `on.pull_request.paths` in `auto-merge.yml`, the `NON_DOCS` pattern in `promote-docs`, and what the CI workflow skips on both `push` and `pull_request` (a `paths-ignore` list, or `paths` with `!` exclusions). If CI does not skip them, a docs-only pull request is still merged at once, while its CI run is in flight.
+- **CI may take instruction files back, and nothing else.** A CI workflow that skips `**.md` also skips `CLAUDE.md` and the agent definitions, so the gate never runs on a pull request that only edits them. Its `pull_request` filter may therefore re-include paths after the exclusions (`.claude/**`, `CLAUDE.md` at any depth). Every re-included path must be one `CLAUDE_GATE_RE` holds: `promote-docs` merges a docs-only pull request without waiting, so a re-included path it does not hold would be merged while the run CI just started is still in flight. For a held path there is no race — both jobs refuse it, and the CI run is there for whoever merges by hand.
 - **Three decisions are left as to-do comments in the workflow:** the paths that are executed (`CLAUDE_GATE_RE`), where a Dependabot major may go through (`MAJOR_HOLD_RE`), and whether something must be dispatched after a merge.
 - **Forks are out of scope by design**: both jobs act on branches of this repository only.
 

@@ -1,0 +1,17 @@
+{
+  "id": "ci-workflow",
+  "title": "A minimal CI workflow that calls the security gate",
+  "summary": "A seed .github/workflows/ci.yml whose first and only job calls security.yml, so the gate runs on every pull request — including one that only touches Claude instruction files. The project adds its build and test jobs behind it.",
+  "phase": "first-ci",
+  "order": 31,
+  "requires": ["core", "ci-security"],
+  "placeholders": {
+    "CI_WORKFLOW": { "prompt": "Name of the CI workflow that must be green before a merge (its `name:`)", "default": "CI", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}" }
+  },
+  "seed": [".github/workflows/ci.yml"],
+  "postInstall": [
+    "Skip this module if the project already has a CI workflow under another file name: two workflows with the same `name:` confuse whatever waits for it. Add the call to security.yml to yours instead (docs/conventions/security-workflow.md § Wiring).",
+    "Add the project's jobs (lint, tests, build) to .github/workflows/ci.yml, each with `needs: [security]`. With no code yet, leave the TODO(harness) block as it is: the gate alone is a valid CI.",
+    "This workflow has not run in your repository yet: open one pull request that only touches CLAUDE.md and check that the CI run starts."
+  ]
+}

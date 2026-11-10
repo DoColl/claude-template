@@ -1,0 +1,52 @@
+name: __HARNESS_CI_WORKFLOW__
+
+# The project's CI (docs/conventions/ci-workflow.md). As installed it has one
+# job: the enforcing tier of security.yml (gitleaks, then the gate). Add the
+# project's jobs below it, each waiting for it, so that "CI is green" always
+# includes the gate.
+#
+# This file is yours: the kit never overwrites it.
+on:
+  push:
+    branches: [__HARNESS_DEFAULT_BRANCH__]
+    # Documentation-only pushes are scanned by security.yml's own `push`
+    # trigger, whose `paths` mirror this list.
+    paths-ignore: ['docs/**', '**.md', 'LICENSE', '.gitignore']
+  pull_request:
+    branches: [__HARNESS_DEFAULT_BRANCH__]
+    # The same documentation set is skipped here, written as `paths` with
+    # negations because `paths-ignore` cannot take anything back. The last
+    # lines take the Claude instruction files back: they are Markdown, but the
+    # gate has checks on them (the CLAUDE.md budget, the agents' hook lines),
+    # and nothing else runs it on a pull request that touches only them.
+    # Order matters: a later pattern overrides an earlier one. Re-include only
+    # paths that are never merged unattended (auto-merge-policy.md, if that
+    # module is installed).
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!**.md'
+      - '!LICENSE'
+      - '!.gitignore'
+      - '.claude/**'
+      - '**/.claude/**'
+      - 'CLAUDE.md'
+      - '**/CLAUDE.md'
+
+permissions: {}
+
+jobs:
+  security:
+    name: Security
+    # `$/` is this repository at the caller's commit. `./` means the same to
+    # GitHub, but zizmor reports it (self-repository) and GA-2 would fail.
+    uses: $/.github/workflows/security.yml
+    # The ceiling for the called workflow: its jobs can only narrow it.
+    permissions:
+      contents: read
+
+  # TODO(harness): the project's own jobs (lint, tests, build). Each one
+  # declares `needs: [security]`, `runs-on`, `timeout-minutes` and its own
+  # minimal `permissions:`; its checkout is pinned to the commit SHA
+  # security.yml uses and sets `persist-credentials: false`
+  # (docs/conventions/github-actions-rules.md).

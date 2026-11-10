@@ -53,6 +53,7 @@ Running `init` again is safe: files already in place are left alone.
 | `agents` | day 1 | `implementer`, `verifier`, `doc-sync` and `reviewer` agents, and the tested Bash allowlist that confines the read-only ones |
 | `security-review` | day 1 | `security-reviewer` agent (fresh context, read-only), the project review skill, and a check that Claude Code plugins stay at the commit that was reviewed |
 | `ci-security` | first CI | `security.yml` in two tiers, GitHub Actions rules with zizmor at zero, pinned scanners, a Dependabot skeleton |
+| `ci-workflow` | first CI, when the project has no CI workflow yet | a seed `ci.yml` whose first job calls `security.yml`, and whose pull-request filter keeps the Claude instruction files in |
 | `node-audit` | first CI, Node projects | an `npm audit` gate with per-advisory derogations |
 | `auto-merge` | pull-request flow | unattended squash-merge on green CI, with the gates that hold instruction files, CI-session branches and risky bumps for a human |
 | `weekly-digest` | pull-request flow | one issue a week listing what waits on a human |
@@ -71,6 +72,7 @@ Each module's convention page says where its piece comes from and what has actua
 | Bash allowlist of the agents | The decision logic comes from production. This kit's variant reads the verification commands from a config file and carries a fix the review below produced; it is covered by its test table, and must be checked live once in your project (`docs/conventions/agent-bash-guard.md` § Live check). |
 | Agents, review skill, plugin pins | Adapted from production; the wording is new where project specifics were removed. |
 | `security.yml`, zizmor rules, `npm audit` gate | Ported from production workflows. This generic variant has not run on GitHub yet. |
+| `ci-workflow` | Never run on GitHub as shipped. The call to `security.yml` is the one its convention page documents; the pull-request path filter with re-inclusions is written from GitHub's documented rules, not from an observed run. |
 | `auto-merge` | The original runs in production. This generic variant has not: its first pull requests are its test. |
 | `weekly-digest` | Unit-tested. Never run live, in the project it comes from either. |
 | `claude-ci` | Not exercised end to end; only its push hook was replayed locally, against the push wrapper of the pinned action. For private repositories only. |
@@ -94,7 +96,7 @@ SECURITY_REVIEW.md                 the findings catalogue (yours)
   harness.json                     what the installer did
 .githooks/                         pre-commit, pre-push
 .github/
-  workflows/                       security.yml, auto-merge.yml, weekly-digest.yml, claude.yml
+  workflows/                       ci.yml (yours), security.yml, auto-merge.yml, weekly-digest.yml, claude.yml
   dependabot.yml, zizmor.yml
 docs/
   conventions/                     one page per rule: the detail behind CLAUDE.md

@@ -7,7 +7,7 @@
   "requires": ["core"],
   "seed": [".github/dependabot.yml", ".github/zizmor.yml"],
   "postInstall": [
-    "Call security.yml from your CI workflow as its first job, so a red gate turns CI red (snippet: docs/conventions/security-workflow.md § Wiring). Until then its enforcing job only runs on the weekly schedule, on manual dispatch and on docs-only pushes.",
+    "Call security.yml from your CI workflow as its first job, so a red gate turns CI red: the ci-workflow module installs a skeleton that does, or add the call to your own (snippet: docs/conventions/security-workflow.md § Wiring). Until then its enforcing job only runs on the weekly schedule, on manual dispatch and on docs-only pushes.",
     "Add the project's package ecosystems to .github/dependabot.yml (the TODO(harness) block shows the shape).",
     "Run ./scripts/security-checks.sh once with network access: GA-2 fetches the pinned zizmor. Fix what it reports on your existing workflows, or record the triage in .github/zizmor.yml.",
     "Scanner pins (gitleaks, Trivy, Syft, Semgrep, zizmor) are bumped by hand: docs/conventions/security-workflow.md § Pinned scanners. Dependabot does not see them."
