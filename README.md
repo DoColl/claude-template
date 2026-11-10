@@ -134,7 +134,7 @@ Most of the kit is not Claude configuration at all: scripts, git hooks, workflow
 ## Working on the kit
 
 ```bash
-node --test test/     # unit tests, static rules on every module, end-to-end installs
+node --test test/*.test.mjs     # unit tests, static rules on every module, end-to-end installs
 ```
 
 `CLAUDE.md` at the root of this repository holds the rules for changing the kit; `docs/module-authoring.md` the contract for modules.

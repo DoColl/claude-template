@@ -90,7 +90,7 @@ A module that enforces something ships a guard: `files/scripts/guards.d/NN-<name
 - A freshly installed module passes its own guard, in a project that contains only that module and what it requires.
 - Numbers: `10` core, `20` agents, `25` security-review, `30` ci-security, `35` node-audit, `40` auto-merge, `42` weekly-digest, `44` claude-ci, `46` openspec, `50` the project's own, `90` advisory.
 
-Tests a guard runs (`node --test …`) ship with the module, next to the code they test.
+Tests a guard runs ship with the module, next to the code they test. Always name the test file (`node --test scripts/x.test.mjs`), never a directory: an older Node takes a directory argument for a module to run and fails.
 
 ## Workflows
 
@@ -108,7 +108,7 @@ Names of people, organisations, products or infrastructure from the project a pi
 ## Checking a module
 
 ```bash
-node --test test/                                   # manifests, placeholders, slots, end-to-end installs
+node --test test/*.test.mjs                                   # manifests, placeholders, slots, end-to-end installs
 node bin/harness.mjs init /tmp/try --modules <id>   # then, in /tmp/try:
 git init -q && git add -A && ./scripts/security-checks.sh --offline
 ```

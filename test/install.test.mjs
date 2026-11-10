@@ -1,4 +1,4 @@
-// node --test test/ — end-to-end: install modules into a scratch project, run its gate, add, update, conflict.
+// node --test test/*.test.mjs — end-to-end: install modules into a scratch project, run its gate, add, update, conflict.
 // Needs git and bash. The gate runs offline, and with CI unset so a guard whose tool is missing skips.
 import { test } from "node:test";
 import assert from "node:assert/strict";

@@ -26,13 +26,23 @@ jobs:
         with:
           persist-credentials: false
 
+      # The test files are named, never the directory: an older Node takes a
+      # bare directory argument for a module to run and fails.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: 20
           package-manager-cache: false
 
-      - name: Installer tests (unit, static rules, end-to-end installs)
-        run: node --test test/
+      - name: Installer tests on the oldest supported Node (20)
+        run: node --test test/*.test.mjs
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Installer tests on a current Node (24)
+        run: node --test test/*.test.mjs
 
       - name: Render every module into a scratch project
         run: node bin/harness.mjs init "$RUNNER_TEMP/rendered" --all

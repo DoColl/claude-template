@@ -1,4 +1,4 @@
-// node --test test/ — the installer's pure parts and the static rules every module must satisfy
+// node --test test/*.test.mjs — the installer's pure parts and the static rules every module must satisfy
 // (docs/module-authoring.md). The end-to-end installs are in install.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -179,6 +179,24 @@ test("guard numbers are unique across modules", () => {
     assert.ok(!seen.has(n) || seen.get(n) === id, `guard number ${n} is used by ${seen.get(n)} and ${id}`);
     seen.set(n, id);
   }
+});
+
+// An older Node takes `node --test <directory>` for a module to run and fails; a newer one searches the
+// directory. Written on the newer, it breaks on a runner: name the files, everywhere.
+test("node --test is always given test files, never a directory", () => {
+  const kitFiles = ["README.md", "CLAUDE.md", "package.json", "docs/module-authoring.md", ...walk(path.join(kit.root, ".github")).map((f) => `.github/${f}`), ...walk(path.join(kit.root, "test")).map((f) => `test/${f}`), ...walk(path.join(kit.root, "skills")).map((f) => `skills/${f}`)];
+  const files = [...kitFiles.map((f) => path.join(kit.root, f)), ...[...kit.modules.values()].flatMap(textFilesOf)];
+  let seen = 0;
+  for (const file of files) {
+    if (file.endsWith("agent-bash-guard.test.mjs")) continue; // its table lists the directory forms on purpose, as commands to block
+    if (file.endsWith(path.join("test", "engine.test.mjs"))) continue; // this explanation
+    for (const m of read(file).matchAll(/node --test((?: +[^\s`"'|&;)#]+)+)/g)) {
+      const first = m[1].trim().split(/ +/).find((a) => !a.startsWith("-"));
+      assert.match(first ?? "", /\.(mjs|cjs|js)$/, `${path.relative(kit.root, file)}: "node --test ${first}" does not name a test file`);
+      seen++;
+    }
+  }
+  assert.ok(seen >= 5, "the scan found the commands it is meant to check");
 });
 
 test("every post-install line and summary is one line of plain text", () => {

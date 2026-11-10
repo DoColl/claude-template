@@ -14,7 +14,7 @@ Guidance for Claude Code when working **on the kit itself**. (The `CLAUDE.md` a 
 ## Commands
 
 ```bash
-node --test test/                     # everything; needs git and bash, no network
+node --test test/*.test.mjs                     # everything; needs git and bash, no network
 node bin/harness.mjs list             # the modules
 node bin/harness.mjs init /tmp/try --modules <id>   # then, in /tmp/try: git init -q && git add -A && ./scripts/security-checks.sh --offline
 pipx run --spec 'zizmor==1.31.1' zizmor --offline <rendered project>/.github/workflows/
@@ -34,4 +34,4 @@ pipx run --spec 'zizmor==1.31.1' zizmor --offline <rendered project>/.github/wor
 
 ## Before pushing
 
-`node --test test/`, then zizmor on a rendered project and on `.github/workflows/`. A change to a guard or a workflow is also tried by hand in a scratch project: break the thing the guard protects and watch it go red.
+`node --test test/*.test.mjs`, then zizmor on a rendered project and on `.github/workflows/`. A change to a guard or a workflow is also tried by hand in a scratch project: break the thing the guard protects and watch it go red.
