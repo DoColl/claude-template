@@ -53,10 +53,29 @@ The installer prints "Next steps" and counts the `TODO(harness)` markers; `statu
 - `.claude/hooks/agent-bash-guard.config.json` (agents module) — the exact verification commands: tests, build, type-check. Nothing that writes, installs or reaches the network.
 - `.claude/skills/project-security-review/SKILL.md` (security-review module) — the same sensitive areas, and the invariants.
 
-Then stage the installation (`git add -A` — staging is not committing) and run the gate: `./scripts/security-checks.sh --offline` must pass. Several guards read what git tracks; run before the first `git add`, they report notes instead of checking.
+**Stay inside the gaps.** This session fills `TODO(harness)` markers. It does not write an ADR, a convention page, a runbook, a guard or a finding unless the user asks for one: those record decisions and incidents the project has not had yet, and each one written now is a file someone must review.
 
-## 6. Hand over
+**A gap may stay open.** A `TODO(harness)` left in place is a correct state — the advisory guard counts them and never fails. In a project with no code yet, fill the project overview, the out-of-scope list and whatever the user can already state, and leave these as they are:
+
+- "Commands" in `CLAUDE.md`, and the verification commands of `.claude/hooks/agent-bash-guard.config.json` — there is nothing to build or test;
+- "Environment variables", "Architecture" beyond what is decided, and "Conventions for new code" — no code shows them yet;
+- "Version history" — nothing has shipped;
+- the invariants of the review skill, the first row of `SECURITY_REVIEW.md`, `scripts/guards.d/50-project.sh` — no finding yet;
+- the jobs of `.github/workflows/ci.yml` and the ecosystems of `.github/dependabot.yml` — no stack yet.
+
+Tell the user which gaps you left and why, in one list. Do not fill a gap with a guess to make the count go down.
+
+## 6. Verify once, review once
+
+The installer's output is already tested in the kit; what is new is what this session wrote. One light pass, then one review:
+
+1. **Verify, once.** `git add -A` (staging is not committing), then `./scripts/security-checks.sh --offline`: it must pass. Several guards read what git tracks; run before the first `git add`, they report notes instead of checking. Re-read your own edits to the seeds once. No sub-agent for this, and no second pass after a clean first one.
+2. **Say what was not edited.** `node <kit>/bin/harness.mjs update . --dry-run` must print `nothing to write`, with no `left alone`, `would be updated` or `CONFLICTS` list: every kit file is then what the kit ships. Note the kit's commit (`git -C <kit> rev-parse HEAD`). Both go in the pull request description.
+3. **Review, once, at the end.** Follow "Before pushing" of the installed `CLAUDE.md` for the files this session wrote — the seeds as filled and the project's own files — not for the kit files, which were reviewed in the kit (`docs/conventions/security-review.md` § Scope, when that module is installed). Filled seeds are tier 1 when they are prose and tier 2 when they change what runs or what a session may do (the verification commands, a workflow job). Run that tier's passes one time, when everything is filled; give a reviewing agent the kit commit and the result of step 2 in its brief. Do not run the chain after each file, and do not re-run it after fixing a finding: re-run the gate.
+
+## 7. Hand over
 
 - Do not commit unless the user asks. Instruction files (`CLAUDE.md`, `.claude/**`, `.githooks/**`) deserve a human read before they are committed: every session executes them.
 - Tell the user to opt in to the git hooks (`git config core.hooksPath .githooks`) if that module was installed, and to restart open Claude Code sessions so new agents and skills are picked up.
 - Repeat the module-specific warnings the installer printed (a workflow that has never run live, a module meant for private repositories).
+- List the gaps left open on purpose.
