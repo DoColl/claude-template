@@ -1,0 +1,577 @@
+# Auto-merge a pull request once the CI workflow signs off on it.
+#
+# Flow: a pull request is opened, draft or not → the CI workflow runs as the
+# "review" → on success the draft is lifted and the pull request is
+# squash-merged, pinned to the commit CI validated → its head branch is
+# deleted. Policy, reasons and limits: docs/conventions/auto-merge-policy.md.
+#
+# The merge is a REST call (`PUT /repos/.../pulls/N/merge`) rather than
+# `gh pr merge`, because `gh pr merge` shells out to a local `git` and this
+# workflow never checks the repository out — the API call is server-side and
+# needs no local git state.
+#
+# Why not native GitHub auto-merge (`gh pr merge --auto`)? It needs the
+# "Allow auto-merge" repository setting, which GitHub does not offer on every
+# plan for private repositories. The workflow_run trigger already gates on
+# `conclusion == success`, so by the time the merge step runs CI is green — a
+# synchronous merge has no race window worth waiting for native auto-merge for.
+#
+# After the merge: the merge below uses GITHUB_TOKEN, and GitHub does NOT emit
+# a `push` event for refs updated by GITHUB_TOKEN (its recursive-run guard).
+# Nothing that triggers on a push to the default branch — a deploy, a
+# post-merge test run — fires after an auto-merge. This workflow dispatches
+# nothing by default: docs/conventions/auto-merge-policy.md § After the merge
+# says how to add a dispatch (workflow_dispatch is the documented exception)
+# and what must come with it.
+#
+# Head-branch cleanup: GitHub's "Automatically delete head branches" setting
+# was observed not to apply to merges made with GITHUB_TOKEN, so each job
+# deletes the head ref itself after a successful merge — `contents: write`
+# already covers it.
+#
+# Never merged unattended, by either job: a pull request touching a path
+# CLAUDE_GATE_RE matches (what Claude Code or git EXECUTES), or coming from a
+# claude/issue-* head (what a CI Claude session wrote).
+
+name: Auto-merge after CI
+
+on:
+  # Code pull requests: react to the CI workflow signing off the diff.
+  # workflow_run runs with this repository's token on a run a pull request
+  # started, which is why zizmor flags it. Accepted by design: the jobs act
+  # only on a green run whose event is pull_request and whose head is in this
+  # repository, they check nothing out and execute nothing the pull request
+  # carries.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["__HARNESS_CI_WORKFLOW__"]
+    types: [completed]
+  # Docs pull requests: a CI workflow that ignores docs paths never runs on
+  # them, so workflow_run never fires. Use a direct pull_request trigger
+  # constrained to the same paths, since the docs gate has no CI to wait for.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+
+# Least privilege: permissions are granted per job below.
+permissions: {}
+
+# gh normally finds the target repository from the local git remote. This
+# workflow does not check the repository out (the merge is a pure API call),
+# so gh would fail with "not a git repository". GH_REPO sidesteps the lookup
+# for every `gh` command below.
+env:
+  GH_REPO: ${{ github.repository }}
+  # Paths that are EXECUTED by Claude Code or git rather than read (ERE, matched
+  # case-insensitively per path segment): any `.claude/` directory at any depth
+  # (and a `.claude` symlink entry), CLAUDE.md / CLAUDE.local.md anywhere, the
+  # git hooks directory, a project MCP config at any depth, the other paths a
+  # Claude CI action treats as configuration read from the working directory
+  # (`.claude.json`, `.ripgreprc`, `.gitmodules`, `.husky/`), what runs Claude
+  # in CI or enforces all this (those workflows, this one, their guards), and
+  # the record of which Claude Code plugin commits were reviewed.
+  # Single source for both jobs; AM-1 (scripts/guards.d/40-auto-merge.sh) tests
+  # the pattern on a table of paths and asserts both jobs use it.
+  # TODO(harness): review this list once, add whatever else your tooling
+  # executes (another agent's instruction file, a page of install commands that
+  # sessions follow, another hooks directory), then delete this three-line note.
+  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)claude(\.local)?\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^scripts/guards\.d/[0-9]+-(auto-merge|claude-ci)[^/]*\.sh$|^scripts/reviewed-plugins\.json$'
+  # Where a Dependabot major is held even when it is an indirect dependency's
+  # security update (ERE on the changed paths; `.github/` is always held).
+  # `.` matches every path: as shipped, every Dependabot major waits for a hand
+  # merge. Narrow it to the directories whose dependencies the pull-request CI
+  # does not build or test (a mobile app, a production image), or to `^$` when
+  # CI exercises everything, to let such a fix through unattended elsewhere.
+  # An empty or unusable pattern holds everything.
+  # TODO(harness): decide where a major may go through, then delete this line.
+  MAJOR_HOLD_RE: '.'
+
+jobs:
+  promote-from-ci:
+    # workflow_run path: only act on green CI runs that originated from a
+    # pull_request inside this same repository (no forks; workflow_run has
+    # elevated permissions otherwise). A claude/issue-* head is a branch a CI
+    # Claude session wrote, and opening its pull request is not reading it:
+    # never unattended.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      !startsWith(github.event.workflow_run.head_branch, 'claude/issue-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pull-requests: write # mark ready, merge
+      contents: write # merge, delete the head branch
+    steps:
+      - name: Find PR for head_sha
+        id: find-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          # `sha:` matches any open PR that CONTAINS the commit (a stacked PR,
+          # a sibling): keep only the one whose head IS the CI-validated SHA.
+          PR=$(gh pr list --search "sha:$HEAD_SHA" --state open --json number,headRefOid \
+                 --jq '[.[] | select(.headRefOid == $ENV.HEAD_SHA)][0].number // empty')
+          if [ -z "$PR" ]; then
+            echo "No open PR found for SHA $HEAD_SHA — skipping"
+            exit 0
+          fi
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
+
+      # Dependabot exception to the "every green PR merges" rule.
+      #
+      # A Dependabot PR is not written by a maintainer, and nobody reads it
+      # before it lands. Patch AND minor bumps go through unattended: reading a
+      # minor's diff by hand was never the control, the cooldown in
+      # dependabot.yml and the CI are. Every commit must be Dependabot's;
+      # dependabot_verdict then pairs each trailer entry, by name, with its
+      # `from X to Y` line and holds a major (trailer or pair; below 1.0 a
+      # minor, below 0.1 a patch), a move to a pre-release, an unreadable
+      # version, a GitHub Action minor (it runs with the workflow's token and
+      # secrets), or an entry without its pair. One exception to "a major
+      # holds": an entry typed `dependency-type: indirect` is a security update
+      # — version updates cover direct dependencies only, AM-5 pins
+      # dependabot.yml to that — and its major can be the only fix, so it goes
+      # through unless a changed path matches MAJOR_HOLD_RE (every path, as
+      # shipped). Cooldown keeps fresh versions out of version updates;
+      # security updates skip it upstream, a known flaw wins that one.
+      # Non-Dependabot PRs are unaffected: they merge on green.
+      #
+      # Why not dependabot/fetch-metadata? It resolves the PR from the event
+      # context and takes no PR number as input, and workflow_run carries no
+      # pull_request payload. The merge has to stay on workflow_run (it must
+      # wait for CI), so this step reads the same `updated-dependencies`
+      # trailer that action parses out of Dependabot's commit message.
+      #
+      # Second exception: Claude instruction files (any `.claude/` directory,
+      # `CLAUDE.md`, `CLAUDE.local.md` — Claude Code walks up from its working
+      # directory, so a nested one counts too) steer every session that loads
+      # them. A green CI proves nothing about them, so they never merge
+      # unattended — the PR stays open for a hand merge.
+      - name: Merge gate (Claude config, Dependabot breaking bumps and Action minors)
+        id: gate
+        if: steps.find-pr.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.find-pr.outputs.pr }}
+        run: |
+          set -euo pipefail
+          # File listing through REST + --paginate: `gh pr view --json files` stops
+          # at 100 files. Each row carries `previous_filename` too, so a rename OUT
+          # of a gated path (CLAUDE.md → docs/legacy.md) is still seen. The count
+          # is checked against the PR's changed_files: any gap fails closed.
+          ROWS=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" \
+                   --jq '.[] | [.filename, (.previous_filename // "")] | @tsv')
+          IFS=$'\t' read -r CHANGED AUTHOR <<< "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.changed_files, .user.login] | @tsv')"
+          LISTED=$(grep -c . <<< "$ROWS" || true)
+          if [ "$LISTED" != "$CHANGED" ]; then
+            echo "::notice::PR #${PR}: file listing incomplete (${LISTED} of ${CHANGED}) — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
+          # Per path segment and case-folded: on a case-insensitive file system
+          # `.Claude/agents/x.md` lands in `.claude/agents/`; `(/|$)` also
+          # catches a `.claude` symlink entry. Pattern: CLAUDE_GATE_RE (workflow env).
+          CLAUDE_FILES=$(grep -i -E -c "$CLAUDE_GATE_RE" <<< "$PATHS" || true)
+          if [ "$CLAUDE_FILES" != "0" ]; then
+            echo "::notice::PR #${PR} touches ${CLAUDE_FILES} file(s) matched by CLAUDE_GATE_RE — never merged unattended, merge it by hand."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # AUTHOR came with changed_files above (.user.login).
+          # Deliberately not a `case` statement: `dependabot[bot]` would be read
+          # as a glob character class ([bot] = one char among b, o, t).
+          if [ "$AUTHOR" != "dependabot[bot]" ] \
+             && [ "$AUTHOR" != "app/dependabot" ] \
+             && [ "$AUTHOR" != "dependabot" ]; then
+            echo "merge=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # >>> dependabot_verdict (AM-5 extracts this block and runs it on
+          # Dependabot commit bodies). stdin: the PR's commit messages; $1: its
+          # changed paths. Prints `merge`, or `hold: <reason>`; anything else
+          # holds too.
+          dependabot_verdict() {
+            local msgs entries names direct pairs name from to level held
+            msgs=$(cat)
+            # One `name dependency-type update-type` per trailer entry ("-" if
+            # absent), read only inside the `updated-dependencies:` ... `...` block.
+            entries=$(awk '
+              /^updated-dependencies:$/ { in_t = 1; next }
+              /^\.\.\.$/               { in_t = 0 }
+              !in_t { next }
+              /^- / { if (n != "") print n, t, u
+                      n = ""; t = "-"; u = "-" }
+              /^- dependency-name: / { n = $3; gsub(/"/, "", n); next }
+              /^  dependency-type: / { t = $2 }
+              /^  update-type: /     { u = $2 }
+              END { if (n != "") print n, t, u }' <<< "$msgs")
+            # Version updates cover direct dependencies only (AM-5 pins
+            # dependabot.yml to that), so an indirect entry is a security
+            # update: its major is the only route to the fix, and may go through.
+            # By name: a package with any entry not typed indirect (direct in
+            # one manifest, indirect in another, or untyped) counts as direct.
+            direct=$(awk '$2 != "indirect" { print $1 }' <<< "$entries")
+            while read -r name; do
+              if [ -n "$name" ] && grep -qxF -- "$name" <<< "$direct"; then
+                echo "hold: the trailer says semver-major for ${name}"; return
+              fi
+            done <<< "$(awk '$3 == "version-update:semver-major" { print $1 }' <<< "$entries")"
+            # One `name from to` per bump line: "Bumps [pkg](url) from A to B."
+            # (most ecosystems), "Bumps pkg from A to B." (docker), "Updates
+            # `pkg` from A to B" (group).
+            pairs=$(grep -E '^(Bumps|Updates) ' <<< "$msgs" | sed -E 's/\.$//' | sed -nE \
+                      -e 's/^Bumps \[([^]]+)\]\([^)]*\) from ([^ ]+) to ([^ ]+)$/\1 \2 \3/p' \
+                      -e 's/^Bumps ([^ []+) from ([^ ]+) to ([^ ]+)$/\1 \2 \3/p' \
+                      -e 's/^Updates `([^`]+)` from ([^ ]+) to ([^ ]+)$/\1 \2 \3/p' || true)
+            # Every trailer entry, by name, must have its pair: a bump written in
+            # another shape would otherwise go unchecked.
+            names=$(cut -d' ' -f1 <<< "$entries" | grep . | sort -u || true)
+            if [ -z "$names" ] || [ "$(cut -d' ' -f1 <<< "$pairs" | sort -u)" != "$names" ]; then
+              echo "hold: the version pairs do not match the trailer entries"; return
+            fi
+            while read -r name from to; do
+              level=$(bump_level "$from" "$to")
+              case "$level" in
+                patch) ;;
+                # An Action runs with the workflow's token and secrets.
+                minor) if grep -q '^\.github/' <<< "$1"; then
+                         echo "hold: minor bump of the GitHub Action ${name}"; return
+                       fi ;;
+                # A direct dependency always holds. An indirect one holds where
+                # MAJOR_HOLD_RE says the PR's CI does not exercise what ships,
+                # and under .github/. Only "no path matched" (1) lets it
+                # through: a match (0), an unusable pattern (2) or an empty
+                # path list holds.
+                major) held=0
+                       if [ -n "$1" ]; then grep -qE "^\.github/|${MAJOR_HOLD_RE:-.}" <<< "$1" || held=$?; fi
+                       if [ "$held" != 1 ] || grep -qxF -- "$name" <<< "$direct"; then
+                         echo "hold: major bump of ${name}: ${from} -> ${to}"; return
+                       fi ;;
+                *) echo "hold: ${level} bump of ${name}: ${from} -> ${to}"; return ;;
+              esac
+            done <<< "$pairs"
+            echo merge
+          }
+          # patch | minor | major (a different major; below 1.0 a different
+          # minor, below 0.1 a different patch: breaking by semver) | prerelease
+          # (TO carries a suffix FROM does not) | bad (not a whole version token:
+          # a SHA, a digest, an empty field).
+          bump_level() {
+            local re='^v?([0-9]+)(\.([0-9]+))?(\.([0-9]+))?(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$' f t
+            [[ "$1" =~ $re ]] || { echo bad; return; }
+            f=("${BASH_REMATCH[1]}" "${BASH_REMATCH[3]:-0}" "${BASH_REMATCH[5]:-0}" "${BASH_REMATCH[6]}")
+            [[ "$2" =~ $re ]] || { echo bad; return; }
+            t=("${BASH_REMATCH[1]}" "${BASH_REMATCH[3]:-0}" "${BASH_REMATCH[5]:-0}" "${BASH_REMATCH[6]}")
+            if [ -n "${t[3]}" ] && [ "${t[3]}" != "${f[3]}" ]; then echo prerelease
+            elif [ "${f[0]}" != "${t[0]}" ]; then echo major
+            elif [ "${f[0]}" = 0 ] && [ "${f[1]}" != "${t[1]}" ]; then echo major
+            elif [ "${f[0]}" = 0 ] && [ "${f[1]}" = 0 ] && [ "${f[2]}" != "${t[2]}" ]; then echo major
+            elif [ "${f[1]}" != "${t[1]}" ]; then echo minor
+            else echo patch
+            fi
+          }
+          # <<< dependabot_verdict
+
+          # Every commit must be Dependabot's: a commit pushed onto its branch
+          # would otherwise ride this exception unreviewed.
+          COMMITS=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/commits")
+          AUTHORS=$(jq -r '.[].author.login // "unknown"' <<< "$COMMITS")
+          if grep -qvxF 'dependabot[bot]' <<< "$AUTHORS"; then
+            echo "::notice::PR #${PR} (Dependabot): a commit not authored by Dependabot — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          MSGS=$(jq -r '.[].commit.message' <<< "$COMMITS")
+          VERDICT=$(dependabot_verdict "$PATHS" <<< "$MSGS")
+          if [ "$VERDICT" != merge ]; then
+            echo "::notice::PR #${PR} (Dependabot): ${VERDICT#hold: } — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::notice::PR #${PR} (Dependabot): patch/minor, or an indirect dependency's major — auto-merging."
+          echo "merge=true" >> "$GITHUB_OUTPUT"
+
+      # Lift draft once the gate has decided, and only while the head is still
+      # the one CI validated. merge=true: the merge below needs it (the API
+      # refuses drafts). merge=false (held, green CI): the PR now waits only for
+      # its hand merge, so the merge button must work — draft never pauses
+      # anything here, a held draft would only cost a click. This step never
+      # merges (AM-4).
+      - name: Mark ready (validated head only, never merges)
+        if: steps.find-pr.outputs.pr != '' && steps.gate.outputs.merge != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.find-pr.outputs.pr }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          HEAD=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+          if [ "$HEAD" != "$HEAD_SHA" ]; then
+            echo "::notice::PR #${PR}: head moved since the validated SHA — left as is, its own run decides."
+            exit 0
+          fi
+          gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."
+
+      - name: Squash-merge
+        id: merge
+        if: steps.find-pr.outputs.pr != '' && steps.gate.outputs.merge == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.find-pr.outputs.pr }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          # Server-side merge via REST API — no local git needed. Try
+          # --squash first (cleanest linear history), fall back to a merge
+          # commit if squash is disabled in the repository settings. Retry on
+          # transient errors (e.g. "Pull request is in draft state" race
+          # right after the ready step above). `sha=` pins the merge to the head CI
+          # validated (AM-6): a head pushed since gets a 409 and no merge — the
+          # next green run merges it. `merged=true` is what lets the head-branch
+          # cleanup below run: only an actual merge sets it; `sha` (the merge
+          # commit GitHub created) is there for a post-merge dispatch.
+          for attempt in 1 2 3 4 5; do
+            for method in squash merge; do
+              if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \
+                  -f merge_method="$method" -f sha="$HEAD_SHA" 2>&1); then
+                echo "$OUT"
+                echo "merged via ${method}"
+                echo "merged=true" >> "$GITHUB_OUTPUT"
+                echo "sha=$(jq -r '.sha // empty' <<< "$OUT")" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "$OUT"
+              # 409 = the head moved since this SHA: the PR is no longer ours
+              # to merge, its new head gets its own run. No retry.
+              case "$OUT" in
+                *"(HTTP 409)"*)
+                  echo "::notice::PR #${PR}: head moved since the validated SHA — leaving it to its own run."
+                  exit 0 ;;
+              esac
+            done
+            echo "attempt ${attempt}: merge failed, retrying in ${attempt}s"
+            sleep "$attempt"
+          done
+          echo "::error::Merge of #${PR} failed after 5 attempts. The PR is non-draft and can be merged manually."
+          exit 1
+
+      # Nothing is dispatched after the merge (see the header). If a deploy or
+      # a test run must follow it, the dispatch goes here, before the branch
+      # cleanup, with what docs/conventions/auto-merge-policy.md § After the
+      # merge lists.
+      # TODO(harness): decide whether this project needs a dispatch, then delete this line.
+
+      # Delete the head ref ourselves (see the header). `!cancelled()` keeps it
+      # running when a step added between the merge and here failed, since the
+      # merge did happen. Each guard below is explained once, in
+      # docs/conventions/auto-merge-policy.md § Head branch deletion.
+      - name: Delete head branch
+        if: ${{ !cancelled() && steps.merge.outputs.merged == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.find-pr.outputs.pr }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          INFO=$(gh pr view "$PR" --json headRefName,headRefOid,isCrossRepository \
+            --jq '[.headRefName, .headRefOid, .isCrossRepository] | @tsv')
+          IFS=$'\t' read -r HEAD_REF MERGED_OID CROSS_REPO <<< "$INFO"
+          if [ "$CROSS_REPO" != "false" ]; then
+            echo "PR #${PR}: head branch lives in another repository — nothing to delete here."
+            exit 0
+          fi
+          if [ "$HEAD_REF" = "$DEFAULT_BRANCH" ]; then
+            echo "::warning::PR #${PR}: head branch is the default branch — not deleting."
+            exit 0
+          fi
+          # Stacked on top of it, or opened from it: deleting would retarget
+          # or close that PR behind its author's back.
+          OPEN_ON_TOP=$(gh pr list --state open --base "$HEAD_REF" --json number --jq 'length')
+          OPEN_FROM=$(gh pr list --state open --head "$HEAD_REF" --json number --jq 'length')
+          if [ "$OPEN_ON_TOP" != "0" ] || [ "$OPEN_FROM" != "0" ]; then
+            echo "::notice::PR #${PR}: other open PR(s) still use the head branch (${OPEN_ON_TOP} on top of it, ${OPEN_FROM} from it) — keeping it."
+            exit 0
+          fi
+          if ! [[ "$HEAD_REF" =~ ^[A-Za-z0-9._/@+-]+$ ]]; then
+            echo "::warning::PR #${PR}: head branch name needs URL encoding — delete it by hand."
+            exit 0
+          fi
+          # Exact lookup first: "gone" = already deleted (Dependabot, a human)
+          # = goal reached. The REST `GET git/ref/…` would need its status
+          # line parsed to tell a 404 from an outage; a failed lookup fails.
+          CURRENT_OID=$(gh api graphql \
+            -f query='query($owner: String!, $name: String!, $ref: String!) { repository(owner: $owner, name: $name) { ref(qualifiedName: $ref) { target { oid } } } }' \
+            -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -f ref="refs/heads/${HEAD_REF}" \
+            --jq '.data.repository.ref.target.oid // "gone"') \
+            || { echo "::error::Could not look up head branch '${HEAD_REF}' of #${PR} — check it by hand."; exit 1; }
+          if [ "$CURRENT_OID" = "gone" ]; then
+            echo "${HEAD_REF} was already deleted"
+            exit 0
+          fi
+          # A commit pushed since the merge must survive.
+          if [ "$CURRENT_OID" != "$MERGED_OID" ]; then
+            echo "::warning::PR #${PR}: head branch moved since the merge (${CURRENT_OID:0:7} vs merged ${MERGED_OID:0:7}) — not deleting."
+            exit 0
+          fi
+          if gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${HEAD_REF}"; then
+            echo "deleted ${HEAD_REF}"
+            exit 0
+          fi
+          echo "::error::Could not delete head branch '${HEAD_REF}' of #${PR} — delete it by hand."
+          exit 1
+
+  promote-docs:
+    # pull_request path: docs-only changes the CI workflow deliberately skips.
+    # They have no status check to wait for, so they merge immediately. Fork
+    # guard mirrors workflow_run's repo-ownership check, and the claude/issue-*
+    # refusal.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !startsWith(github.event.pull_request.head.ref, 'claude/issue-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pull-requests: write # mark ready, merge
+      contents: write # merge, delete the head branch
+    steps:
+      - name: Mark ready + squash-merge
+        id: merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # GitHub's pull_request `paths` filter matches when ANY changed file
+          # matches, so a MIXED docs+code PR reaches this job too. Merging here
+          # would bypass the CI workflow entirely (the known race: a mixed PR
+          # merged before its CI finished). Only merge when EVERY changed file
+          # is docs; otherwise leave it to promote-from-ci, which waits for the
+          # CI verdict. The path set mirrors the CI workflow's paths-ignore and
+          # this workflow's pull_request paths.
+          # Claude instruction files (`.claude/**`, `CLAUDE.md`) are `.md` too
+          # but never merge unattended (see promote-from-ci's gate): no CI runs
+          # on them either, so such a PR waits for a hand merge.
+          # Same listing and gate as promote-from-ci (comments there).
+          ROWS=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" \
+                   --jq '.[] | [.filename, (.previous_filename // "")] | @tsv')
+          CHANGED=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.changed_files')
+          LISTED=$(grep -c . <<< "$ROWS" || true)
+          if [ "$LISTED" != "$CHANGED" ]; then
+            echo "::notice::PR #${PR}: file listing incomplete (${LISTED} of ${CHANGED}) — leaving it for a hand merge."
+            exit 0
+          fi
+          PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
+          # Old AND new paths count: a rename out of code into docs/ is a code
+          # change (the code file disappears) and must go through CI.
+          NON_DOCS=$(grep -E -v -c '(\.md$|^docs/|^LICENSE$|^\.gitignore$)' <<< "$PATHS" || true)
+          CLAUDE_FILES=$(grep -i -E -c "$CLAUDE_GATE_RE" <<< "$PATHS" || true)
+          if [ "$CLAUDE_FILES" != "0" ]; then
+            echo "::notice::PR #${PR} touches ${CLAUDE_FILES} file(s) matched by CLAUDE_GATE_RE — never merged unattended, merge it by hand."
+            # Docs-only: no CI will run, so this is its hold point — hand it
+            # over (see promote-from-ci). A PR with code stays draft until its
+            # CI is green, where promote-from-ci hands it over.
+            if [ "$NON_DOCS" = "0" ]; then gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."; fi
+            exit 0
+          fi
+          if [ "$NON_DOCS" != "0" ]; then
+            echo "PR #${PR} touches ${NON_DOCS} non-docs file(s) — deferring to the CI gate (promote-from-ci)."
+            exit 0
+          fi
+          gh pr ready "$PR" || true
+          # `sha=` pins the merge to the head this event carries (a head pushed
+          # since gets a 409 and its own run). `merged=true` only on an actual
+          # merge: the deferral above and a failed merge leave it unset, so the
+          # branch cleanup below is skipped.
+          for attempt in 1 2 3 4 5; do
+            for method in squash merge; do
+              if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \
+                  -f merge_method="$method" -f sha="$HEAD_SHA" 2>&1); then
+                echo "$OUT"
+                echo "merged via ${method}"
+                echo "merged=true" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              echo "$OUT"
+              # 409 = the head moved since this SHA: the PR is no longer ours
+              # to merge, its new head gets its own run. No retry.
+              case "$OUT" in
+                *"(HTTP 409)"*)
+                  echo "::notice::PR #${PR}: head moved since the validated SHA — leaving it to its own run."
+                  exit 0 ;;
+              esac
+            done
+            echo "attempt ${attempt}: merge failed, retrying in ${attempt}s"
+            sleep "$attempt"
+          done
+          echo "::error::Merge of #${PR} failed after 5 attempts. The PR is non-draft and can be merged manually."
+          exit 1
+
+      # Same cleanup as in promote-from-ci (reasons and guards there); the two
+      # jobs share no steps, exactly like the merge loop above.
+      - name: Delete head branch
+        if: ${{ !cancelled() && steps.merge.outputs.merged == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          INFO=$(gh pr view "$PR" --json headRefName,headRefOid,isCrossRepository \
+            --jq '[.headRefName, .headRefOid, .isCrossRepository] | @tsv')
+          IFS=$'\t' read -r HEAD_REF MERGED_OID CROSS_REPO <<< "$INFO"
+          if [ "$CROSS_REPO" != "false" ]; then
+            echo "PR #${PR}: head branch lives in another repository — nothing to delete here."
+            exit 0
+          fi
+          if [ "$HEAD_REF" = "$DEFAULT_BRANCH" ]; then
+            echo "::warning::PR #${PR}: head branch is the default branch — not deleting."
+            exit 0
+          fi
+          # Stacked on top of it, or opened from it: deleting would retarget
+          # or close that PR behind its author's back.
+          OPEN_ON_TOP=$(gh pr list --state open --base "$HEAD_REF" --json number --jq 'length')
+          OPEN_FROM=$(gh pr list --state open --head "$HEAD_REF" --json number --jq 'length')
+          if [ "$OPEN_ON_TOP" != "0" ] || [ "$OPEN_FROM" != "0" ]; then
+            echo "::notice::PR #${PR}: other open PR(s) still use the head branch (${OPEN_ON_TOP} on top of it, ${OPEN_FROM} from it) — keeping it."
+            exit 0
+          fi
+          if ! [[ "$HEAD_REF" =~ ^[A-Za-z0-9._/@+-]+$ ]]; then
+            echo "::warning::PR #${PR}: head branch name needs URL encoding — delete it by hand."
+            exit 0
+          fi
+          # Exact lookup first: "gone" = already deleted (Dependabot, a human)
+          # = goal reached. The REST `GET git/ref/…` would need its status
+          # line parsed to tell a 404 from an outage; a failed lookup fails.
+          CURRENT_OID=$(gh api graphql \
+            -f query='query($owner: String!, $name: String!, $ref: String!) { repository(owner: $owner, name: $name) { ref(qualifiedName: $ref) { target { oid } } } }' \
+            -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -f ref="refs/heads/${HEAD_REF}" \
+            --jq '.data.repository.ref.target.oid // "gone"') \
+            || { echo "::error::Could not look up head branch '${HEAD_REF}' of #${PR} — check it by hand."; exit 1; }
+          if [ "$CURRENT_OID" = "gone" ]; then
+            echo "${HEAD_REF} was already deleted"
+            exit 0
+          fi
+          # A commit pushed since the merge must survive.
+          if [ "$CURRENT_OID" != "$MERGED_OID" ]; then
+            echo "::warning::PR #${PR}: head branch moved since the merge (${CURRENT_OID:0:7} vs merged ${MERGED_OID:0:7}) — not deleting."
+            exit 0
+          fi
+          if gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${HEAD_REF}"; then
+            echo "deleted ${HEAD_REF}"
+            exit 0
+          fi
+          echo "::error::Could not delete head branch '${HEAD_REF}' of #${PR} — delete it by hand."
+          exit 1

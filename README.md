@@ -1,0 +1,140 @@
+# claude-template
+
+A modular harness for working on a codebase with [Claude Code](https://code.claude.com/docs): the instruction file, sub-agents, hooks, a local gate and the CI around them. A project installs it module by module and takes only what it uses.
+
+It is distilled from a production codebase where each piece was added after something went wrong. The kit makes no assumption about your stack: what only your project knows is left as a marked gap for you to fill.
+
+## The idea
+
+1. **A rule that matters is a check.** A sentence in an instruction file is followed until the day it is not. Every fixed bug or review finding gets an ID, a line in a catalogue and a guard; one script runs the guards locally and in CI.
+2. **`CLAUDE.md` is a budgeted index.** It is loaded into every session, so it holds operative rules only, under a byte budget that a guard enforces. Reasons and history live in `docs/conventions/`, read on demand.
+3. **An orchestrator and specialists.** The main session decides and reviews; lighter models implement, run the tests and check the docs. A sub-agent is briefed like a peer and its result is verified, and the read-only ones are confined by a hook rather than by wording.
+4. **The harness is privileged code.** Instruction files, agents, hooks and workflows are executed by every session. They are tested, pinned, reviewed like a change of privilege, and never merged unattended.
+5. **What waits on a human is gathered.** Hand merges, red or missing runs and dated follow-ups land in one weekly issue instead of being discovered by asking.
+
+## Quick start
+
+Requirements: Node 20 or later, git and bash. Clone this repository anywhere, then from your project:
+
+```bash
+node /path/to/claude-template/bin/harness.mjs init .
+```
+
+In a terminal it lists the modules and asks which to install. Without one, name them:
+
+```bash
+node /path/to/claude-template/bin/harness.mjs init . --modules git-hooks,agents,security-review
+```
+
+The installer prints what it wrote and what is left for you. Then:
+
+1. Fill the gaps it lists (`status .` shows them again): the project overview, the commands, the sensitive areas and the conventions in `CLAUDE.md`, the verification commands of the agents.
+2. Run `./scripts/security-checks.sh --offline`. It must pass.
+3. Read what was installed before committing it. Every session will execute these files.
+
+Later, as the project grows:
+
+```bash
+node /path/to/claude-template/bin/harness.mjs add . --modules ci-security   # another module
+node /path/to/claude-template/bin/harness.mjs status .                      # installed modules, edited files, gaps left
+node /path/to/claude-template/bin/harness.mjs update .                      # refresh the kit files you have not edited
+```
+
+Running `init` again is safe: files already in place are left alone.
+
+## Modules
+
+`core` is always installed. A module brings along what it requires.
+
+| Module | Adopt | What it installs |
+|---|---|---|
+| `core` | day 1 | `CLAUDE.md` skeleton with its byte budget, `docs/` (conventions, ADR, runbooks), the findings catalogue, the gate `scripts/security-checks.sh` and its `guards.d/` |
+| `git-hooks` | day 1 | `pre-commit` (gitleaks on staged changes) and `pre-push` (the gate, offline) |
+| `agents` | day 1 | `implementer`, `verifier`, `doc-sync` and `reviewer` agents, and the tested Bash allowlist that confines the read-only ones |
+| `security-review` | day 1 | `security-reviewer` agent (fresh context, read-only), the project review skill, and a check that Claude Code plugins stay at the commit that was reviewed |
+| `ci-security` | first CI | `security.yml` in two tiers, GitHub Actions rules with zizmor at zero, pinned scanners, a Dependabot skeleton |
+| `node-audit` | first CI, Node projects | an `npm audit` gate with per-advisory derogations |
+| `auto-merge` | pull-request flow | unattended squash-merge on green CI, with the gates that hold instruction files, CI-session branches and risky bumps for a human |
+| `weekly-digest` | pull-request flow | one issue a week listing what waits on a human |
+| `claude-ci` | on demand | `@claude` on plain issues of a private repository, with the job token only |
+| `openspec` | on demand | the OpenSpec convention (specs for current behaviour, changes for work in flight) and its validation guard |
+
+`node bin/harness.mjs list` prints the same with each module's requirements.
+
+## What has been exercised
+
+Each module's convention page says where its piece comes from and what has actually run. In short:
+
+| Piece | Status |
+|---|---|
+| The installer | Tested: `test/` installs every module alone and all together into scratch projects and runs their gate. |
+| Bash allowlist of the agents | The decision logic runs in production. This kit's variant reads the verification commands from a config file; it is covered by its test table, and must be checked live once in your project (`docs/conventions/agent-bash-guard.md` § Live check). |
+| Agents, review skill, plugin pins | Adapted from production; the wording is new where project specifics were removed. |
+| `security.yml`, zizmor rules, `npm audit` gate | Ported from production workflows. This generic variant has not run on GitHub yet. |
+| `auto-merge` | The original runs in production. This generic variant has not: its first pull requests are its test. |
+| `weekly-digest` | Unit-tested. Never run live, in the project it comes from either. |
+| `claude-ci` | Not exercised end to end. For private repositories only. |
+| `openspec` guard | Not run against the OpenSpec CLI by the kit's authors. |
+
+Treat anything marked "has not run" as a draft until you have watched it work once.
+
+## What lands in your project
+
+With every module installed:
+
+```
+CLAUDE.md                          the budgeted instruction file (yours)
+SECURITY_REVIEW.md                 the findings catalogue (yours)
+.claude/
+  agents/                          implementer, verifier, doc-sync, reviewer, security-reviewer
+  hooks/                           the Bash allowlist, its tests, its config (yours)
+  skills/project-security-review/  the project's review skill (yours)
+  harness.json                     what the installer did
+.githooks/                         pre-commit, pre-push
+.github/
+  workflows/                       security.yml, auto-merge.yml, weekly-digest.yml, claude.yml
+  dependabot.yml, zizmor.yml
+docs/
+  conventions/                     one page per rule: the detail behind CLAUDE.md
+  adr/, runbook/                   templates and indexes
+scripts/
+  security-checks.sh               the gate
+  guards.d/                        one guard per family of checks; 50-project.sh is yours
+```
+
+Files marked "yours" are created once and never touched again. The others are the kit's machinery: `update` refreshes them as long as you have not edited them, and tells you when you have.
+
+## How installation works
+
+- **Seeds and kit files.** A seed is a skeleton the project fills in. It is created once and never overwritten, not even with `--force`. A kit file is recorded with a hash in `.claude/harness.json`, which is how `status` shows the ones you edited and `update` knows which it may refresh.
+- **Slots.** Seeds carry comment lines such as `<!-- harness:slot delegation -->`. A module inserts its section there, once, and the line stays so that a module added later finds it. Claude Code does not send block-level HTML comments in `CLAUDE.md` to the model, so they cost nothing in context.
+- **Placeholders.** A few values (project name, default branch, the name of your CI workflow) are asked at install time and checked against a strict pattern before anything is written.
+- **Gaps.** What the kit cannot know is a `TODO(harness)` comment. `status` and an advisory guard count them.
+- **Conflicts.** A file that already exists with other content is left alone and reported; the exit code is 2.
+
+`docs/module-authoring.md` is the full contract, for writing a module of your own.
+
+## From a Claude Code session
+
+Copy `skills/harness-init/` into `~/.claude/skills/`, set `CLAUDE_TEMPLATE_DIR` to your checkout, and ask Claude to initialise the project with the harness. The skill runs the installer, asks which modules you want and helps fill the gaps from the codebase.
+
+## Why files and not a plugin
+
+Most of the kit is not Claude configuration at all: scripts, git hooks, workflows, documentation. And the one piece that must not be optional, the hook that confines read-only agents, is declared in each agent's frontmatter, which Claude Code ignores for agents shipped by a plugin. Project files it is.
+
+## Limits
+
+- The workflow modules are for GitHub. The rest works with any forge.
+- The Bash allowlist is a tripwire against a steered or over-eager sub-agent, not a sandbox. Its page lists what it does not cover.
+- That allowlist is a hook in each agent's frontmatter, and Claude Code runs such hooks only in a folder whose workspace trust prompt was accepted. A new clone, a new git worktree or a headless session in an untrusted folder runs the read-only agents unguarded.
+- A guard stops a regression, not a deliberate edit by someone who can change the guard too. Review of the harness files is what covers that.
+- The hook, the gate helpers and the digest need Node on the machine and on the runner.
+- Nothing here replaces reading what you install.
+
+## Working on the kit
+
+```bash
+node --test test/     # unit tests, static rules on every module, end-to-end installs
+```
+
+`CLAUDE.md` at the root of this repository holds the rules for changing the kit; `docs/module-authoring.md` the contract for modules.

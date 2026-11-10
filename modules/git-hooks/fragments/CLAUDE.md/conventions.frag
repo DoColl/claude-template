@@ -1,0 +1,1 @@
+- **Git hooks**: `.githooks/pre-commit` scans staged changes with gitleaks, `.githooks/pre-push` runs the gate offline; each clone opts in with `git config core.hooksPath .githooks`. Never pass `--no-verify` to get past a failure — fix it or report it. → `docs/conventions/git-hooks.md`

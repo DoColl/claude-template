@@ -1,0 +1,22 @@
+{
+  "_comment": [
+    "Advisories accepted as documented derogations for the audit gate",
+    "(scripts/audit-gate.mjs, guard NA-1; CLAUDE.md § Findings policy). An entry",
+    "here NEVER silences a whole package or severity level — it silences one",
+    "advisory id for one package, and only until review_by. Anything not listed",
+    "here still fails the gate.",
+    "",
+    "Entry: { \"package\": \"<name as npm audit reports it>\",",
+    "         \"advisory\": \"<GHSA id, the last segment of the advisory URL>\",",
+    "         \"severity\": \"<severity accepted: a re-rating above it re-opens the gate>\",",
+    "         \"review_by\": \"YYYY-MM-DD\",",
+    "         \"reason\": \"<why it cannot be fixed, and why it is not reachable>\",",
+    "         \"workspace\": \"<optional: the one directory it applies to, as listed in the guard>\" }",
+    "",
+    "Without `workspace` an entry applies to every lockfile; with it, the other",
+    "workspaces' runs neither honour it nor report it as stale. Run",
+    "./scripts/security-checks.sh to re-evaluate. This file is yours: the kit",
+    "never overwrites it."
+  ],
+  "allow": []
+}

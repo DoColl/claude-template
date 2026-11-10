@@ -1,0 +1,1 @@
+- Finding that reveals an invariant, or a new sensitive area → Step 2 / "When to run" of `.claude/skills/project-security-review/SKILL.md` (same list as "Before pushing")

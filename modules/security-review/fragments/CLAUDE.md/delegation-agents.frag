@@ -1,0 +1,1 @@
+| Fresh-context security review of a diff | `security-reviewer` (Opus, read-only, preloads `project-security-review`) | A reading not anchored on the author's: runs the gate, checks the diff against the catalogue and the invariants, lists the scanners to run. Verify each finding. |

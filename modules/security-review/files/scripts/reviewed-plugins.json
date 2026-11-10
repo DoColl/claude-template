@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "Claude Code plugins reviewed for this repository (docs/conventions/security-review.md § Plugins).",
+    "A plugin is used only at a reviewed commit. `reviewed` is the marketplace commit whose plugin",
+    "directory was read in full; `installed` is the commit the install actually copied — equal to",
+    "`reviewed`, or accepted after a compare between the two listed no file under the plugin's",
+    "directory. scripts/plugin-pins.mjs compares the machine's installed plugins with this file",
+    "(local gate only) and fails on a commit mismatch or on a `rejected` plugin being installed.",
+    "Entry: \"<plugin>@<marketplace>\": { \"status\": \"retained\", \"source\": \"owner/repo\",",
+    "\"reviewed\": \"<40-hex>\", \"installed\": \"<40-hex>\", \"date\": \"yyyy-mm-dd\", \"note\": \"…\" }",
+    "or { \"status\": \"rejected\", \"reason\": \"…\" }.",
+    "A bump = re-read the plugin directory at the new commit, then update reviewed / installed / date."
+  ],
+  "plugins": {}
+}

@@ -1,0 +1,15 @@
+{
+  "id": "security-review",
+  "title": "Fresh-context security review, the project's review skill, plugin pins",
+  "summary": "A security-reviewer agent (Opus, read-only, enforced) that reads a diff it did not write, a project skill holding the invariants and the scanner routing, and a check that Claude Code plugins stay at the commit that was reviewed.",
+  "phase": "day-1",
+  "order": 25,
+  "recommended": true,
+  "requires": ["core", "agents"],
+  "seed": [".claude/skills/project-security-review/SKILL.md", "scripts/reviewed-plugins.json"],
+  "postInstall": [
+    "Fill .claude/skills/project-security-review/SKILL.md: the trigger list (same as CLAUDE.md § Before pushing) and one bullet per invariant of your architecture.",
+    "Record in scripts/reviewed-plugins.json every Claude Code plugin the project relies on, at the commit you read (docs/conventions/security-review.md § Plugins).",
+    "Restart open Claude Code sessions so the new agent and skill are picked up."
+  ]
+}

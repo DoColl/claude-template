@@ -1,0 +1,24 @@
+# gitleaks configuration, read from the repository root by the pre-commit hook
+# (git-hooks module) and by the CI gate (ci-security module). Needs
+# gitleaks >= 8.25 for [[allowlists]].
+
+title = "__HARNESS_PROJECT_NAME__"
+
+# Keep gitleaks' built-in rule set; this file only adds to it.
+[extend]
+useDefault = true
+
+# TODO(harness): one rule per credential format of your own that no built-in
+# rule knows — the keys or tokens your application issues. A leaked one grants
+# access until it is revoked, and nothing else will recognise it.
+#
+# [[rules]]
+# id = "myapp-token"
+# description = "MyApp personal access token"
+# regex = '''myapp_pat_[0-9a-f]{64}'''
+# keywords = ["myapp_pat_"]
+#
+# A false positive that a rule can describe gets an [[allowlists]] entry bound
+# to that rule (targetRules) and matching the whole captured secret, so a real
+# value is still reported. One that no rule describes goes to .gitleaksignore,
+# as a fingerprint.

@@ -1,0 +1,45 @@
+name: CI
+
+# The kit's own checks: the installer's tests (which install every module into
+# a scratch project and run its gate), then zizmor on every workflow the kit
+# ships, rendered as a project would get them, and on this file.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests and workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Installer tests (unit, static rules, end-to-end installs)
+        run: node --test test/
+
+      - name: Render every module into a scratch project
+        run: node bin/harness.mjs init "$RUNNER_TEMP/rendered" --all
+
+      # Pinned to an exact version: each zizmor release adds audits, so a
+      # floating one would turn this job red without any change here.
+      - name: zizmor — shipped workflows and this one, no finding at any severity
+        run: |
+          pipx run --spec 'zizmor==1.31.1' zizmor --offline "$RUNNER_TEMP/rendered/.github/workflows/"
+          pipx run --spec 'zizmor==1.31.1' zizmor --offline .github/workflows/

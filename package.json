@@ -1,0 +1,13 @@
+{
+  "name": "claude-template",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A modular Claude Code harness for a project: instruction files, sub-agents, hooks, a local gate and CI, installed module by module.",
+  "type": "module",
+  "bin": { "harness": "bin/harness.mjs" },
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "test": "node --test test/",
+    "list": "node bin/harness.mjs list"
+  }
+}

@@ -1,0 +1,1 @@
+- **Claude Code plugins**: used only at a commit that was read in full, recorded in `scripts/reviewed-plugins.json`; never auto-installed. PL-1 compares what is installed with the record (local gate). → `docs/conventions/security-review.md`

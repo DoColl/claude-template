@@ -1,0 +1,17 @@
+{
+  "id": "agents",
+  "title": "Sub-agents and their Bash allowlist",
+  "summary": "An orchestrator/specialists split: implementer, verifier, doc-sync and reviewer agents on lighter models, with a tested hook that confines the read-only ones to exact command shapes.",
+  "phase": "day-1",
+  "order": 20,
+  "recommended": true,
+  "requires": ["core"],
+  "seed": [".claude/hooks/agent-bash-guard.config.json"],
+  "postInstall": [
+    "List the project's verification commands (tests, build, type-check) in .claude/hooks/agent-bash-guard.config.json: the verifier agent can run nothing else.",
+    "Requires node >= 20 on the machine: the hook fails closed without it (every Bash command of a guarded agent is blocked).",
+    "The hook only runs in a folder whose workspace trust prompt was accepted — each clone and each git worktree separately, and never in a headless session started in an untrusted folder. Until then the read-only agents run unguarded: docs/conventions/agent-bash-guard.md § Trust.",
+    "Check the hook live once per folder, and again after each Claude Code upgrade: docs/conventions/agent-bash-guard.md § Live check. The tests prove the script, not the runtime calling it.",
+    "Restart open Claude Code sessions: a running session does not pick up new agent files reliably."
+  ]
+}

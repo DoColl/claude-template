@@ -1,0 +1,19 @@
+#!/bin/sh
+# Secret scan of the staged changes, before they become a commit.
+#
+# Opt in once per clone:   git config core.hooksPath .githooks
+#
+# Uses the repository's .gitleaks.toml (built-in rules plus the project's own
+# credential formats) and .gitleaksignore. This hook is the early warning: a
+# secret caught here never enters the history. The gate that cannot be skipped
+# is the CI scan of the pushed commits. Output is redacted, so a hit never
+# prints the secret itself.
+set -eu
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-commit: gitleaks not found. Install it (>= 8.25), e.g. brew install gitleaks" >&2
+  echo "pre-commit: or turn the hooks off for this clone: git config --unset core.hooksPath" >&2
+  exit 1
+fi
+
+exec gitleaks git --staged --redact --exit-code 1 --no-banner --verbose

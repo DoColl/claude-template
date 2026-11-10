@@ -1,0 +1,17 @@
+{
+  "id": "weekly-digest",
+  "title": "Weekly digest of what waits on a human",
+  "summary": "A scheduled workflow that opens one issue a week, assigned to the repository owner: pull requests to merge by hand, red or missing CI, failed or skipped scheduled runs, stale alert issues, overdue follow-ups.",
+  "phase": "pr-flow",
+  "order": 42,
+  "requires": ["core"],
+  "placeholders": {
+    "CI_WORKFLOW": { "prompt": "Name of the CI workflow that must be green before a merge (its `name:`)", "default": "CI", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}" }
+  },
+  "seed": ["scripts/weekly-digest.config.mjs"],
+  "postInstall": [
+    "The digest has never run live: once the workflow is on the default branch, run it by hand with dry_run ticked (Actions → Weekly digest → Run workflow) and read the run summary before trusting the schedule.",
+    "Check scripts/weekly-digest.config.mjs: the CI workflow name, and a maxAgeDays entry for every scheduled workflow that runs more often than weekly.",
+    "Track dated follow-ups as issues labelled `deadline` with a `Due: YYYY-MM-DD` line in the body; the digest picks them up."
+  ]
+}

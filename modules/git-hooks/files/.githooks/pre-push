@@ -1,0 +1,25 @@
+#!/bin/sh
+# The local gate, before anything leaves the machine.
+#
+# Opt in once per clone:   git config core.hooksPath .githooks
+#
+# Runs scripts/security-checks.sh --offline (no network, fast). It checks the
+# working tree — what you are about to push in the common case; CI runs the
+# full gate on the pushed commit and is the check that cannot be skipped. To
+# push once without it, knowingly: git push --no-verify.
+set -eu
+
+# Nothing to check when the push only deletes refs (or pushes nothing).
+pushes=false
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  case "$local_sha" in
+    *[!0]*) pushes=true ;;
+  esac
+done
+[ "$pushes" = true ] || exit 0
+
+root=$(git rev-parse --show-toplevel)
+if ! "$root/scripts/security-checks.sh" --offline; then
+  echo "pre-push: the gate failed — fix what it names, or see docs/conventions/local-gate.md" >&2
+  exit 1
+fi

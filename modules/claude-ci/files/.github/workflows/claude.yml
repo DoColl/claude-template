@@ -1,0 +1,70 @@
+name: Claude Code
+
+# `@claude` in a comment on a plain issue, nothing else: a CI session never sits
+# on a pull-request tree and never answers on an issue that carries third-party
+# text. Written for a PRIVATE repository, where issues are written by
+# collaborators; read docs/conventions/claude-ci.md before using it elsewhere.
+# A change here updates the digest in scripts/guards.d/44-claude-ci.sh.
+on:
+  # The only trigger that can answer a mention. It runs the default branch's
+  # workflow file, the job below refuses pull requests, and the action refuses
+  # actors without write access — so no untrusted code or tree is involved.
+  issue_comment: # zizmor: ignore[dangerous-triggers]
+    types: [created]
+
+permissions: {}
+
+jobs:
+  claude:
+    # A comment on a pull request fires issue_comment too, and the action would
+    # check out the pull request's head. The refused labels mark issues whose
+    # text no collaborator wrote (advisory summaries, titles gathered from pull
+    # requests). Issue and comment must both come from someone with write access.
+    if: ${{ !github.event.issue.pull_request && !contains(github.event.issue.labels.*.name, 'dependabot-alert') && !contains(github.event.issue.labels.*.name, 'weekly-digest') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) && contains(github.event.comment.body, '@claude') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      issues: write
+    steps:
+      # The credential is kept on purpose: the action fetches before it sets up
+      # its own git authentication, so with persist-credentials: false a private
+      # repository fails to fetch. The persisted token is this job's own, the
+      # one the job hands the action anyway, and the job uploads no artifact.
+      - name: Checkout repository # zizmor: ignore[artipacked]
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      # git honours the configuration of a repository it finds inside the
+      # workspace, and a push could name any ref. A session writes neither to
+      # ~/.gitconfig nor outside the workspace, so both settings hold.
+      - name: Harden git for the session
+        run: |
+          hooks="$RUNNER_TEMP/claude-git-hooks"
+          mkdir -p "$hooks"
+          cat > "$hooks/pre-push" <<'EOF_HOOK'
+          #!/bin/sh
+          while read -r _ _ remote_ref _; do
+            case "$remote_ref" in
+              refs/heads/claude/issue-*) ;;
+              *) echo "pre-push: a CI session pushes claude/issue-* only, not $remote_ref" >&2; exit 1 ;;
+            esac
+          done
+          EOF_HOOK
+          chmod +x "$hooks/pre-push"
+          git config --global core.hooksPath "$hooks"
+          git config --global safe.bareRepository explicit
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@f27be6b65a4652f08a2ba3cff79114829b588967 # v1.0.252
+        with:
+          # The job's token instead of an App token: `permissions:` above is then
+          # the real bound, it dies with the job, and its pushes start no workflow.
+          github_token: ${{ github.token }}
+          # A Claude subscription token (`claude setup-token`), stored as a
+          # repository secret. Never set an API key alongside it.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The only record of what a session that can push did. The run log is
+          # as visible as the repository: one more reason this is for private ones.
+          show_full_output: true

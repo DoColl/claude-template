@@ -1,0 +1,10 @@
+# Claude Code: local state stays out of git, the shared harness stays in.
+# (The agents module checks that hook files are tracked and not ignored: AG-2.)
+.claude/*
+!.claude/settings.json
+!.claude/harness.json
+!.claude/agents/
+!.claude/commands/
+!.claude/hooks/
+!.claude/skills/
+CLAUDE.local.md

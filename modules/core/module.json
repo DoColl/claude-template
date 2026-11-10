@@ -1,0 +1,28 @@
+{
+  "id": "core",
+  "title": "Instruction file, docs skeleton and the local gate",
+  "summary": "CLAUDE.md under a byte budget, docs/ (conventions, ADR, runbooks), the findings catalogue, and scripts/security-checks.sh running every guard in scripts/guards.d/.",
+  "phase": "day-1",
+  "order": 10,
+  "required": true,
+  "placeholders": {
+    "PROJECT_NAME": { "prompt": "Project name", "default": "@dirname", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,60}" },
+    "CLAUDE_MD_BUDGET": { "prompt": "CLAUDE.md size budget, in bytes", "default": "25000", "pattern": "[1-9][0-9]{3,5}" },
+    "DEFAULT_BRANCH": { "prompt": "Default branch", "default": "main", "pattern": "[A-Za-z0-9][A-Za-z0-9._/-]{0,60}" }
+  },
+  "seed": [
+    "CLAUDE.md",
+    ".gitleaks.toml",
+    "SECURITY_REVIEW.md",
+    "docs/conventions/README.md",
+    "docs/adr/README.md",
+    "docs/runbook/README.md",
+    "scripts/guards.d/50-project.sh"
+  ],
+  "append": [{ "file": ".gitignore", "from": "append/gitignore", "marker": "claude-template" }],
+  "postInstall": [
+    "Fill CLAUDE.md: project overview, architecture map, commands, the sensitive areas under \"Before pushing\" and the conventions for new code (each gap is a TODO(harness) comment).",
+    "Run ./scripts/security-checks.sh --offline once: it must pass before the first commit.",
+    "When a bug or a review finding is fixed, give it an ID: one line in SECURITY_REVIEW.md, one check in scripts/guards.d/50-project.sh."
+  ]
+}

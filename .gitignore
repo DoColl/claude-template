@@ -1,0 +1,11 @@
+.DS_Store
+node_modules/
+
+# Claude Code: local state stays out of git.
+.claude/*
+!.claude/settings.json
+!.claude/agents/
+!.claude/commands/
+!.claude/hooks/
+!.claude/skills/
+CLAUDE.local.md

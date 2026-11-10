@@ -1,0 +1,13 @@
+{
+  "id": "git-hooks",
+  "title": "Git hooks: secret scan before a commit, the gate before a push",
+  "summary": "An opt-in .githooks/ directory: pre-commit scans the staged changes with gitleaks, pre-push runs the local gate offline.",
+  "phase": "day-1",
+  "order": 15,
+  "recommended": true,
+  "requires": ["core"],
+  "postInstall": [
+    "Opt in once per clone: git config core.hooksPath .githooks",
+    "Install gitleaks >= 8.25 (the pre-commit hook refuses to run without it)."
+  ]
+}

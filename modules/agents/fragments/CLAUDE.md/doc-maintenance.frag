@@ -1,0 +1,1 @@
+- New or changed agent in `.claude/agents/` → the table under "Delegation"; a new verification command → `.claude/hooks/agent-bash-guard.config.json`

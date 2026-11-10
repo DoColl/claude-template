@@ -1,0 +1,21 @@
+{
+  "id": "node-audit",
+  "title": "npm audit gate with per-advisory derogations",
+  "summary": "For Node projects: scripts/audit-gate.mjs fails the gate on any high+ advisory of the lockfiles (NA-1), with an allowlist that accepts one advisory for one package, with a reason and a review date.",
+  "phase": "first-ci",
+  "order": 35,
+  "requires": ["core"],
+  "placeholders": {
+    "NODE_WORKSPACES": {
+      "prompt": "Directories holding a package-lock.json, separated by spaces (\".\" for the repository root)",
+      "default": ".",
+      "pattern": "(\\.|[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*)( (\\.|[A-Za-z0-9_][A-Za-z0-9._-]*(/[A-Za-z0-9_][A-Za-z0-9._-]*)*)){0,15}"
+    }
+  },
+  "seed": ["scripts/audit-allowlist.json"],
+  "postInstall": [
+    "Run ./scripts/security-checks.sh once with network access: NA-1 audits every lockfile at high+. Fix what it reports; an advisory with no reachable fix gets a justified entry in scripts/audit-allowlist.json.",
+    "NA-1 needs the npm registry, so --offline skips it (the pre-push hook included): CI is where it gates. Without the ci-security module, call ./scripts/security-checks.sh from your own workflow.",
+    "Add the npm ecosystem of each workspace to .github/dependabot.yml if you use Dependabot."
+  ]
+}
