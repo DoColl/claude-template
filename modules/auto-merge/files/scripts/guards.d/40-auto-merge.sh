@@ -12,6 +12,8 @@
 #   AM-7  the gate judges the range that is merged: files and commits come
 #         from compare/<base commit>...<validated head>, never from the pull
 #         request's current state, and the base is re-read before each merge.
+#         A pull request that cannot be read fails the job instead of passing
+#         for a moved head.
 #   AM-4  marking a pull request ready never merges it. The two ready lines are
 #         pinned to their exact text, and every merge call in the file, however
 #         it is spelled, is one of the gated REST calls AM-1 counts.
@@ -553,6 +555,18 @@ heads_checked=$(grep -cF 'if [ "$PR_HEAD" != "$HEAD_SHA" ]' "$AM" || true)
 if [ "$heads_checked" != "$merging" ]; then
   bad 7 "$merging merging job(s) but $heads_checked check that the pull request's head is still the event's before reading its file count"
 fi
+# A read that fails must fail the job. Fed straight into `read` through a
+# here-string, a failing call leaves the variables empty, the head check
+# reports "head moved" and the job ends green: no call inside a here-string,
+# and each merging job stops on an empty head before comparing it.
+swallowed=$(grep -cE '<<< *"\$\((gh|curl) ' <<< "$code" || true) # $code: the workflow without its comment lines (AM-4)
+if [ "$swallowed" != "0" ]; then
+  bad 7 "$swallowed API call(s) fed straight into a here-string — a failed call there is silent; assign first, then check"
+fi
+unread=$(awk '/^          if \[ -z "\$PR_HEAD" \]; then$/ { armed = 1; next } armed && /^            exit 1$/ { n++ } /^          fi$/ { armed = 0 } END { print n + 0 }' "$AM")
+if [ "$unread" != "$merging" ]; then
+  bad 7 "$merging merging job(s) but $unread fail on a pull request that could not be read — an empty head must exit 1, not pass for a moved head"
+fi
 rechecked=$(grep -cxF '          if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then' "$AM" || true)
 if [ "$rechecked" != "$merging" ]; then
   bad 7 "$merging merging job(s) but $rechecked re-read the base branch right before merging"
@@ -561,7 +575,7 @@ foreign_base=$(grep -E '^ +BASE_(SHA|REF): ' "$AM" | grep -cvE '^ +(BASE_SHA: \$
 if [ "$foreign_base" != "0" ]; then
   bad 7 "BASE_SHA / BASE_REF must come from the triggering event or from the gate step's output"
 fi
-pass 7 "the gate reads the immutable range that is merged, and the base is re-read before each merge"
+pass 7 "the gate reads the immutable range that is merged, the base is re-read before each merge, and a failed read fails the job"
 
 # Advisory: nothing merges code until the workflow waited for exists.
 ci_name=$(sed -n 's/^    workflows: \["\(.*\)"]$/\1/p' "$AM")

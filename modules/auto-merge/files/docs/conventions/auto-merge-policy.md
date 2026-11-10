@@ -72,6 +72,8 @@ Pinning the merge is half of it. The gate must read the same commit. A listing o
 
 So the gate never lists the pull request live. One read gives its base, its head, its file count and its author; if the head is no longer the event's, the job stops. Files and commits then come from the immutable range `compare/<base commit>...<validated head>`, which no later push can change, and the file count must match the one read with that head: a truncated range (300 files, 250 commits) holds. The merge step re-reads the base branch right before merging and stops if the pull request was retargeted since.
 
+A read that fails is not a head that moved. If the pull request cannot be read from the API, the job fails with an error and merges nothing; it does not end green on a "head moved" notice that nobody would look at. No call is fed straight into `read` through a here-string, where a failure leaves the variables empty and the step successful.
+
 `workflow_run` fires once per workflow it lists, so the list holds **one** name. Two names would merge as soon as either is green. Keep security checks in their own file if you like, but call it from the CI workflow as a reusable workflow so that one conclusion covers both.
 
 ## After the merge
@@ -131,7 +133,7 @@ A session still working on a merged branch is unaffected: a push before the clea
 - **AM-4** — the two "mark ready" lines are pinned to their exact text, and every merge call in the file, however spelled, is one of the gated ones.
 - **AM-5** — the workflow's own `dependabot_verdict` and `bump_level` are extracted and run on the commit-body shapes that must merge and the ones that must hold; the author check, the exact `merge` verdict and `MAJOR_HOLD_RE` are pinned; `dependabot.yml` sets no `allow` and has no `.yaml` twin.
 - **AM-6** — one workflow is waited for, the pull request is selected by its head SHA, every merge passes that SHA, and it comes from the triggering event.
-- **AM-7** — the gate judges the range that is merged: no listing of the pull request's current files or commits, one read of `compare/<base commit>...<validated head>` per merging job, a head check before the file count is trusted, the base re-read right before each merge, and the base taken from the event or from the gate.
+- **AM-7** — the gate judges the range that is merged: no listing of the pull request's current files or commits, one read of `compare/<base commit>...<validated head>` per merging job, a head check before the file count is trusted, the base re-read right before each merge, and the base taken from the event or from the gate. A pull request that cannot be read fails the job.
 
 AM-1 also requires `CLAUDE_GATE_RE` and `PROJECT_GATE_RE` to be defined exactly once each, in the workflow-level `env`: a job- or step-level definition would shadow them.
 
@@ -141,4 +143,4 @@ AM-2 and AM-3 are unused: they belong to a post-merge dispatch (§ After the mer
 
 - Installed with the kit.
 - After a security review of the kit: the gate reads the immutable range instead of the pull request's live file and commit listings (AM-7); the gate runner, every guard and the plugin registry are held for a hand merge; `CLAUDE_GATE_RE` must be defined once.
-- After reviews of an installed project: the gate also holds the scripts the kit's guards call, the gitleaks and zizmor configs and the AM-1 table; a project's own paths have their own pattern (`PROJECT_GATE_RE`) and their own table instead of an edit to the kit's.
+- After reviews of an installed project: a failed read of the pull request fails the job instead of reporting a moved head; the gate also holds the scripts the kit's guards call, the gitleaks and zizmor configs and the AM-1 table; a project's own paths have their own pattern (`PROJECT_GATE_RE`) and their own table instead of an edit to the kit's.

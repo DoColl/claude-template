@@ -184,7 +184,15 @@ jobs:
           # and its author. Any doubt holds: a head that is no longer HEAD_SHA,
           # a file count that does not match the range (the compare lists 300
           # files at most), a commit list cut short.
-          IFS=$'\t' read -r BASE_REF BASE_SHA PR_HEAD CHANGED AUTHOR <<< "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .base.sha, .head.sha, .changed_files, .user.login] | @tsv')"
+          # A failed read is an error, never "the head moved": inside
+          # `read … <<< "$(…)"` a failing call leaves every variable empty and
+          # the job green.
+          PR_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .base.sha, .head.sha, .changed_files, .user.login] | @tsv') || PR_INFO=""
+          IFS=$'\t' read -r BASE_REF BASE_SHA PR_HEAD CHANGED AUTHOR <<< "$PR_INFO"
+          if [ -z "$PR_HEAD" ]; then
+            echo "::error::PR #${PR} could not be read from the API — nothing was decided and nothing was merged. Re-run this job."
+            exit 1
+          fi
           if [ "$PR_HEAD" != "$HEAD_SHA" ]; then
             echo "::notice::PR #${PR}: head moved since the validated SHA — left as is, its own run decides."
             exit 0
@@ -520,7 +528,13 @@ jobs:
           # Same listing and gate as promote-from-ci (comments there): the
           # immutable range this event carries, never the pull request's
           # current files; a head or a base that is no longer the event's holds.
-          IFS=$'\t' read -r NOW_BASE PR_HEAD CHANGED <<< "$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .head.sha, .changed_files] | @tsv')"
+          # A failed read is an error, not a changed head (see promote-from-ci).
+          PR_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .head.sha, .changed_files] | @tsv') || PR_INFO=""
+          IFS=$'\t' read -r NOW_BASE PR_HEAD CHANGED <<< "$PR_INFO"
+          if [ -z "$PR_HEAD" ]; then
+            echo "::error::PR #${PR} could not be read from the API — nothing was decided and nothing was merged. Re-run this job."
+            exit 1
+          fi
           if [ "$PR_HEAD" != "$HEAD_SHA" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
             echo "::notice::PR #${PR}: head or base changed since this event — left as is."
             exit 0
