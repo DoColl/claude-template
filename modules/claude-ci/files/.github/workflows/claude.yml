@@ -39,8 +39,9 @@ jobs:
           fetch-depth: 1
 
       # git honours the configuration of a repository it finds inside the
-      # workspace, and a push could name any ref. A session writes neither to
-      # ~/.gitconfig nor outside the workspace, so both settings hold.
+      # workspace, and the action's push wrapper accepts any branch name. A
+      # session writes neither to ~/.gitconfig, nor outside the workspace, nor
+      # under .git/ (docs/conventions/claude-ci.md), so both settings hold.
       - name: Harden git for the session
         run: |
           hooks="$RUNNER_TEMP/claude-git-hooks"

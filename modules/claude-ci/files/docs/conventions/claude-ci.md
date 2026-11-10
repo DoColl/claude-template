@@ -4,7 +4,7 @@
 
 ## Status
 
-Ported from a workflow designed after a security review of running an agent in CI. **It has not been exercised end to end by the kit's authors** in this form: the first `@claude` in your repository is its test. Use a throwaway issue, then read the run log before relying on it.
+Ported from a workflow designed after a security review of running an agent in CI. **It has not been exercised end to end by the kit's authors** in this form: the first `@claude` in your repository is its test. Use a throwaway issue, then read the run log before relying on it. One piece was replayed locally, in throwaway repositories: the pre-push hook against the push wrapper of the pinned action. A session's own branch goes through; the default branch is refused.
 
 ## Why plain issues
 
@@ -27,7 +27,8 @@ Private is not enough by itself. Anyone who can write in an issue of the reposit
 ## What a run holds
 
 - **One GitHub credential, the job token.** `github_token` skips the App token exchange, so the job's `permissions:` are the real bound (`contents: write` to push a branch, `issues: write` to comment), there is no `id-token: write`, the token dies with the job, and its pushes start no workflow. The price: comments come from `github-actions[bot]`.
-- **With the tools the action allows, it pushes its own branches only.** A session produces a `claude/issue-N-*` branch. A global pre-push hook, installed in `$RUNNER_TEMP` before the session starts, refuses every other ref. That holds as long as the session can neither change git's configuration, nor skip hooks, nor call the API by itself: properties of the action's tool allowlist at the pinned commit, to re-read on every bump — not of the token, which can write any branch. The hook stops a push made by mistake or by a steered session using its tools; it is not a boundary around the token. Where your plan allows it, add a branch ruleset that refuses direct pushes to the default branch. The token cannot open a pull request (no `pull-requests` permission).
+- **With the tools the action allows, it pushes its own branches only.** A session produces a `claude/issue-N-*` branch, and a global pre-push hook, installed in `$RUNNER_TEMP` before the session starts, refuses every other ref. The hook is needed: the action's own push wrapper refuses flags and other remotes but accepts any branch name, the default branch included. Where your plan allows it, add a branch ruleset that refuses direct pushes to the default branch. The token cannot open a pull request (no `pull-requests` permission).
+- **That rests on the action, not on the token**, which can write any branch. The hook holds as long as a session can neither change git's configuration, nor skip hooks, nor call the API by itself. As read at the pinned commit, a session gets the read tools, file edits and a few file commands inside the workspace (the `acceptEdits` permission mode), `git add`, `git commit`, `git rm` and the push wrapper: no other git subcommand, no network client. Claude Code asks before a write under `.git/`, a protected path, and an unattended run has nobody to approve it (by its documentation; not tested here). Re-read all of it on every bump. The hook stops a push made by mistake or by a steered session using its tools; it is not a boundary around the token.
 - **git is hardened.** `safe.bareRepository=explicit`: git will not adopt a repository layout found inside the workspace, whose configuration could run commands.
 - **Assume the session can read every credential the job holds** (the job token, the Claude token). What bounds the risk is the input, not the output: no third party's text reaches a session.
 - A session's branch **never merges unattended**. With the `auto-merge` module that is enforced (`claude/issue-*` heads and any change to `claude.yml` are held for a human); without it, do not auto-merge them.
@@ -54,3 +55,4 @@ They stop a regression, not a deliberate edit by someone who can change the guar
 ## History
 
 - Installed with the kit. Differences from the workflow it was ported from: the issue author and the commenter must both be an owner, a member or a collaborator; `weekly-digest` issues are refused as well; the two zizmor exceptions (`dangerous-triggers` on `issue_comment`, `artipacked` on the checkout) are inline comments next to their justification instead of entries in `.github/zizmor.yml`.
+- A review of the kit asked what a session can really push. The action was read at the pinned commit and its push wrapper replayed against the hook; § What a run holds now states what was read instead of pointing at "the action's tool allowlist".

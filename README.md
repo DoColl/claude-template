@@ -73,12 +73,12 @@ Each module's convention page says where its piece comes from and what has actua
 | `security.yml`, zizmor rules, `npm audit` gate | Ported from production workflows. This generic variant has not run on GitHub yet. |
 | `auto-merge` | The original runs in production. This generic variant has not: its first pull requests are its test. |
 | `weekly-digest` | Unit-tested. Never run live, in the project it comes from either. |
-| `claude-ci` | Not exercised end to end. For private repositories only. |
+| `claude-ci` | Not exercised end to end; only its push hook was replayed locally, against the push wrapper of the pinned action. For private repositories only. |
 | `openspec` guard | Not run against the OpenSpec CLI by the kit's authors. |
 
 Treat anything marked "has not run" as a draft until you have watched it work once.
 
-One fresh-context security review has been run on the kit, on the Bash allowlist, `auto-merge`, `claude-ci`, the installer, the security workflow and the digest. What it confirmed is fixed: a bypass of the allowlist through shell comments, a merge gate that judged the pull request's live listing instead of the commits being merged, writes through a symlink leaving the project, and claims in the pages that were wider than the code. It did not read `node-audit`, `openspec`, `security-review` or the smaller guards. One review is not an audit.
+One fresh-context security review has been run on the kit, on the Bash allowlist, `auto-merge`, `claude-ci`, the installer, the security workflow and the digest. What it confirmed is fixed: a bypass of the allowlist through shell comments, a merge gate that judged the pull request's live listing instead of the commits being merged, writes through a symlink leaving the project, and claims in the pages that were wider than the code. One point it left open, what a CI session can push, was settled afterwards by reading the action at the pinned commit. It did not read `node-audit`, `openspec`, `security-review` or the smaller guards. One review is not an audit.
 
 ## What lands in your project
 
