@@ -38,7 +38,7 @@ What this does not cover: the kit itself. A project that wants more than the kit
 
 ## Checks
 
-- **PL-1** (`scripts/guards.d/25-plugin-pins.sh`, local only) — every `retained` plugin is installed at its recorded commit; no `rejected` plugin is installed. It reads a file Claude Code maintains and does not document (`~/.claude/plugins/installed_plugins.json`): a record without a commit counts as a mismatch, never as a pass. With an empty registry there is nothing to compare, and the machine's other plugins are not listed.
+- **PL-1** (`scripts/guards.d/25-plugin-pins.sh`, local only) — every `retained` plugin is installed at its recorded commit; no `rejected` plugin is installed. It reads a file Claude Code maintains and does not document (`~/.claude/plugins/installed_plugins.json`): a record without a commit counts as a mismatch, never as a pass, and a plugin installed in several scopes has one record per scope, each of which is compared. With an empty registry there is nothing to compare, and the machine's other plugins are not listed.
 - **AG-1** covers the agent's hook line like every other read-only agent.
 
 ## History

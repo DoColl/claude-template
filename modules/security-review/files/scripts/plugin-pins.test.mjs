@@ -42,6 +42,21 @@ test("a record without gitCommitSha is a mismatch, not a pass", () => {
   const r = run({ "kept@market": [{ scope: "user" }] });
   assert.equal(r.code, 1); assert.match(r.out, /FAIL — /);
 });
+// One record per scope: the first being right says nothing about the others.
+test("every installation record is compared, not only the first", () => {
+  let r = run({ "kept@market": [{ scope: "user", gitCommitSha: B }, { scope: "project", gitCommitSha: "0".repeat(40) }] });
+  assert.equal(r.code, 1, r.out); assert.match(r.out, /FAIL — kept@market installed from 0000000 \(project scope\) in 1 of its 2 installation records/);
+  r = run({ "kept@market": [{ scope: "user", gitCommitSha: B }, { scope: "project" }] });
+  assert.equal(r.code, 1, r.out); assert.match(r.out, /FAIL — .*\(no git \(project scope\)/);
+  r = run({ "kept@market": [{ scope: "user", gitCommitSha: B }, { scope: "project", gitCommitSha: B }] });
+  assert.equal(r.code, 0, r.out); assert.match(r.out, /ok — kept@market at bbbbbbb \(2 installation records\)/);
+  r = run({ "refused@market": [{ scope: "user", gitCommitSha: B }, { scope: "local", gitCommitSha: A }] });
+  assert.equal(r.code, 1, r.out); assert.match(r.out, /FAIL — .*rejected/);
+});
+test("an id with no installation record is not installed", () => {
+  const r = run({ "kept@market": [], "refused@market": [] });
+  assert.equal(r.code, 0, r.out); assert.match(r.out, /note — kept@market retained but not installed here/);
+});
 test("rejected plugin installed: FAIL, exit 1", () => {
   const r = run({ "refused@market": [{ scope: "user", gitCommitSha: "1".repeat(40) }] });
   assert.equal(r.code, 1); assert.match(r.out, /FAIL — .*rejected/);
