@@ -1,6 +1,6 @@
 ---
 name: harness-init
-description: Install or extend the claude-template harness in the current project — choose the modules (instruction files, sub-agents and their Bash allowlist, git hooks, security workflow, auto-merge, weekly digest, Claude in CI, OpenSpec), run the installer, then fill in what only the project knows. Use when the user asks to initialise, set up or add a module of the Claude Code harness in a repository.
+description: Install or extend the claude-template harness in the current project — choose the modules (instruction files, sub-agents and their Bash allowlist, git hooks, security workflow, a CI skeleton, auto-merge, weekly digest, Claude in CI, OpenSpec), run the installer, then fill in what only the project knows. Use when the user asks to initialise, set up or add a module of the Claude Code harness in a repository.
 ---
 
 # Initialise a project with claude-template
@@ -21,6 +21,14 @@ node <kit>/bin/harness.mjs status .        # only if .claude/harness.json exists
 ## 3. Choose the modules with the user
 
 Present the modules grouped by phase (`day-1`, `first-ci`, `pr-flow`, `on-demand`), each with its one-line summary. `core` is always installed; what a module requires is added automatically. Recommend the day-1 set (the modules flagged `recommended`) for a new project, and the later phases only when the project has what they need — a CI workflow before `auto-merge`, a private repository before `claude-ci`. The choice is the user's: ask, do not decide for them.
+
+For a new repository on GitHub that will work through pull requests, offer the whole set in one run rather than a second installation later — each installation is its own pull request to read and merge by hand:
+
+```bash
+node <kit>/bin/harness.mjs init . --modules git-hooks,agents,security-review,ci-security,ci-workflow,auto-merge
+```
+
+`ci-workflow` installs the CI workflow `auto-merge` waits for, under the same name, so nothing has to be written by hand. Leave it out when the project already has a CI workflow. Say what `auto-merge` means before the user accepts it: a green pull request is merged with nobody watching.
 
 Ask for a placeholder value only when the default is wrong for this project (`PROJECT_NAME` defaults to the directory name, `DEFAULT_BRANCH` to `main`, `CI_WORKFLOW` to `CI`).
 

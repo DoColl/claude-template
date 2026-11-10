@@ -77,6 +77,22 @@ test("HD-1: the gate lists the kit files that drifted from their recorded hash, 
   assert.match(gate(dir).stdout, /HD-1: no hashed file could be read/);
 });
 
+// The one-run installation the README and the harness-init skill give for a new repository: day-1 set, CI, unattended merge.
+test("day-1 and the pull-request flow install in one run, and the CI workflow carries the name auto-merge waits for", () => {
+  const command = /init \. --modules (git-hooks,agents,security-review,ci-security,ci-workflow,auto-merge)\n/;
+  const ids = command.exec(read(KIT_ROOT, "README.md"))?.[1];
+  assert.ok(ids, "the README gives the command");
+  assert.equal(command.exec(read(KIT_ROOT, "skills/harness-init/SKILL.md"))?.[1], ids, "the skill gives the same one");
+  const dir = tmp();
+  const r = cli("init", dir, "--modules", ids, "--set", "CI_WORKFLOW=Build and test");
+  assert.equal(r.status, 0, output(r));
+  assert.match(read(dir, ".github/workflows/ci.yml"), /^name: Build and test\n/);
+  assert.match(read(dir, ".github/workflows/auto-merge.yml"), /^    workflows: \["Build and test"\]$/m);
+  const g = gate(dir);
+  assert.equal(g.status, 0, output(g));
+  assert.doesNotMatch(g.stdout, /security\.yml is not called by any workflow|no workflow named/, "nothing is left to wire by hand");
+});
+
 test("core alone says nothing about what is not installed", () => {
   const dir = tmp();
   install(dir, []);

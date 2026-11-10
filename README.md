@@ -26,6 +26,14 @@ In a terminal it lists the modules and asks which to install. Without one, name 
 node /path/to/claude-template/bin/harness.mjs init . --modules git-hooks,agents,security-review
 ```
 
+A new repository on GitHub that will work through pull requests can take the day-1 set, the CI and the unattended merge in one run, and so in one installation pull request instead of two:
+
+```bash
+node /path/to/claude-template/bin/harness.mjs init . --modules git-hooks,agents,security-review,ci-security,ci-workflow,auto-merge
+```
+
+`ci-workflow` writes the CI workflow under the name `auto-merge` waits for (`CI`, or `--set CI_WORKFLOW=<name>`), so the two agree without an edit. Leave `ci-workflow` out if the project already has a CI workflow, and read `docs/conventions/auto-merge-policy.md` before the first pull request: from then on, green means merged.
+
 The installer prints what it wrote and what is left for you. Then:
 
 1. Fill the gaps it lists (`status .` shows them again): the project overview, the commands, the sensitive areas and the conventions in `CLAUDE.md`, the verification commands of the agents.
