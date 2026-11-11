@@ -34,6 +34,13 @@ const ALLOW_RO = [
   "grep -n -e '#include' src/a.c", "git grep -n -e \"# TODO\" -- src", "grep -e \\#x f", "grep -c -e 'a#b' f",
   // so is a glob character: quoted or escaped, the shell leaves the word alone, and git or grep reads its own pattern
   "git diff HEAD -- '*.md'", "git ls-files '*.sh'", "git ls-files \"scripts/*.sh\"", "git log --oneline -- 'src/[a-c]*'", "grep -e 'a*b' f", "grep -e a\\*b f", "grep -c -e '?' f", "git log --oneline '^main' HEAD", "grep -e '=x' f", "git diff --stat HEAD -- backend/'*'.ts",
+  "git diff 'HEAD^' HEAD", "git show --stat \"HEAD^2\"", "git diff HEAD\\^ HEAD", "git diff HEAD -- ':^docs'", "git blame -L '/^export/,+5' src/a.ts", "grep -n -e '^import' src/a.ts",
+  // a = or a ^ that the shell leaves alone: inside a word (HEAD~1 is not a pattern), quoted, or escaped
+  "git show --stat HEAD~1", "git diff HEAD~2 HEAD", "cat a''=b", "cat \"=\"ls", "grep -e \\=x f",
+  // -U takes its number attached, as git reads it; --unified= likewise
+  "git diff --unified=10 HEAD", "git log -p -U1 -1", "git show -U0 HEAD",
+  // a non-ASCII pattern is fine when no backslash or | follows the character
+  "grep -e '中文' f", "grep -e é f | head -3", "git grep -n -e 'é' -- src",
 ];
 const BLOCK_RO = [
   // writes / deletes / installs / network / other programs
@@ -62,10 +69,19 @@ const BLOCK_RO = [
   "git status --short # a comment", "ls . #", "ls .#", "cat f # '", "grep -e x#y f", "#", "# git status",
   // filename expansion: the shell replaces an unquoted * ? [ with the names in the directory AFTER the guard has
   // read the word, so a file named `--output=x` reaches git as an option nobody approved (a real write through a
-  // read-only agent). The same for a word starting with = (zsh: the path of that command) or ^ (zsh extended glob).
+  // read-only agent). The same for an unquoted ^ anywhere in a word (zsh extended glob) and for a word starting
+  // with = (zsh: the path of that command), empty quotes in front included: zsh drops them first.
   "git diff HEAD *", "git diff HEAD -- *", "git diff *", "cat *", "cat src/*", "ls *.md", "head -n 5 ?", "cat src/?.ts", "cat [a-z]*", "grep -e x [a-z]*", "wc -l backend/src/*.ts", "git log --oneline -- src/*",
   "git diff HEAD -- ?-output=pwn", "git show HEAD:*", "grep -rn --include=*.ts -e x backend/src", "git grep -n -e a* f", "grep -e a*b f", "grep -e x f*", "git ls-files *.sh", "git diff --stat HEAD -- backend/'*'.t?",
+  "git diff HEAD [-]-output=pwn.txt", "cat [ab].txt", "grep -e [x] f", "grep -rn --include=[a].ts -e x backend/src",
   "cat =ls", "git diff =x", "git log ^main", "cat ^a", "grep -e x ^f",
+  "git diff HEAD^ HEAD", "git show --stat HEAD^2", "git diff HEAD -- :^docs", "git blame -L /^export/,+5 src/a.ts", "git log --format=%h^%s -1", "cat src/^x",
+  "cat ''=ls", "cat \"\"=/bin/sh", "git diff ''=x", "grep -e x ''=f", "git log --oneline \"\"''=main HEAD", "git diff HEAD ''^x", "git log --oneline \"\"^main HEAD",
+  // git reads -U's value only attached: a bare -U leaves the next word to be parsed as an option of its own
+  "git diff -U --output=pwn.txt HEAD", "git log -p -U --output=pwn.txt -1", "git show -U --output=pwn.txt HEAD", "git diff -U 5 HEAD", "git diff -U--stat HEAD", "git diff --unified=--output=x HEAD",
+  // under GBK, Big5 or Shift_JIS, bash reads a non-ASCII character and a following \ or | as one character: the
+  // escaped quote this check saw is a live quote to bash, and `touch PWNED` ran (bash 3.2 and 5.3, LC_ALL=zh_CN.GBK)
+  "grep -e 中\\' -e '; touch PWNED; ' -e 中\\' f", "grep -e é\\x f", "git grep -n -e 中|cat f",
   // a pattern never spans lines
   "grep -e 'a\ntouch x\nb' f", "git grep -n -e \"a\nb\" f", "grep -e 'a\rb' f",
   // readers: pattern never bare, dangerous options, unknown clusters

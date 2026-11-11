@@ -16,7 +16,7 @@ hooks:
 
 You check that documentation keeps pace with a code change. You do not write docs; you report gaps.
 
-**Enforced by a hook (profile `readonly`):** Bash accepts only git read subcommands, the local gate (`./scripts/security-checks.sh --offline`) and `cat`/`head`/`tail`/`wc`/`grep -e <pattern>`/`ls` on project-relative paths, piped with `|`, `&&`, `||`; no `cd`, no `$(…)`, no redirection, no unquoted `*`, `?` or `[` (quote them: `'*.md'`), no other program. A blocked command is outside your remit: report the need, never work around it. Shapes and limits: `docs/conventions/agent-bash-guard.md`. Prefix git with `GIT_OPTIONAL_LOCKS=0` (a concurrent session may hold `index.lock`).
+**Enforced by a hook (profile `readonly`):** Bash accepts only git read subcommands, the local gate (`./scripts/security-checks.sh --offline`) and `cat`/`head`/`tail`/`wc`/`grep -e <pattern>`/`ls` on project-relative paths, piped with `|`, `&&`, `||`; no `cd`, no `$(…)`, no redirection, no unquoted `*`, `?`, `[` or `^` and no word starting with `=` (quote a pattern git or grep reads itself: `-- '*.md'`, `-e '^x'`; write `HEAD~1` for `HEAD^`; find files with Glob — given to `cat` or `ls`, a quoted pattern is a file name), no other program. A blocked command is outside your remit: report the need, never work around it. Shapes and limits: `docs/conventions/agent-bash-guard.md`. Prefix git with `GIT_OPTIONAL_LOCKS=0` (a concurrent session may hold `index.lock`).
 
 ## Procedure
 

@@ -131,13 +131,16 @@ function splitSegments(src) {
 // Filename expansion is refused in the same loop, for the same reason as
 // comments: the shell rewrites the word after this check has read it. An
 // unquoted `*`, `?` or `[` expands to the names in the directory, and a file
-// called `--output=x` then reaches git as an option nobody approved. A word
-// that starts with an unquoted `=` (zsh replaces `=name` with the path of that
-// command) or `^` (a negated pattern under zsh's extended globbing) changes
-// the same way. Quoted or escaped, each is a plain character and passes: git
-// and grep take their own patterns from the quoted form.
-const GLOB = "unquoted glob characters (* ? [) are not allowed — quote the argument: the shell would expand it into words this check never saw";
-const WORD_START = "a word cannot start with an unquoted = or ^ — quote it: the shell may expand it into something else";
+// called `--output=x` then reaches git as an option nobody approved. So does
+// an unquoted `^` under zsh's EXTENDED_GLOB, anywhere in a word: `^x` is every
+// name but x, `HEAD^` every name that begins with HEAD. A word that starts
+// with an unquoted `=` is replaced by zsh with the path of the command it
+// names. Empty quotes in front change nothing: zsh drops them before it looks
+// at the first character, so the test is on what the word holds so far, not
+// on whether a quote opened. Quoted or escaped, each is a plain character and
+// passes: git and grep take their own patterns from the quoted form.
+const GLOB = "unquoted glob characters (* ? [ ^) are not allowed: the shell would expand them into words this check never saw. Quote a pattern that git or grep reads itself (-- '*.md', --include='*.ts', -e '^x'), write HEAD~1 for HEAD^, and find files with the Glob tool: quoted, a pattern given to cat, head, tail, wc or ls is a file name";
+const WORD_START = "a word cannot start with an unquoted = (zsh replaces =name with the path of that command, empty quotes in front or not): quote it, '=x'";
 const REDIRECT_OK = /^([12]?>&[12]|(&|[12])?>{1,2}\/dev\/null)$/;
 function words(segment) {
   const out = []; let cur = ""; let q = null; let had = false; let quotedPart = false; let live = false;
@@ -152,8 +155,8 @@ function words(segment) {
     if (c === "\\") { const n = segment[i + 1] ?? ""; if (n === "<" || n === ">") throw new Error("escaped redirection characters are not allowed"); cur += n; i++; had = true; quotedPart = true; continue; }
     if (/\s/.test(c)) { flush(); continue; }
     if (c === "#") throw new Error(COMMENT); // splitSegments already refuses it; the two loops must agree
-    if (c === "*" || c === "?" || c === "[") throw new Error(GLOB);
-    if (!had && (c === "=" || c === "^")) throw new Error(WORD_START);
+    if (c === "*" || c === "?" || c === "[" || c === "^") throw new Error(GLOB);
+    if (cur === "" && c === "=") throw new Error(WORD_START);
     if (c === "<" || c === ">") live = true;
     cur += c; had = true;
   }
@@ -171,6 +174,9 @@ function projectRelative(tok) {
 }
 
 // Shared option walker: literal flags, value options, clusters; returns the positional args or an error string.
+// git reads the value of -U only attached (-U5): its value is optional, so a bare -U is a whole option and the
+// next word is parsed on its own — `git diff -U --output=x` writes x. Such an option never takes the next word.
+const ATTACHED_ONLY = ["-U"];
 function walkOptions(argv, { flags, values, letters = "", count = false, pattern = null }, who) {
   const positional = []; let patternSeen = !pattern;
   for (let k = 1; k < argv.length; k++) {
@@ -179,12 +185,12 @@ function walkOptions(argv, { flags, values, letters = "", count = false, pattern
     if (!a.startsWith("-") || (count && NUMBER.test(a))) { if (!a.startsWith("-")) positional.push(a); continue; }
     if (flags.includes(a)) continue;
     const attached = values.find(v => v.endsWith("=") ? a.startsWith(v) : a.startsWith(v) && a.length > v.length);
-    const separate = values.find(v => !v.endsWith("=") && a === v);
+    const separate = values.find(v => !v.endsWith("=") && a === v && !ATTACHED_ONLY.includes(v));
     if (attached || separate) {
       const opt = attached ?? separate; const val = attached ? a.slice(opt.length) : argv[++k];
       if (val === undefined) return `${who} ${opt} needs a value`;
       if (opt === pattern) { if (UNSAFE_PATTERN.test(val)) return "unsafe pattern"; patternSeen = true; continue; }
-      if (["-n", "-A", "-B", "-C", "--max-count="].includes(opt) && !NUMBER.test(val)) return `${who} ${opt} needs a number`;
+      if (["-n", "-A", "-B", "-C", "-U", "--unified=", "--max-count="].includes(opt) && !NUMBER.test(val)) return `${who} ${opt} needs a number`;
       if (!SAFE_VALUE.test(val)) return `unsafe value for ${opt}`;
       continue;
     }
@@ -244,6 +250,10 @@ export function decide(command, profile, config = EMPTY_CONFIG) {
   if (!PROFILES.includes(profile)) return { allow: false, reason: `unknown profile '${profile}'` };
   if (typeof command !== "string" || !command.trim()) return { allow: false, reason: "empty command" };
   if (command.length > 2000) return { allow: false, reason: "command too long" };
+  // Under a legacy multibyte locale (GBK, GB18030, Big5, Shift_JIS), bash reads a non-ASCII character and the
+  // byte after it as one character when that byte is a backslash or a `|`: what this check reads as an escape
+  // or a pipe is neither to the shell, and an escaped quote becomes a live one. zsh does not do this.
+  if (/[^\x00-\x7f][\\|]/.test(command)) return { allow: false, reason: "a backslash or | right after a non-ASCII character is not allowed: under some locales the shell reads the pair as one character" };
   const cfg = profile === "verify" ? config : EMPTY_CONFIG;
   try {
     const segs = splitSegments(command);
