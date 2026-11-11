@@ -63,7 +63,7 @@ Running `init` again is safe: files already in place are left alone.
 | `ci-security` | first CI | `security.yml` in two tiers, GitHub Actions rules with zizmor at zero, pinned scanners, a Dependabot skeleton |
 | `ci-workflow` | first CI, when the project has no CI workflow yet | a seed `ci.yml` whose first job calls `security.yml`, and whose pull-request filter keeps the Claude instruction files in |
 | `node-audit` | first CI, Node projects | an `npm audit` gate with per-advisory derogations |
-| `auto-merge` | pull-request flow | unattended squash-merge on green CI, with the gates that hold instruction files, CI-session branches and risky bumps for a human |
+| `auto-merge` | pull-request flow | unattended squash-merge on green CI, with the gates that hold instruction files, CI-session branches, risky bumps and — once the project names its tests — changes that delete or rewrite existing test lines, for a human |
 | `weekly-digest` | pull-request flow | one issue a week listing what waits on a human |
 | `claude-ci` | on demand | `@claude` on plain issues of a private repository, with the job token only |
 | `openspec` | on demand | the OpenSpec convention (specs for current behaviour, changes for work in flight) and its validation guard |

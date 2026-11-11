@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AM-1, AM-4, AM-5, AM-6, AM-7 — invariants of .github/workflows/auto-merge.yml
+# AM-1, AM-4, AM-5, AM-6, AM-7, AM-8 — invariants of .github/workflows/auto-merge.yml
 # (docs/conventions/auto-merge-policy.md). That workflow merges pull requests
 # with nobody watching, so what it must never do is pinned here.
 #
@@ -26,6 +26,13 @@
 #         workflow name is waited for, the pull request is selected by its head
 #         SHA, every merge call passes that SHA, and the SHA comes from the
 #         triggering event.
+#   AM-8  tests that get weaker. Green means merged, and green is what the
+#         tests say, so a pull request that deletes, renames or rewrites lines
+#         of an existing file under TEST_HOLD_RE is held. The workflow's own
+#         jq selection is extracted and run on the file shapes the compare API
+#         returns (it needs jq, as the workflow does); the pattern is defined
+#         once, every merging job applies it, and the `test` / `not-test`
+#         rows of scripts/auto-merge-paths.txt are run on it.
 #
 # AM-2 and AM-3 are unused on purpose. In the workflow this guard was first
 # written for, they covered a post-merge deploy dispatch: whether the default
@@ -99,18 +106,19 @@ TABLE=scripts/auto-merge-paths.txt
 if [ -n "$RE" ] && [ -n "$PROJECT_RE" ] && [ -f "$TABLE" ]; then
   while read -r want p rest; do
     case "$want" in ''|'#'*) continue ;; esac
-    if [ -z "$p" ] || [ -n "$rest" ]; then bad 1 "$TABLE: expected 'hold <path>' or 'pass <path>', got: $want $p $rest"; continue; fi
+    if [ -z "$p" ] || [ -n "$rest" ]; then bad 1 "$TABLE: expected '<hold|pass|test|not-test> <path>', got: $want $p $rest"; continue; fi
     got=pass
     if grep -qiE -e "$RE" -e "$PROJECT_RE" <<< "$p" 2> /dev/null; then got=hold; fi
     case "$want" in
       hold|pass) [ "$got" = "$want" ] || bad 1 "$TABLE says '$want $p' but the gate would $got it — fix PROJECT_GATE_RE or the row" ;;
-      *) bad 1 "$TABLE: expected 'hold <path>' or 'pass <path>', got: $want $p" ;;
+      test|not-test) ;; # TEST_HOLD_RE rows: AM-8
+      *) bad 1 "$TABLE: expected 'hold <path>', 'pass <path>', 'test <path>' or 'not-test <path>', got: $want $p" ;;
     esac
   done < "$TABLE"
 fi
 # One definition, at the workflow level: a job- or step-level `env:` could
 # otherwise shadow it with a weaker pattern and this check would not see it.
-for var in CLAUDE_GATE_RE PROJECT_GATE_RE; do
+for var in CLAUDE_GATE_RE PROJECT_GATE_RE; do # TEST_HOLD_RE: AM-8
   defined=$(grep -cE "^ *$var:" "$AM" || true)
   if [ "$defined" != "1" ]; then
     bad 1 "$var is defined $defined time(s) in $AM — exactly one definition, in the workflow-level env"
@@ -578,6 +586,64 @@ if [ "$foreign_base" != "0" ]; then
   bad 7 "BASE_SHA / BASE_REF must come from the triggering event or from the gate step's output"
 fi
 pass 7 "the gate reads the immutable range that is merged, the base is re-read before each merge, and a failed read fails the job"
+
+# ── AM-8 — tests that get weaker are held ───────────────────────────────────
+# The CI that went green ran the tests as the pull request left them. What the
+# gate can see without running anything is whether an EXISTING test lost
+# something: the selection below is the workflow's own, run on the shapes of
+# a compare listing.
+TEST_RE=$(sed -n "s/^  TEST_HOLD_RE: '\(.*\)'$/\1/p" "$AM")
+defined=$(grep -cE "^ *TEST_HOLD_RE:" "$AM" || true)
+if [ -z "$TEST_RE" ] || [ "$defined" != "1" ]; then
+  bad 8 "TEST_HOLD_RE must be defined exactly once (single-quoted, non-empty; '^\$' holds nothing) in the workflow-level env of $AM — found $defined"
+else
+  rc=0
+  grep -qiE "$TEST_RE" <<< "x" 2> /dev/null || rc=$?
+  [ "$rc" -le 1 ] || bad 8 "TEST_HOLD_RE is not a usable extended regular expression: $TEST_RE"
+  if [ -f "$TABLE" ]; then
+    while read -r want p rest; do
+      case "$want" in test|not-test) ;; *) continue ;; esac
+      [ -n "$p" ] && [ -z "$rest" ] || continue # malformed rows: reported by AM-1
+      got=not-test
+      if grep -qiE -e "$TEST_RE" <<< "$p" 2> /dev/null; then got=test; fi
+      [ "$got" = "$want" ] || bad 8 "$TABLE says '$want $p' but TEST_HOLD_RE reads it as $got — fix the pattern or the row"
+    done < "$TABLE"
+  fi
+fi
+# Every merging job reads the same selection, applies the pattern to it and
+# holds on any match — and both read the facts from the immutable range.
+selections=$(sed -n "s/^ *SHRUNK=\$(jq -r '\(.*\)' <<< \"\$RANGE\")$/\1/p" "$AM")
+n_sel=$(grep -c . <<< "$selections" || true)
+n_distinct=$(sort -u <<< "$selections" | grep -c . || true)
+applied=$(grep -cxF '          if [ -n "$SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$SHRUNK" || true); fi' "$AM" || true)
+held=$(awk '/^          if \[ "\$WEAKENED" != "0" \]; then$/ { armed = 1; next } armed && /^            exit 0$/ { n++; armed = 0 } /^          fi$/ { armed = 0 } END { print n + 0 }' "$AM")
+facts=$(grep -cF 'changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]' "$AM" || true)
+if [ "$n_sel" != "$merging" ] || [ "$n_distinct" != "1" ] || [ "$applied" != "$merging" ] || [ "$held" != "$merging" ] || [ "$facts" != "$merging" ]; then
+  bad 8 "$merging merging job(s), but $n_sel select the weakened files ($n_distinct distinct selection(s)), $applied apply TEST_HOLD_RE, $held hold on a match and $facts read the per-file facts from the range — every merging job must do all four, with one selection"
+fi
+merged_after=$(awk '/^          if \[ "\$WEAKENED" != "0" \]; then$/ { f = 1; next } f && /^          fi$/ { f = 0 } f && /merge=true|pulls\/|gh pr ready/' "$AM" | grep -c . || true)
+[ "$merged_after" = "0" ] || bad 8 "the branch that holds a pull request weakening tests must only report and exit"
+if ! command -v jq > /dev/null 2>&1; then
+  if [ -n "${CI:-}" ]; then bad 8 "jq is needed to run the selection of weakened files"; else note "AM-8: jq not found — the selection of weakened files was not run"; fi
+elif [ "$n_distinct" = "1" ]; then
+  filter=$(sort -u <<< "$selections")
+  am8() { # am8 <expected: listed paths, space-separated, or -> <label> <one file object of a compare listing>
+    local got
+    got=$(jq -r "$filter" <<< "{\"changes\": [$3]}" 2> /dev/null | tr '\n' ' ' | sed 's/ $//')
+    [ "${got:--}" = "$1" ] || bad 8 "weakened-files selection on '$2': listed '${got:--}', expected '$1'"
+  }
+  am8 -                  'a new test file'                 '{"filename":"tests/b.test.js","status":"added","additions":40,"deletions":0}'
+  am8 -                  'lines added to an existing test' '{"filename":"tests/a.test.js","status":"modified","additions":12,"deletions":0}'
+  am8 tests/a.test.js    'an assertion rewritten'          '{"filename":"tests/a.test.js","status":"modified","additions":1,"deletions":1}'
+  am8 tests/a.test.js    'test lines removed'              '{"filename":"tests/a.test.js","status":"modified","additions":0,"deletions":9}'
+  am8 tests/a.test.js    'a test file deleted'             '{"filename":"tests/a.test.js","status":"removed","additions":0,"deletions":30}'
+  am8 'old/a.js tests/a.test.js' 'a test renamed away, unchanged' '{"filename":"old/a.js","previous_filename":"tests/a.test.js","status":"renamed","additions":0,"deletions":0}'
+  am8 tests/a.snap       'a change with no line count (binary snapshot, mode)' '{"filename":"tests/a.snap","status":"modified","additions":0,"deletions":0}'
+  am8 tests/a.test.js    'a status the gate does not know' '{"filename":"tests/a.test.js","status":"changed","additions":3,"deletions":0}'
+  am8 tests/a.test.js    'no line counts at all'           '{"filename":"tests/a.test.js","status":"modified"}'
+  am8 tests/c.test.js    'a copy'                          '{"filename":"tests/c.test.js","status":"copied","additions":0,"deletions":0}'
+fi
+pass 8 "a pull request that deletes, renames or rewrites lines of an existing file under TEST_HOLD_RE is held by the $merging merging job(s)"
 
 # Advisory: nothing merges code until the workflow waited for exists.
 ci_name=$(sed -n 's/^    workflows: \["\(.*\)"]$/\1/p' "$AM")

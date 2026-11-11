@@ -1,6 +1,6 @@
 # Auto-merge policy
 
-**Rule (CLAUDE.md § Security workflow › Auto-merge policy):** every pull request whose `__HARNESS_CI_WORKFLOW__` run is green is squash-merged, pinned to the commit CI validated, and its head branch is deleted; a pull request whose every file is documentation merges at once, without CI. Nothing that touches Claude instruction files, nothing from a CI Claude session's branch and no Dependabot bump the gate holds is ever merged unattended.
+**Rule (CLAUDE.md § Security workflow › Auto-merge policy):** every pull request whose `__HARNESS_CI_WORKFLOW__` run is green is squash-merged, pinned to the commit CI validated, and its head branch is deleted; a pull request whose every file is documentation merges at once, without CI. Nothing that touches Claude instruction files, nothing from a CI Claude session's branch, no Dependabot bump the gate holds and, once `TEST_HOLD_RE` names the project's tests, nothing that deletes or rewrites lines of an existing test is ever merged unattended.
 
 ## Status
 
@@ -42,6 +42,16 @@ The pattern lives in the workflow file because the workflow checks nothing out: 
 What is not in the kit's list, and is yours to decide: any other script a guard runs or reads (a dependency-audit gate and its list of derogations, a reporting script), and the workflows that call the gate (§ Residual risks).
 
 Such a pull request stays open until someone merges it from the GitHub UI. A mixed one (code plus a `CLAUDE.md` bullet) waits too; keep the instruction change in the same pull request anyway, the hand merge is the price of the rule.
+
+### Tests that get weaker (AM-8)
+
+Green means merged, and green is whatever the tests say. The CI run that just passed ran the tests *as the pull request left them*: a session that could not make a test pass and rewrote its assertion, or deleted the test, gets the same green as one that fixed the code — and here nobody reads the diff at that moment.
+
+`TEST_HOLD_RE`, a third pattern in the workflow's `env`, names the tests (and their fixtures and snapshots). Both jobs read, from the same immutable range, what each changed file is: a pull request is held when a file matching the pattern is **deleted**, **renamed** (old or new path), has **a line removed or rewritten**, or changed with no line count at all (a binary snapshot, a file mode). What keeps merging on green: a **new** test file, and **lines added** to an existing one — writing tests is never slowed down, taking something away from them is. A held pull request is marked ready by `promote-from-ci` like any other; `promote-docs` leaves a docs-only one as it is.
+
+As shipped the pattern is `^$`, which matches no path, so nothing is held until the project says where its tests are — the kit does not guess a layout. A typical value is `'(^|/)tests?/|\.(test|spec)\.[a-z]+$'`. Each kind of path comes with a `test <path>` row in `scripts/auto-merge-paths.txt`, and a `not-test <path>` row for a neighbour the pattern must not catch; AM-8 runs the pattern on them. An unusable pattern holds every pull request that changes an existing file.
+
+This is a tripwire, not a proof that the tests still test. It does not see a test neutered by **added** lines only (an early return, a skip marker — forbid those with a lint rule that CI runs), a test runner's configuration that stops collecting a directory (put that file in the pattern), or code changed so that the assertion no longer exercises it. And a refactoring that legitimately rewrites tests is held with the rest: that hand merge is the price, as for instruction files.
 
 ### Branches written by a CI Claude session
 
@@ -124,6 +134,7 @@ A session still working on a merged branch is unaffected: a push before the clea
 - A Dependabot entry's `indirect` type is trusted from the commit text; it is not cross-checked against an open alert.
 - Security updates are not subject to `cooldown` (GitHub documents it as a version-updates option): a fix version merges as soon as its CI is green.
 - Without a post-merge dispatch, the default branch is tested before the merge only (§ After the merge).
+- `TEST_HOLD_RE` holds nothing as shipped, and once filled it sees removed and rewritten lines only: a test disabled by added lines, or by a change outside the pattern, still merges on green (§ Tests that get weaker).
 
 ## Checks
 
@@ -134,6 +145,7 @@ A session still working on a merged branch is unaffected: a push before the clea
 - **AM-5** — the workflow's own `dependabot_verdict` and `bump_level` are extracted and run on the commit-body shapes that must merge and the ones that must hold; the author check, the exact `merge` verdict and `MAJOR_HOLD_RE` are pinned; `dependabot.yml` sets no `allow` and has no `.yaml` twin.
 - **AM-6** — one workflow is waited for, the pull request is selected by its head SHA, every merge passes that SHA, and it comes from the triggering event.
 - **AM-7** — the gate judges the range that is merged: no listing of the pull request's current files or commits, one read of `compare/<base commit>...<validated head>` per merging job, a head check before the file count is trusted, the base re-read right before each merge, and the base taken from the event or from the gate. A pull request that cannot be read fails the job.
+- **AM-8** — the workflow's own selection of weakened files is extracted and run on the file shapes a compare listing returns (new file and added lines pass; a deletion, a rename, a removed or rewritten line, a change without line counts are listed); `TEST_HOLD_RE` is defined once and usable, every merging job applies it to that selection and only reports and exits on a match; the `test` / `not-test` rows of `scripts/auto-merge-paths.txt` get their stated outcome. Needs `jq`: without it the selection is not run locally, and the check fails on a runner.
 
 AM-1 also requires `CLAUDE_GATE_RE` and `PROJECT_GATE_RE` to be defined exactly once each, in the workflow-level `env`: a job- or step-level definition would shadow them.
 
@@ -145,3 +157,4 @@ AM-2 and AM-3 are unused: they belong to a post-merge dispatch (§ After the mer
 - After a security review of the kit: the gate reads the immutable range instead of the pull request's live file and commit listings (AM-7); the gate runner, every guard and the plugin registry are held for a hand merge; `CLAUDE_GATE_RE` must be defined once.
 - After reviews of an installed project: a failed read of the pull request fails the job instead of reporting a moved head; the gate also holds the scripts the kit's guards call, the gitleaks and zizmor configs and the AM-1 table; a project's own paths have their own pattern (`PROJECT_GATE_RE`) and their own table instead of an edit to the kit's.
 - `AGENTS.md` joined `CLAUDE_GATE_RE`, at any depth: Claude Code reads it as instructions where no `CLAUDE.md` stands in for it, and as Markdown it rode the docs fast path.
+- `TEST_HOLD_RE` and AM-8: a pull request that deletes or rewrites lines of an existing test is held. Unit-tested by the guard on sample listings; like the rest of this workflow, not yet watched on a live pull request.

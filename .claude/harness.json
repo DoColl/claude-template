@@ -118,11 +118,11 @@
     },
     ".github/workflows/auto-merge.yml": {
       "module": "auto-merge",
-      "sha256": "76bc820d86ef0f864f942a32c3e5e0f9b2019e2eb6ee088208e911296da90518"
+      "sha256": "528d8be5974508e5c51e128e2f8037322041f2acbfdcf10620ca3355decb52e2"
     },
     "docs/conventions/auto-merge-policy.md": {
       "module": "auto-merge",
-      "sha256": "3c9435d8ef0e9416a48a8c79221a9682cfc39c5582727b67de4567714cd7e361"
+      "sha256": "1a541d5643f159b9ef7435b83e820146cccbc3a991b5c71cc650330a0daebfa8"
     },
     "scripts/auto-merge-paths.txt": {
       "module": "auto-merge",
@@ -130,7 +130,7 @@
     },
     "scripts/guards.d/40-auto-merge.sh": {
       "module": "auto-merge",
-      "sha256": "a5a8eba2550e6c068e9af84ffa038c3fd2cdc006502b788a5ac3a68c9462bd77"
+      "sha256": "d52ecf094ec55172824e508958c740f4e66c784e1698f09be45420dcf9cf1a55"
     },
     ".github/workflows/weekly-digest.yml": {
       "module": "weekly-digest",
@@ -138,7 +138,7 @@
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "2de6432ff17702c1878d10bd3620e7cb9d990463f2c69b4e344fb6bda46283c2"
+      "sha256": "4a1437c0a8f6f3ce7fade838d36f825abf33644377f1fee40efd30acc031c260"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
@@ -150,11 +150,11 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "d01b5217ce19e90bcd076fb16c63234df593b8853703f4e9df0a08e74db54720"
+      "sha256": "3f47de1d08900b7fc6f409cc059f36d198a5249841f1084e89c7e992ee3a40d9"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",
-      "sha256": "6a6fa8dd613a7beaf917dbdd3b7bacca68ba3547f375eaec5f3c7ebeb3c4bec1"
+      "sha256": "4fb7d160eba427ad8d01ba86b7614036158c9e742c2bbda437143952ea228890"
     }
   },
   "fragments": [

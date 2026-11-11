@@ -92,6 +92,18 @@ env:
   # documentation set. None of it merges unattended; rows in
   # scripts/auto-merge-paths.txt.
   PROJECT_GATE_RE: '^(modules|lib|bin|skills|test)/|^(README|docs/module-authoring)\.md$'
+  # Tests an unattended merge must not weaken (ERE on paths, matched like the
+  # two patterns above). Green means merged, and green is whatever the tests
+  # say: a pull request that deletes or renames a file matching this pattern,
+  # or removes or rewrites a line of one, is held for a hand merge. A new test
+  # file, and lines added to an existing one, keep merging on green. `^$`
+  # matches no path: nothing is held as shipped. An unusable pattern holds
+  # every pull request that changes an existing file. A tripwire, not a proof:
+  # docs/conventions/auto-merge-policy.md § Tests that get weaker.
+  # Here: the kit's tests are test/ and the self-tests under modules/, which
+  # PROJECT_GATE_RE already holds whole. What is left is the root copy of an
+  # installed self-test, which only changes through an update of its module.
+  TEST_HOLD_RE: '^scripts/.*\.test\.mjs$'
   # Where a Dependabot major is held even when it is an indirect dependency's
   # security update (ERE on the changed paths; `.github/` is always held).
   # `.` matches every path: as shipped, every Dependabot major waits for a hand
@@ -211,7 +223,7 @@ jobs:
           # gated path (CLAUDE.md → docs/legacy.md) is still seen. The count is
           # checked against the pull request's changed_files: any gap holds.
           RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
-                    --jq '{total: .total_commits, commits: [.commits[] | {login: (.author.login // "unknown"), message: .commit.message}], files: [.files[]? | [.filename, (.previous_filename // "")]]}')
+                    --jq '{total: .total_commits, commits: [.commits[] | {login: (.author.login // "unknown"), message: .commit.message}], files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
           ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
           if [ "$LISTED" != "$CHANGED" ]; then
@@ -227,6 +239,20 @@ jobs:
           CLAUDE_FILES=$(grep -i -E -c -e "$CLAUDE_GATE_RE" -e "$PROJECT_GATE_RE" <<< "$PATHS" || true)
           if [ "$CLAUDE_FILES" != "0" ]; then
             echo "::notice::PR #${PR} touches ${CLAUDE_FILES} file(s) matched by CLAUDE_GATE_RE or PROJECT_GATE_RE — never merged unattended, merge it by hand."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Tests that get weaker (AM-8). SHRUNK lists every file of the range
+          # that is not new and did more than gain lines — deleted, renamed
+          # (old and new path), a line removed or rewritten, or a change with
+          # no line count (a binary snapshot, a mode). One of them under
+          # TEST_HOLD_RE holds the pull request, whoever wrote it: the CI that
+          # just went green ran the tests as this pull request left them.
+          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE")
+          WEAKENED=0
+          if [ -n "$SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$SHRUNK" || true); fi
+          if [ "$WEAKENED" != "0" ]; then
+            echo "::notice::PR #${PR} deletes, renames or rewrites lines of ${WEAKENED} existing file(s) matched by TEST_HOLD_RE — never merged unattended, read what the tests lost and merge it by hand."
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -544,8 +570,9 @@ jobs:
             echo "::notice::PR #${PR}: unreadable base or head commit — leaving it for a hand merge."
             exit 0
           fi
-          ROWS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
-                   --jq '.files[]? | [.filename, (.previous_filename // "")] | @tsv')
+          RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
+                    --jq '{files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
+          ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
           if [ "$LISTED" != "$CHANGED" ]; then
             echo "::notice::PR #${PR}: file listing incomplete (${LISTED} of ${CHANGED}) — leaving it for a hand merge."
@@ -566,6 +593,17 @@ jobs:
           fi
           if [ "$NON_DOCS" != "0" ]; then
             echo "PR #${PR} touches ${NON_DOCS} non-docs file(s) — deferring to the CI gate (promote-from-ci)."
+            exit 0
+          fi
+          # Tests that get weaker (AM-8, see promote-from-ci): a test or a
+          # fixture kept as documentation is held here too. It stays a draft:
+          # the one line that marks a pull request ready in this job is the
+          # gate's above (AM-4).
+          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE")
+          WEAKENED=0
+          if [ -n "$SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$SHRUNK" || true); fi
+          if [ "$WEAKENED" != "0" ]; then
+            echo "::notice::PR #${PR} deletes, renames or rewrites lines of ${WEAKENED} existing file(s) matched by TEST_HOLD_RE — never merged unattended, lift draft and merge it by hand."
             exit 0
           fi
           gh pr ready "$PR" || true

@@ -24,3 +24,7 @@ pass docs/conventions/local-gate.md
 pass src/README.md
 pass package.json
 pass docs/modules/x.md
+
+test scripts/weekly-digest.test.mjs
+not-test scripts/weekly-digest.mjs
+not-test docs/conventions/weekly-digest.md

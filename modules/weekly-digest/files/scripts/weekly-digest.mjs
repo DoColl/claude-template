@@ -87,14 +87,25 @@ export function readDocsRe(autoMergeYml) {
 }
 
 /**
- * { gateRe, docsRe, autoMerge }: read from auto-merge.yml when that workflow is
- * installed (and it throws if the file lost a declaration), built-in otherwise.
+ * The tests auto-merge.yml will not let a pull request weaken (TEST_HOLD_RE,
+ * AM-8), or null: an auto-merge.yml installed before that pattern existed has
+ * none, and `^$`, the shipped value, matches no path.
+ */
+export function readTestRe(autoMergeYml) {
+  const m = autoMergeYml.match(/^ {2}TEST_HOLD_RE: '(.*)'$/m);
+  return m && m[1] !== '^$' ? new RegExp(m[1], 'i') : null;
+}
+
+/**
+ * { gateRe, docsRe, testRe, autoMerge }: read from auto-merge.yml when that
+ * workflow is installed (and it throws if the file lost a declaration),
+ * built-in otherwise.
  */
 export function loadRules(dir = join(ROOT, '.github/workflows')) {
   const file = join(dir, 'auto-merge.yml');
-  if (!existsSync(file)) return { gateRe: new RegExp(DEFAULT_GATE_RE, 'i'), docsRe: new RegExp(DEFAULT_DOCS_RE), autoMerge: false };
+  if (!existsSync(file)) return { gateRe: new RegExp(DEFAULT_GATE_RE, 'i'), docsRe: new RegExp(DEFAULT_DOCS_RE), testRe: null, autoMerge: false };
   const yml = readFileSync(file, 'utf8');
-  return { gateRe: readGateRe(yml), docsRe: readDocsRe(yml), autoMerge: true };
+  return { gateRe: readGateRe(yml), docsRe: readDocsRe(yml), testRe: readTestRe(yml), autoMerge: true };
 }
 
 /** Workflow files that declare a schedule trigger. */
@@ -151,7 +162,7 @@ export function parseDeadline(body) {
  * `autoMerge`: auto-merge.yml is installed (green PRs are expected to merge on
  * their own). `hasCi`: a CI workflow exists (a run is expected on every PR).
  */
-export function prReason(pr, { gateRe, docsRe, autoMerge = true, hasCi = true }, now) {
+export function prReason(pr, { gateRe, docsRe, testRe = null, autoMerge = true, hasCi = true }, now) {
   const ageH = (now - new Date(pr.createdAt)) / HOUR;
   const { files } = pr;
   // The CI workflow skips docs-only PRs (paths-ignore): no run is expected then.
@@ -185,11 +196,13 @@ export function prReason(pr, { gateRe, docsRe, autoMerge = true, hasCi = true },
     return 'touches `.github/workflows/`: merge by hand if auto-merge got a 403';
   }
   if (dependabot) return 'Dependabot bump held by `auto-merge.yml` (0.x, unreadable version…): see the run, merge by hand';
+  // Only paths are known here, not which lines went: the run says whether AM-8 held it.
+  if (testRe && files.some((p) => testRe.test(p))) return 'touches tests (`TEST_HOLD_RE`): held if it deleted or rewrote test lines — see the `auto-merge.yml` run, merge by hand';
   return 'CI green but not merged: check `auto-merge.yml`';
 }
 
 /** Pure: data in, { count, markdown } out. */
-export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, gateRe, docsRe, autoMerge = true, hasCi = true }) {
+export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, gateRe, docsRe, testRe = null, autoMerge = true, hasCi = true }) {
   const sections = [];
   let count = 0;
   const section = (title, lines) => {
@@ -201,7 +214,7 @@ export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, ga
   const ageD = (d) => Math.floor((now - new Date(d)) / DAY);
 
   section('Pull requests', prs.flatMap((pr) => {
-    const why = prReason(pr, { gateRe, docsRe, autoMerge, hasCi }, now);
+    const why = prReason(pr, { gateRe, docsRe, testRe, autoMerge, hasCi }, now);
     return why ? [item(pr.number, pr.title, `— ${why} (${ageD(pr.createdAt)} d)`)] : [];
   }));
 
