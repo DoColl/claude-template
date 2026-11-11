@@ -2,6 +2,7 @@
   "name": "claude-template",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "A modular Claude Code harness for a project: instruction files, sub-agents, hooks, a local gate and CI, installed module by module.",
   "type": "module",
   "bin": { "harness": "bin/harness.mjs" },

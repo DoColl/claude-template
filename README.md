@@ -150,3 +150,7 @@ node --test test/*.test.mjs     # unit tests, static rules on every module, end-
 ```
 
 `CLAUDE.md` at the root of this repository holds the rules for changing the kit; `docs/module-authoring.md` the contract for modules.
+
+## License and security
+
+MIT, see `LICENSE`. To report a vulnerability in a piece of the kit, see `SECURITY.md`.
