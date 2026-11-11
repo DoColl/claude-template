@@ -81,14 +81,15 @@ Each module's convention page says where its piece comes from and what has actua
 | Bash allowlist of the agents | The decision logic comes from production. This kit's variant reads the verification commands from a config file and carries a fix the review below produced; it is covered by its test table, and must be checked live once in your project (`docs/conventions/agent-bash-guard.md` § Live check). |
 | `session-settings` | Written from Claude Code's documentation. The guard is tested; the settings file has never been read by a live session here. Its page has a live check. |
 | Agents, review skill, plugin pins | Adapted from production; the wording is new where project specifics were removed. |
-| `security.yml`, zizmor rules, `npm audit` gate | Ported from production workflows. This generic variant has not run on GitHub yet. |
-| `ci-workflow` | Never run on GitHub as shipped. The call to `security.yml` is the one its convention page documents; the pull-request path filter with re-inclusions is written from GitHub's documented rules, not from an observed run. |
-| `auto-merge` | The original runs in production. This generic variant has not: its first pull requests are its test. |
+| `security.yml`, zizmor rules | Ported from production workflows. This generic variant has run on the kit's own repository: the enforcing tier (gitleaks, then the gate with zizmor) called from CI on pull requests and on a push, and one standalone run of both tiers, Semgrep, Trivy and the SBOM included, on a documentation push. The weekly schedule and the manual dispatch have not fired yet. |
+| `npm audit` gate | Ported from a production workflow. This generic variant has not run on GitHub yet. |
+| `ci-workflow` | Not run as shipped. Its call to `security.yml` has run in the kit's own CI, which is written the same way. The pull-request path filter with re-inclusions is still written from GitHub's documented rules: no pull request touching only instruction files has been watched starting a run. |
+| `auto-merge` | The original runs in production. This generic variant has merged nothing yet. On the kit's own repository `promote-docs` ran twice and held a pull request that touched gated paths; the module was then uninstalled there, its ruleset not being enforced. No unattended merge, no `promote-from-ci` run and no `TEST_HOLD_RE` hold has been watched: your first pull requests are their test. |
 | `weekly-digest` | Unit-tested. Never run live, in the project it comes from either. |
 | `claude-ci` | Not exercised end to end; only its push hook was replayed locally, against the push wrapper of the pinned action. For private repositories only. |
 | `openspec` guard | Not run against the OpenSpec CLI by the kit's authors. |
 
-Treat anything marked "has not run" as a draft until you have watched it work once.
+Treat anything marked "has not run", and every part of a piece this table does not say has run, as a draft until you have watched it work once.
 
 One fresh-context security review has been run on the kit, on the Bash allowlist, `auto-merge`, `claude-ci`, the installer, the security workflow and the digest. What it confirmed is fixed: a bypass of the allowlist through shell comments, a merge gate that judged the pull request's live listing instead of the commits being merged, writes through a symlink leaving the project, and claims in the pages that were wider than the code. One point it left open, what a CI session can push, was settled afterwards by reading the action at the pinned commit. It did not read `node-audit`, `openspec`, `security-review`, `session-settings` or the smaller guards, and it predates the `TEST_HOLD_RE` gate of `auto-merge`. One review is not an audit.
 

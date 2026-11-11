@@ -4,7 +4,7 @@
 
 ## Status
 
-The call to `security.yml` and the triggers are the ones `security-workflow.md` § Wiring describes. This file **has not run on GitHub** as shipped: the path filter with negations and re-inclusions is written from GitHub's documented filter rules, not from an observed run. Open one pull request that only touches `CLAUDE.md` and check that the run starts.
+The call to `security.yml` and the triggers are the ones `security-workflow.md` § Wiring describes. This file **has not run on GitHub** as shipped. The call to `security.yml`, in this exact form, has run in the kit's own CI workflow; the path filter with negations and re-inclusions is written from GitHub's documented filter rules, not from an observed run. Open one pull request that only touches `CLAUDE.md` and check that the run starts.
 
 ## Why
 
