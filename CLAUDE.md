@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+<!-- harness:budget 12000 -->
+
 Guidance for Claude Code when working **on the kit itself**. (The `CLAUDE.md` a project receives is `modules/core/files/CLAUDE.md`.)
 
 ## What this repository is
@@ -32,6 +34,24 @@ pipx run --spec 'zizmor==1.31.1' zizmor --offline <rendered project>/.github/wor
 - **Security-sensitive pieces** — the Bash allowlist (`modules/agents/files/.claude/hooks/`), `auto-merge`, `claude-ci`: when a generalisation would loosen a condition, keep the stricter form. Every allowlist change comes with rows in its test table (the allow, and the nearby form that must stay blocked).
 - The installer has no dependency beyond Node (>= 20). Keep it that way.
 
+## The kit's own harness
+
+The kit installs part of itself at its root (`.claude/harness.json`): `core`, `ci-security`, `auto-merge` and `weekly-digest`, so that those guards and workflows run somewhere before a project trusts them. The root copies are installed files, never edited in place: change the module, then run `node bin/harness.mjs update .` — a test fails while a root copy is behind its module. The one root file edited by hand is `.github/workflows/auto-merge.yml`, for the kit's own `PROJECT_GATE_RE`: `modules/`, `lib/`, `bin/`, `skills/`, `test/`, `README.md` and `docs/module-authoring.md` are never merged unattended (rows in `scripts/auto-merge-paths.txt`).
+
+- **The gate**: `./scripts/security-checks.sh` runs every guard in `scripts/guards.d/`, here and in CI. → `docs/conventions/local-gate.md`
+- **This file is budgeted**: under the bytes of its `harness:budget` line (CM-1), and every `docs/` path it names exists (CM-2). → `docs/conventions/claude-md.md`
+- **GitHub Actions**: zizmor stays at zero findings, every severity (GA-2), and every `uses:` is pinned to a full SHA (GA-1). `permissions: {}` at workflow level plus minimal per-job blocks; `persist-credentials: false` on every checkout unless the job pushes; no `${{ … }}` inside `run:` — go through `env:`; every `upload-artifact` declares `retention-days`. Unfixable finding → `.github/zizmor.yml` with its justification. → `docs/conventions/github-actions-rules.md`
+- **Dependabot**: patch and minor groups stay separate, behind a `cooldown`; `ignore` holds the deliberate pins only, each with its reason. It does not see lockfile overrides, vendored code, patches or the scanner pins of `security.yml` — the periodic audit stays the net. → `docs/conventions/dependabot.md`
+- **Weekly digest**: `weekly-digest.yml` opens one `weekly-digest` issue a week, assigned to the repository owner, listing what waits on a human (hand merges, red or missing CI, failed or skipped crons, stale alert issues, overdue follow-ups). Every `schedule:` workflow is watched automatically; it copies **titles only**, never PR or issue bodies. A dated follow-up is an issue labelled `deadline` with a `Due: YYYY-MM-DD` line, never a Markdown list. → `docs/conventions/weekly-digest.md`
+<!-- harness:rows conventions -->
+
+`.github/workflows/security.yml` has two tiers. **Enforcing** (blocks merges; every run, including the one CI calls first): gitleaks over the full history, then `./scripts/security-checks.sh` — the same gate as on a laptop. **Advisory** (log-only; weekly cron, manual dispatch and docs-only pushes): Semgrep, Trivy, a Syft SBOM. Scanner binaries are pinned releases verified by sha256 (`scripts/fetch-pinned-release.sh`); zizmor is pinned to an exact PyPI version, without a hash. Never `curl … | sh`, never a bump without the procedure. → `docs/conventions/security-workflow.md`
+
+### Auto-merge policy
+
+`.github/workflows/auto-merge.yml` squash-merges **every** pull request whose `CI` run is green, pinned to the validated SHA, then deletes the head branch; docs-only pull requests (every file in `docs/**`, `**.md`, `LICENSE`, `.gitignore`) merge at once, without CI. **Never merged unattended**: a pull request touching Claude instruction files (`CLAUDE_GATE_RE`: `.claude/`, `CLAUDE.md`, `.githooks/`, `.mcp.json`, this workflow, the gate and what it runs or reads; the project's own in `PROJECT_GATE_RE`) or from a `claude/issue-*` head, and the Dependabot bumps the gate holds (majors, Action minors) — marked ready, merged by hand. Draft does **not** pause a pull request: cancel its CI run or close it. A merge here emits no `push` event. A workflow-touching pull request may be refused at merge while CI is green: merge it by hand, never grant `workflows: write`. → `docs/conventions/auto-merge-policy.md`
+
+<!-- harness:slot security-workflow -->
 ## Before pushing
 
-`node --test test/*.test.mjs`, then zizmor on a rendered project and on `.github/workflows/`. A change to a guard or a workflow is also tried by hand in a scratch project: break the thing the guard protects and watch it go red.
+`node --test test/*.test.mjs` and `./scripts/security-checks.sh`, then zizmor on a rendered project and on `.github/workflows/`. A change to a guard or a workflow is also tried by hand in a scratch project: break the thing the guard protects and watch it go red.

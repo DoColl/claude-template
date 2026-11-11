@@ -1,0 +1,242 @@
+name: Security
+
+# Two tiers (docs/conventions/security-workflow.md):
+#  - Enforcing: gitleaks over the full history, then the project gate
+#    (scripts/security-checks.sh: every guard in scripts/guards.d/, the very
+#    script contributors run before pushing). Precise, actionable, and they
+#    fail the build. They run on EVERY invocation (each call from CI, cron,
+#    dispatch).
+#  - Advisory: Semgrep, Trivy, a Syft SBOM. Deep scanners that surface
+#    findings (Actions logs) but do NOT gate merges on their own —
+#    false-positive rates are too high to block on every finding without
+#    triage. Because nothing gates on them, they run ONLY on the standalone
+#    triggers (weekly cron, manual dispatch, docs-only pushes): on every
+#    pull-request push they would cost billed minutes for findings that are
+#    triaged asynchronously anyway. The `github.workflow == 'Security'` guard
+#    is how a job detects a standalone run: when a CI workflow calls this one
+#    through workflow_call, the github context is the CALLER's, so
+#    github.workflow reads the caller's name. Renaming this workflow means
+#    changing those guards.
+#
+# Every scanner binary this workflow downloads is a pinned release checked
+# against a sha256 written in its step's `env:`
+# (scripts/fetch-pinned-release.sh) — never an install
+# script or a binary fetched from a moving ref (`curl …/install.sh | sh`):
+# whoever controls that ref then decides what runs here. How to bump a pin:
+# docs/conventions/security-workflow.md § Pinned scanners. One exception:
+# zizmor, which the gate runs, is pinned to an exact version on PyPI, without
+# a hash (scripts/guards.d/30-github-actions.sh).
+#
+# Meant to be called from the project's CI workflow as its FIRST job on every
+# pull request and push to the default branch, so the rest of CI (lint, tests,
+# build, deploy) only runs once the enforcing tier is green
+# (docs/conventions/security-workflow.md § Wiring). The standalone triggers
+# below keep it runnable on its own for scheduled audits and ad-hoc checks.
+on:
+  workflow_call:
+  schedule:
+    - cron: '17 6 * * 1' # Mondays 06:17 UTC
+  workflow_dispatch:
+  # Standalone trigger for docs-only pushes, which the CI workflow is expected
+  # to skip through paths-ignore. The paths here MIRROR that paths-ignore, so a
+  # push that only touches docs gets scanned here; a push that touches code
+  # gets scanned through workflow_call. Mixed pushes (code + docs) trigger
+  # both, each in its own concurrency group below.
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+
+# Least privilege (zizmor excessive-permissions): no workflow-wide grant —
+# that would hand every job, including the ones that run third-party
+# scanners on the checked-out tree, the widest job's token. Each job gets
+# `contents: read` for its checkout and nothing else.
+#
+# When a CI workflow calls this one, the caller's job-level `permissions` is
+# the ceiling and these job-level blocks draw from it (a called workflow can
+# only narrow, never widen).
+permissions: {}
+
+# The workflow name keeps a standalone run and the one CI calls in separate
+# groups (github.workflow reads the caller's name there): sharing one, a push
+# touching code and docs makes them cancel each other, and when the called run
+# loses, whatever CI gates on it is silently skipped. Never cancel on the
+# default branch.
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # ─── Enforcing ─────────────────────────────────────────────────────────
+  # A single job: the checks share nothing but a checkout, yet separate jobs
+  # each round up to a full billed minute on every pull-request push. Each
+  # check step carries `if: ${{ !cancelled() }}`: with the default, the first
+  # red step skips every later one, and one red check hides the others. Every
+  # check reports on its own and the job still fails if any of them does.
+  enforcing:
+    name: Enforcing (gitleaks + gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history for the gitleaks scan below.
+          fetch-depth: 0
+          # zizmor artipacked: gitleaks reads the local object store, it
+          # never talks to the remote — no reason to leave the credential
+          # behind in .git/config for the rest of the job.
+          persist-credentials: false
+
+      # Pinned release + checksum: this binary IS the gate, so whoever can
+      # swap it decides what merges. gitleaks publishes no signature, so the
+      # hash was cross-checked against the release's checksums.txt and
+      # GitHub's own asset digest.
+      #
+      # --redact: a real leak must not be copied into the run log, which
+      # anyone with `actions: read` can open. Rules: gitleaks' defaults plus
+      # the repository's .gitleaks.toml when there is one; known history
+      # false positives: .gitleaksignore.
+      - name: Gitleaks (full history)
+        if: ${{ !cancelled() }}
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          scripts/fetch-pinned-release.sh gitleaks/gitleaks "v${GITLEAKS_VERSION}" \
+            "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "$GITLEAKS_SHA256" gitleaks "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/bin/gitleaks" git --redact --no-banner -v .
+
+      # The project gate: every guard in scripts/guards.d/, in order — the
+      # regression checks of SECURITY_REVIEW.md, the harness guards, and GA-2
+      # (zizmor on these very workflows, at the version pinned in
+      # scripts/guards.d/30-github-actions.sh). One script, run here and on
+      # every contributor's machine: nothing to keep in sync between the two.
+      # On a runner ($CI set) a guard whose tool is missing fails instead of
+      # skipping.
+      - name: Gate (scripts/security-checks.sh)
+        if: ${{ !cancelled() }}
+        run: ./scripts/security-checks.sh
+
+  # ─── Advisory (do not block merges) ────────────────────────────────────
+  # These jobs surface findings to the Actions log but never fail the
+  # check. Promote any concrete pattern into a guard (scripts/guards.d/) once
+  # the signal is clear.
+  #
+  # `if: github.workflow == 'Security'` — standalone runs only (weekly
+  # cron, manual dispatch, docs pushes). When a CI workflow calls this one,
+  # github.workflow is the caller's name and these jobs skip (skipped jobs
+  # bill nothing).
+
+  semgrep:
+    name: Semgrep (OWASP) — advisory
+    if: github.workflow == 'Security'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      # Digest-pinned (zizmor unpinned-images): semgrep/semgrep:latest as of
+      # 2026-07-18. Bump the digest deliberately to pick up new rule packs.
+      image: semgrep/semgrep@sha256:2b33f46ba66cf8cc2ad59ccfa7d22951fd00c632c38f1339e84ec8e6e641a942
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # zizmor artipacked
+      # No --error: we want findings reported, not blocking. No p/secrets
+      # either — it fires on the placeholders of example env files and on the
+      # findings catalogue; gitleaks is the secrets gate. The language-neutral
+      # pack only: add the packs of the project's languages as further
+      # `--config` lines (p/python, p/golang, p/javascript, p/typescript…).
+      # The trailing `||` guarantees the check stays green (it is advisory).
+      - name: Run Semgrep (results in log only)
+        run: |
+          semgrep scan \
+            --config p/owasp-top-ten \
+            --metrics=off \
+            || echo "::warning::Semgrep produced findings or errored — see step output above."
+
+  # Trivy — single scanner covering three angles the enforcing tier misses:
+  #   vuln     → dependency CVEs, read from the lockfiles it recognises
+  #   misconfig→ infrastructure as code: Dockerfiles, compose files, manifests
+  #   secret   → hardcoded credentials (complements gitleaks)
+  # --exit-code 0 keeps it advisory; promote real findings into the gate.
+  trivy:
+    name: Trivy (deps + IaC + secrets) — advisory
+    if: github.workflow == 'Security'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # zizmor artipacked
+      # The hash comes from the release's checksums.txt, itself checked with
+      # `cosign verify-blob` against its Sigstore bundle (signer:
+      # aquasecurity/trivy reusable-release.yaml@refs/tags/v0.76.0).
+      - name: Install Trivy (pinned release, checksum-verified)
+        env:
+          TRIVY_VERSION: 0.76.0
+          TRIVY_SHA256: e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7
+        run: |
+          scripts/fetch-pinned-release.sh aquasecurity/trivy "v${TRIVY_VERSION}" \
+            "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" "$TRIVY_SHA256" trivy "$RUNNER_TEMP/bin"
+      - name: Scan filesystem (results in log only)
+        run: |
+          "$RUNNER_TEMP/bin/trivy" fs \
+            --scanners vuln,misconfig,secret \
+            --severity HIGH,CRITICAL \
+            --no-progress --exit-code 0 . \
+            || echo "::warning::Trivy scan errored — see step output above."
+
+  # Syft — CycloneDX SBOM of the whole repository, uploaded as a build artifact
+  # so supply-chain provenance is auditable. Advisory: SBOM generation never
+  # gates the build.
+  sbom:
+    name: Syft SBOM (CycloneDX) — advisory
+    if: github.workflow == 'Security'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # continue-on-error: an SBOM flake — a transient artifact-service error
+    # or a re-run name collision — must never turn the run red and hold
+    # whatever waits on it.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false # zizmor artipacked
+      # The hash comes from the release's checksums.txt, itself checked with
+      # `cosign verify-blob` against its Sigstore bundle (signer:
+      # anchore/syft release.yaml@refs/heads/main, run from the v1.54.1 tag's
+      # commit).
+      - name: Install Syft (pinned release, checksum-verified)
+        env:
+          SYFT_VERSION: 1.54.1
+          SYFT_SHA256: c069905b391cc4c20a5ba65ad5c10be2a7ba074f8ea6ad203e24d14e303dad47
+        run: |
+          scripts/fetch-pinned-release.sh anchore/syft "v${SYFT_VERSION}" \
+            "syft_${SYFT_VERSION}_linux_amd64.tar.gz" "$SYFT_SHA256" syft "$RUNNER_TEMP/bin"
+      - name: Generate SBOM
+        run: |
+          "$RUNNER_TEMP/bin/syft" dir:. -q -o cyclonedx-json="$RUNNER_TEMP/sbom.cdx.json" \
+            && echo "SBOM components: $(grep -o '\"bom-ref\"' "$RUNNER_TEMP/sbom.cdx.json" | wc -l)" \
+            || echo "::warning::Syft SBOM generation errored — see step output above."
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: sbom-cyclonedx
+          path: ${{ runner.temp }}/sbom.cdx.json
+          if-no-files-found: ignore
+          # Advisory tier, regenerated by the weekly cron: a SBOM older than
+          # one cycle has no value and only eats the Actions storage quota.
+          retention-days: 7
+          # upload-artifact errors if the name already exists (e.g. on a
+          # re-run) unless overwriting is allowed.
+          overwrite: true

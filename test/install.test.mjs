@@ -325,3 +325,16 @@ test("git-hooks: pre-push blocks on a red gate and lets a deletion through", () 
   assert.equal(push(`(delete) ${"0".repeat(40)} refs/heads/old ${"2".repeat(40)}\n`).status, 0, "a push that only deletes refs skips the gate");
   assert.equal(push("").status, 0);
 });
+
+// The kit installs part of itself at its root, so that its guards and workflows run somewhere. Those copies are
+// installed files: a module changed without `node bin/harness.mjs update .` leaves the root running the old one.
+test("the kit's own installation is what the modules ship today", () => {
+  if (!readManifest(KIT_ROOT)) return; // a copy of the kit without its own harness
+  const s = summarize(buildPlan({ kit, target: KIT_ROOT, mode: "update" }));
+  const fix = "run `node bin/harness.mjs update .` at the root of the kit";
+  assert.deepEqual([s.created, s.updated, s.outdated, s.dropped], [[], [], [], []], `a root copy is behind its module: ${fix}`);
+  assert.deepEqual(s.conflicts, [], `a root file edited here was changed in its module: ${fix} --force, then put the kit's own values back`);
+  // The one kit file edited here: the kit's own PROJECT_GATE_RE. It stays the module's file but for those lines.
+  assert.deepEqual(s.local, [".github/workflows/auto-merge.yml"], "kit files edited at the root");
+  assert.deepEqual(s.fragmentsMissingSlot, []);
+});
