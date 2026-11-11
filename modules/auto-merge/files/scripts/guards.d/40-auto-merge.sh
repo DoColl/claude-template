@@ -53,11 +53,12 @@ if [ -z "$RE" ]; then
   bad 1 "CLAUDE_GATE_RE is not defined (single-quoted) in the workflow env of $AM"
 else
   # Must be gated: any .claude/ directory at any depth (and a bare .claude
-  # entry), CLAUDE.md / CLAUDE.local.md anywhere, case variants (a
+  # entry), CLAUDE.md / CLAUDE.local.md / AGENTS.md anywhere, case variants (a
   # case-insensitive file system folds them), the git hooks directory, a
   # project MCP config, the other files a Claude CI action reads as
   # configuration, and what runs Claude in CI or enforces all this.
   for p in CLAUDE.md claude.md sub/CLAUDE.md CLAUDE.local.md \
+           AGENTS.md agents.md sub/AGENTS.md docs/Agents.md \
            .claude/agents/x.md sub/.Claude/agents/x.md sub/.claude \
            .CLAUDE/settings.local.json .claude/harness.json .githooks/pre-commit \
            .mcp.json sub/.mcp.json .claude.json .ripgreprc .gitmodules \
@@ -74,6 +75,7 @@ else
   done
   # Must not be gated: ordinary docs, code and scripts.
   for p in README.md docs/foo.md docs/conventions/auto-merge-policy.md x/claudette.md \
+           docs/my-agents.md docs/agents.mdx AGENTS.md.txt docs/conventions/agent-bash-guard.md \
            src/claude.service.ts .gitignore LICENSE src/claude/x.ts \
            .github/workflows/ci.yml .github/dependabot.yml scripts/build.sh \
            scripts/security-checks.sh.md scripts/guards.dx/a.sh src/scripts/guards.d/a.sh \

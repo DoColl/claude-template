@@ -77,10 +77,10 @@ test('docs-only set and gate regex are read from auto-merge.yml', () => {
 test('the project\'s PROJECT_GATE_RE is read with the kit\'s pattern', () => {
   // a function as the replacement: a pattern ending in $ followed by a quote would otherwise be read as "$'"
   const withOwn = (re) => AUTO_MERGE.replace('jobs:', () => `  PROJECT_GATE_RE: '${re}'\njobs:`);
-  const own = readGateRe(withOwn('^tools/hooks/|^AGENTS\\.md$'));
+  const own = readGateRe(withOwn('^tools/hooks/|^GEMINI\\.md$'));
   isGate(own);
   assert.ok(own.test('tools/hooks/pre-run.sh'));
-  assert.ok(own.test('agents.md'), 'case-insensitive, like the gate');
+  assert.ok(own.test('gemini.md'), 'case-insensitive, like the gate');
   assert.ok(!own.test('src/tools/hooks/x.ts'));
   assert.ok(!readGateRe(withOwn('^$')).test('src/x.ts'), 'as shipped, it adds nothing');
 });

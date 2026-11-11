@@ -68,8 +68,9 @@ env:
   GH_REPO: ${{ github.repository }}
   # Paths that are EXECUTED by Claude Code or git rather than read (ERE, matched
   # case-insensitively per path segment): any `.claude/` directory at any depth
-  # (and a `.claude` symlink entry), CLAUDE.md / CLAUDE.local.md anywhere, the
-  # git hooks directory, a project MCP config at any depth, the other paths a
+  # (and a `.claude` symlink entry), CLAUDE.md / CLAUDE.local.md / AGENTS.md
+  # anywhere (Claude Code reads an AGENTS.md as instructions wherever no
+  # CLAUDE.md stands in for it), the git hooks directory, a project MCP config at any depth, the other paths a
   # Claude CI action treats as configuration read from the working directory
   # (`.claude.json`, `.ripgreprc`, `.gitmodules`, `.husky/`), what runs Claude
   # in CI and this workflow, and the gate with everything it runs or reads: the
@@ -81,7 +82,7 @@ env:
   # Single source for both jobs; AM-1 (scripts/guards.d/40-auto-merge.sh) tests
   # the pattern on a table of paths and asserts both jobs use it. This is the
   # kit's list: leave it as it is, so an update of the kit can refresh it.
-  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)claude(\.local)?\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^\.github/zizmor\.ya?ml$|^\.gitleaks(\.toml|ignore)$|^scripts/guards\.d/|^scripts/(security-checks\.sh|fetch-pinned-release\.sh|plugin-pins(\.test)?\.mjs|reviewed-plugins\.json|auto-merge-paths\.txt)$'
+  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)(claude(\.local)?|agents)\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^\.github/zizmor\.ya?ml$|^\.gitleaks(\.toml|ignore)$|^scripts/guards\.d/|^scripts/(security-checks\.sh|fetch-pinned-release\.sh|plugin-pins(\.test)?\.mjs|reviewed-plugins\.json|auto-merge-paths\.txt)$'
   # The project's own additions to the list above, applied with it by both
   # jobs (same syntax, same matching). `^$` matches no path: nothing is added
   # as shipped. An empty or unusable pattern holds every pull request.
@@ -162,8 +163,9 @@ jobs:
       # trailer that action parses out of Dependabot's commit message.
       #
       # Second exception: Claude instruction files (any `.claude/` directory,
-      # `CLAUDE.md`, `CLAUDE.local.md` — Claude Code walks up from its working
-      # directory, so a nested one counts too) steer every session that loads
+      # `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` — Claude Code walks up from
+      # its working directory and loads a subdirectory's file when it reads
+      # there, so a nested one counts too) steer every session that loads
       # them. A green CI proves nothing about them, so they never merge
       # unattended — the PR stays open for a hand merge.
       - name: Merge gate (Claude config, Dependabot breaking bumps and Action minors)
