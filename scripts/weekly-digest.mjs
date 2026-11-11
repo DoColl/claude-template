@@ -33,6 +33,10 @@ const STALE_PR_HOURS = 48;
 const STALE_ALERT_DAYS = 7;
 const DEADLINE_SOON_DAYS = 7;
 
+// A path pattern of a workflow trigger, in the subset the digest reads: literal
+// characters, `*` (within a directory) and `**` (across directories).
+const CI_PATTERN = /^[\w.\/*@-]+$/;
+
 /** The project's settings, checked once: a typo must fail the self-test (WD-1), not a scheduled run. */
 export function checkConfig(c) {
   const text = (v) => typeof v === 'string' && v.trim() !== '';
@@ -43,7 +47,11 @@ export function checkConfig(c) {
   if (typeof ages !== 'object' || Array.isArray(ages) || Object.values(ages).some((n) => !Number.isInteger(n) || n < 1)) {
     throw new Error('weekly-digest.config.mjs: maxAgeDays maps a workflow file name to a whole number of days');
   }
-  return { defaultBranch: c.defaultBranch, ciWorkflow: c.ciWorkflow, maxAgeDays: ages };
+  const also = c.ciAlsoRunsOn;
+  if (also !== undefined && (!Array.isArray(also) || also.some((g) => !text(g) || !CI_PATTERN.test(g)))) {
+    throw new Error("weekly-digest.config.mjs: ciAlsoRunsOn lists path patterns as the CI workflow writes them ('.claude/**', '**/CLAUDE.md')");
+  }
+  return { defaultBranch: c.defaultBranch, ciWorkflow: c.ciWorkflow, maxAgeDays: ages, ...(also === undefined ? {} : { ciAlsoRunsOn: also }) };
 }
 const SETTINGS = checkConfig(config);
 export const DEFAULT_BRANCH = SETTINGS.defaultBranch;
@@ -108,6 +116,60 @@ export function loadRules(dir = join(ROOT, '.github/workflows')) {
   return { gateRe: readGateRe(yml), docsRe: readDocsRe(yml), testRe: readTestRe(yml), autoMerge: true };
 }
 
+/** One path pattern of a workflow trigger as a regular expression source. */
+function patternSource(glob) {
+  if (!CI_PATTERN.test(glob)) {
+    throw new Error(`the CI workflow's path pattern '${glob}' is outside what the digest reads (literal characters, * and **): list the paths in ciAlsoRunsOn (weekly-digest.config.mjs)`);
+  }
+  return glob.replace(/\./g, '\\.').replace(/\*\*\/|\*\*|\*/g, (m) => (m === '**/' ? '(?:.*/)?' : m === '**' ? '.*' : '[^/]*'));
+}
+
+/** The patterns as one anchored expression, or null for an empty list. */
+export function ciAlsoRe(patterns) {
+  return patterns.length ? new RegExp(`^(?:${patterns.map(patternSource).join('|')})$`) : null;
+}
+
+/**
+ * The paths the CI workflow takes back after skipping documentation: in its
+ * `pull_request` trigger, the patterns of `paths` that follow the last `!`
+ * exclusion (`'**'`, `'!**.md'`, then `'CLAUDE.md'`). A pull request touching
+ * only such files does get a CI run, although every one of them is in the
+ * docs-only set. Returns the patterns, [] when the trigger takes nothing back.
+ */
+export function readCiAlso(ciYml) {
+  const lines = ciYml.split('\n').map((l) => l.replace(/(^|\s)#.*$/, ''));
+  const indentOf = (l) => l.match(/^ */)[0].length;
+  const unquote = (v) => v.trim().replace(/^(['"])(.*)\1$/, '$2');
+  const start = lines.findIndex((l) => /^ +["']?pull_request["']?:\s*$/.test(l));
+  if (start === -1) return [];
+  const patterns = [];
+  let list = null; // indentation of the `paths:` key while its block list is being read
+  for (const l of lines.slice(start + 1)) {
+    if (!l.trim()) continue;
+    if (indentOf(l) <= indentOf(lines[start])) break;
+    const item = l.match(/^ *- +(.*)$/);
+    if (list !== null && item && indentOf(l) >= list) { patterns.push(unquote(item[1])); continue; }
+    list = null;
+    const flow = l.match(/^ +paths:\s*\[(.*)\]\s*$/);
+    if (flow) patterns.push(...flow[1].split(',').map(unquote).filter(Boolean));
+    else if (/^ +paths:\s*$/.test(l)) list = indentOf(l);
+  }
+  const lastExclusion = patterns.findLastIndex((p) => p.startsWith('!'));
+  return lastExclusion === -1 ? [] : patterns.slice(lastExclusion + 1);
+}
+
+/**
+ * The expression of the paths CI runs on although they are documentation: the
+ * project's `ciAlsoRunsOn` setting when it has one, else what the trigger of
+ * the CI workflow says. null: none, or no CI workflow. Throws on a pattern the
+ * digest cannot read, so that WD-1 fails rather than a scheduled run.
+ */
+export function loadCiAlso(dir = join(ROOT, '.github/workflows'), settings = SETTINGS) {
+  if (settings.ciAlsoRunsOn) return ciAlsoRe(settings.ciAlsoRunsOn);
+  const file = ciWorkflowFile(settings.ciWorkflow, dir);
+  return file ? ciAlsoRe(readCiAlso(readFileSync(join(dir, file), 'utf8'))) : null;
+}
+
 /** Workflow files that declare a schedule trigger. */
 export function scheduledWorkflows(dir = join(ROOT, '.github/workflows')) {
   return readdirSync(dir)
@@ -162,13 +224,17 @@ export function parseDeadline(body) {
  * `autoMerge`: auto-merge.yml is installed (green PRs are expected to merge on
  * their own). `hasCi`: a CI workflow exists (a run is expected on every PR).
  */
-export function prReason(pr, { gateRe, docsRe, testRe = null, autoMerge = true, hasCi = true }, now) {
+export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, autoMerge = true, hasCi = true }, now) {
   const ageH = (now - new Date(pr.createdAt)) / HOUR;
   const { files } = pr;
   // The CI workflow skips docs-only PRs (paths-ignore): no run is expected then.
   // A truncated listing never counts as docs-only. Without a CI workflow, no
-  // run is expected at all.
-  const ciSkipped = !hasCi || (pr.filesComplete !== false && files.length > 0 && files.every((p) => docsRe.test(p)));
+  // run is expected at all. `ciAlso`: the documentation paths the CI workflow
+  // runs on all the same (instruction files it takes back after skipping
+  // Markdown) — one such file and a run IS expected, so a missing one is
+  // reported as missing, not as a hand merge that waits.
+  const docsOnly = pr.filesComplete !== false && files.length > 0 && files.every((p) => docsRe.test(p));
+  const ciSkipped = !hasCi || (docsOnly && !(ciAlso && files.some((p) => ciAlso.test(p))));
   const gated = files.some((p) => gateRe.test(p)) || pr.headRef.startsWith('claude/issue-');
   const ci = pr.ci; // { status, conclusion } of the latest CI run on the head SHA, or null
 
@@ -202,7 +268,7 @@ export function prReason(pr, { gateRe, docsRe, testRe = null, autoMerge = true, 
 }
 
 /** Pure: data in, { count, markdown } out. */
-export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, gateRe, docsRe, testRe = null, autoMerge = true, hasCi = true }) {
+export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, gateRe, docsRe, testRe = null, ciAlso = null, autoMerge = true, hasCi = true }) {
   const sections = [];
   let count = 0;
   const section = (title, lines) => {
@@ -214,7 +280,7 @@ export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, ga
   const ageD = (d) => Math.floor((now - new Date(d)) / DAY);
 
   section('Pull requests', prs.flatMap((pr) => {
-    const why = prReason(pr, { gateRe, docsRe, testRe, autoMerge, hasCi }, now);
+    const why = prReason(pr, { gateRe, docsRe, testRe, ciAlso, autoMerge, hasCi }, now);
     return why ? [item(pr.number, pr.title, `— ${why} (${ageD(pr.createdAt)} d)`)] : [];
   }));
 
@@ -358,6 +424,15 @@ async function mapLimit(items, limit, fn) {
 const openIssues = (gh, label) =>
   gh.all(`/issues?state=open&labels=${label}&per_page=100`, (d) => d.filter((i) => !i.pull_request));
 
+// WD-1 fails on a CI trigger the digest cannot read. A scheduled run must not:
+// a digest that says less is worth more than no digest.
+function ciAlsoOrWarn() {
+  try { return loadCiAlso(); } catch (e) {
+    console.log(`::warning::${e.message} — until then, a missing CI run on a documentation path may be listed as a hand merge`);
+    return null;
+  }
+}
+
 async function collect(gh, repo, now) {
   const rules = loadRules();
   const ciFile = ciWorkflowFile(CI_WORKFLOW); // null: no workflow carries that name
@@ -381,6 +456,7 @@ async function collect(gh, repo, now) {
     })),
     mainCi,
     ...rules,
+    ciAlso: ciAlsoOrWarn(),
     hasCi: ciFile !== null,
   };
 }

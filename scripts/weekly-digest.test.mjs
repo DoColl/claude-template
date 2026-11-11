@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildDigest, prReason, parseDeadline, safeText, readGateRe, readDocsRe, readTestRe, hasSchedule,
-  scheduledWorkflows, loadRules, workflowName, ciWorkflowFile, checkConfig,
+  scheduledWorkflows, loadRules, workflowName, ciWorkflowFile, checkConfig, readCiAlso, ciAlsoRe, loadCiAlso,
   MAX_AGE_DAYS, SELF, DEFAULT_BRANCH, CI_WORKFLOW,
 } from './weekly-digest.mjs';
 
@@ -136,6 +136,71 @@ test('the CI workflow is found by its name', () => {
   });
 });
 
+// A CI workflow that skips Markdown and then takes the instruction files back: the shape of the kit's CI skeleton.
+const CI_YML = [
+  'name: CI',
+  'on:',
+  '  push:',
+  '    branches: [main]',
+  "    paths-ignore: ['docs/**', '**.md', 'LICENSE', '.gitignore']",
+  '  pull_request:',
+  '    branches: [main]',
+  '    # the same set, as `paths` with negations: the last lines take',
+  '    # the instruction files back',
+  '    paths:',
+  "      - '**'",
+  "      - '!docs/**'",
+  "      - '!**.md' # every Markdown file",
+  "      - '!LICENSE'",
+  "      - '.claude/**'",
+  "      - '**/.claude/**'",
+  '      - "CLAUDE.md"',
+  '      - **/CLAUDE.md',
+  'permissions: {}',
+  'jobs:',
+  '  security:',
+  '    uses: ./x.yml',
+  '',
+].join('\n');
+
+test('the paths CI runs on although they are documentation are read from its pull_request trigger', () => {
+  assert.deepEqual(readCiAlso(CI_YML), ['.claude/**', '**/.claude/**', 'CLAUDE.md', '**/CLAUDE.md']);
+  const re = ciAlsoRe(readCiAlso(CI_YML));
+  for (const p of ['CLAUDE.md', 'packages/api/CLAUDE.md', '.claude/agents/reviewer.md', '.claude/settings.json', 'sub/.claude/skills/x/SKILL.md']) assert.ok(re.test(p), p);
+  for (const p of ['README.md', 'docs/x.md', 'docs/CLAUDE.md.txt', 'src/x.ts', 'XCLAUDE.md', 'claude.md', 'a.claude/x.md']) assert.ok(!re.test(p), p);
+  // the same list in flow style, and a sequence at the indentation of its key
+  assert.deepEqual(readCiAlso("on:\n  pull_request:\n    paths: ['**', '!**.md', 'CLAUDE.md']\n"), ['CLAUDE.md']);
+  assert.deepEqual(readCiAlso("on:\n  pull_request:\n    paths:\n    - '**'\n    - '!**.md'\n    - 'CLAUDE.md'\n  push:\n    paths:\n      - 'x/**'\n"), ['CLAUDE.md']);
+  // nothing taken back: no exclusion, an exclusion last, paths-ignore, another trigger's list, no pull_request key
+  for (const yml of [
+    "on:\n  pull_request:\n    paths:\n      - 'src/**'\n      - 'CLAUDE.md'\n",
+    "on:\n  pull_request:\n    paths:\n      - '**'\n      - '!**.md'\n",
+    "on:\n  pull_request:\n    paths-ignore: ['**.md']\n",
+    "on:\n  pull_request:\n    branches: [main]\n  push:\n    paths:\n      - '**'\n      - '!**.md'\n      - 'CLAUDE.md'\n",
+    'on: [push, pull_request]\n',
+    "on:\n  # pull_request:\n  #   paths: ['**', '!**.md', 'CLAUDE.md']\n  push:\n",
+  ]) assert.deepEqual(readCiAlso(yml), [], yml);
+  assert.equal(ciAlsoRe([]), null);
+  assert.throws(() => ciAlsoRe(['docs/[a-c]*.md']), /outside what the digest reads/, 'a pattern the digest cannot read is loud, not ignored');
+});
+
+test('the setting, when the project has one, replaces the reading; without a CI workflow there is nothing to read', () => inTmp((dir) => {
+  const settings = { ciWorkflow: 'CI' };
+  assert.equal(loadCiAlso(dir, settings), null, 'no workflow carries the name');
+  writeFileSync(join(dir, 'ci.yml'), CI_YML);
+  assert.ok(loadCiAlso(dir, settings).test('CLAUDE.md'));
+  const own = loadCiAlso(dir, { ...settings, ciAlsoRunsOn: ['AGENTS.md'] });
+  assert.ok(own.test('AGENTS.md')); assert.ok(!own.test('CLAUDE.md'));
+  assert.equal(loadCiAlso(dir, { ...settings, ciAlsoRunsOn: [] }), null, 'an empty list says: nothing, whatever the trigger shows');
+  writeFileSync(join(dir, 'ci.yml'), CI_YML.replace("'.claude/**'", "'.claude/{agents,skills}/**'"));
+  assert.throws(() => loadCiAlso(dir, settings), /ciAlsoRunsOn/);
+}));
+
+test('the CI workflow of this repository, if there is one, can be read', () => {
+  const re = loadCiAlso();
+  assert.ok(re === null || re instanceof RegExp);
+});
+
 test('settings are checked on import', () => {
   assert.equal(typeof DEFAULT_BRANCH, 'string');
   assert.equal(typeof CI_WORKFLOW, 'string');
@@ -147,6 +212,9 @@ test('settings are checked on import', () => {
   assert.throws(() => checkConfig({ ...ok, ciWorkflow: undefined }), /ciWorkflow/);
   assert.throws(() => checkConfig({ ...ok, maxAgeDays: { 'nightly.yml': '3' } }), /maxAgeDays/);
   assert.throws(() => checkConfig({ ...ok, maxAgeDays: ['nightly.yml'] }), /maxAgeDays/);
+  assert.deepEqual(checkConfig({ ...ok, ciAlsoRunsOn: ['.claude/**', '**/CLAUDE.md'] }).ciAlsoRunsOn, ['.claude/**', '**/CLAUDE.md']);
+  assert.ok(!('ciAlsoRunsOn' in checkConfig(ok)), 'unset: the trigger of the CI workflow is read');
+  for (const bad of ['CLAUDE.md', [''], [3], ['a b'], ['docs/[a-c].md'], ['!x']]) assert.throws(() => checkConfig({ ...ok, ciAlsoRunsOn: bad }), /ciAlsoRunsOn/, JSON.stringify(bad));
 });
 
 test('PR reasons', () => {
@@ -160,7 +228,7 @@ test('PR reasons', () => {
   assert.match(prReason(pr({ ci: null }), res, now), /no CI run/);
   assert.equal(prReason(pr({ ci: null, createdAt: new Date(now - 600000).toISOString() }), res, now), null);
   assert.match(prReason(pr({ ci: null, files: ['docs/x.md'] }), res, now), /docs-only/);
-  assert.match(prReason(pr({ ci: null, files: ['CLAUDE.md'] }), res, now), /Claude instruction files/, 'no CI by design, hand merge');
+  assert.match(prReason(pr({ ci: null, files: ['CLAUDE.md'] }), res, now), /Claude instruction files/, 'a CI that skips every Markdown file: no run by design, hand merge');
   assert.match(prReason(pr({ ci: null, files: ['CLAUDE.md', 'x.ts'] }), res, now), /no CI run/);
   assert.match(prReason(pr({ ci: null, files: ['docs/x.md'], filesComplete: false }), res, now), /no CI run/, 'truncated listing is never docs-only');
   assert.match(prReason(pr({ ci: { status: 'completed', conclusion: 'failure' }, createdAt: daysAgo(0) }), res, now), /failure/);
@@ -173,6 +241,22 @@ test('PR reasons', () => {
   assert.match(prReason(pr({ author: 'dependabot[bot]', updateTypes: ['semver-minor'], files: ['.github/workflows/ci.yml'] }), res, now), /Dependabot on `.github\/`/, 'the gate holds Action minors');
   assert.match(prReason(pr({ author: 'dependabot[bot]', updateTypes: ['semver-patch'], files: ['.github/workflows/ci.yml'] }), res, now), /403/, 'an Action patch: gate or 403, the run tells');
   assert.match(prReason(pr({ mergeableState: 'dirty', createdAt: daysAgo(0) }), res, now), /conflicts with/);
+});
+
+// A CI workflow that runs on the instruction files although they are Markdown: a pull request touching only them
+// must get a run, so a run that never started is a missing run — not a hand merge that merely waits.
+test('PR reasons when CI runs on some documentation paths', () => {
+  const also = { ...res, ciAlso: ciAlsoRe(readCiAlso(CI_YML)) };
+  assert.match(prReason(pr({ ci: null, files: ['CLAUDE.md'] }), also, now), /no CI run/, 'the run never started');
+  assert.match(prReason(pr({ ci: null, files: ['.claude/agents/x.md', 'docs/x.md'] }), also, now), /no CI run/, 'one such file is enough');
+  assert.equal(prReason(pr({ ci: null, files: ['CLAUDE.md'], createdAt: new Date(now - 600000).toISOString() }), also, now), null, 'give the run an hour to start');
+  assert.match(prReason(pr({ files: ['CLAUDE.md'] }), also, now), /Claude instruction files/, 'green: it waits for its hand merge');
+  assert.equal(prReason(pr({ files: ['CLAUDE.md'], createdAt: daysAgo(1) }), also, now), null, 'green and young');
+  assert.match(prReason(pr({ ci: { status: 'completed', conclusion: 'failure' }, files: ['CLAUDE.md'] }), also, now), /failure/);
+  assert.match(prReason(pr({ ci: null, files: ['docs/x.md'] }), also, now), /docs-only/, 'plain documentation is still skipped by CI');
+  assert.match(prReason(pr({ ci: null, files: ['README.md', 'LICENSE'] }), also, now), /docs-only/);
+  assert.match(prReason(pr({ ci: null, files: ['CLAUDE.md'] }), { ...also, hasCi: false }, now), /Claude instruction files/, 'no CI workflow: nothing to expect');
+  assert.match(prReason(pr({ ci: null, files: ['CLAUDE.md'] }), { ...also, autoMerge: false }, now), /no CI run/, 'with or without auto-merge.yml');
 });
 
 test('PR reasons without auto-merge.yml: a green PR simply waits for a merge', () => {
