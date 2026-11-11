@@ -1,6 +1,6 @@
 ---
 name: harness-init
-description: Install or extend the claude-template harness in the current project — choose the modules (instruction files, sub-agents and their Bash allowlist, git hooks, security workflow, a CI skeleton, auto-merge, weekly digest, Claude in CI, OpenSpec), run the installer, then fill in what only the project knows. Use when the user asks to initialise, set up or add a module of the Claude Code harness in a repository.
+description: Install or extend the claude-template harness in the current project — choose the modules (instruction files, session settings, sub-agents and their Bash allowlist, git hooks, security workflow, a CI skeleton, auto-merge, weekly digest, Claude in CI, OpenSpec), run the installer, then fill in what only the project knows. Use when the user asks to initialise, set up or add a module of the Claude Code harness in a repository.
 ---
 
 # Initialise a project with claude-template
@@ -52,6 +52,7 @@ The installer prints "Next steps" and counts the `TODO(harness)` markers; `statu
 - `CLAUDE.md` — project overview, architecture map, commands, the sensitive areas under "Before pushing", the conventions for new code. Read the codebase and propose text; do not invent a convention the code does not show. Keep each rule to a short bullet and put detail in `docs/conventions/`.
 - `.claude/hooks/agent-bash-guard.config.json` (agents module) — the exact verification commands: tests, build, type-check. Nothing that writes, installs or reaches the network.
 - `.claude/skills/project-security-review/SKILL.md` (security-review module) — the same sensitive areas, and the invariants.
+- `.claude/settings.json` (session-settings module) — a `Read(…)` deny rule for each place the codebase shows secrets are kept; drop the `.env` example carve-outs the project does not use. Never add an allow rule here on your own.
 
 **Stay inside the gaps.** This session fills `TODO(harness)` markers. It does not write an ADR, a convention page, a runbook, a guard or a finding unless the user asks for one: those record decisions and incidents the project has not had yet, and each one written now is a file someone must review.
 

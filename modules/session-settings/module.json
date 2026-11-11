@@ -1,0 +1,15 @@
+{
+  "id": "session-settings",
+  "title": "Session settings: secret files denied, Bash sandboxed",
+  "summary": "A .claude/settings.json seed that denies reading .env files and secrets/ and turns on Claude Code's Bash sandbox without dropping a prompt, with a guard against the settings that widen what every session may do.",
+  "phase": "day-1",
+  "order": 17,
+  "requires": ["core"],
+  "seed": [".claude/settings.json"],
+  "postInstall": [
+    "Read .claude/settings.json before committing it: it applies to every session opened in the repository. Add a Read(…) deny rule for each place your project keeps secrets (key files, credential directories, local databases).",
+    "The Bash sandbox needs bubblewrap and socat on Linux and WSL2 (nothing on macOS; native Windows has none). Where they are missing, Claude Code runs commands unsandboxed and only says so at startup: docs/conventions/session-settings.md § Sandbox.",
+    "This file has never been run live by the kit's authors: check it once in a session (docs/conventions/session-settings.md § Live check).",
+    "Restart open Claude Code sessions so they load the new settings."
+  ]
+}

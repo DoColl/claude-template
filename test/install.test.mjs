@@ -338,3 +338,42 @@ test("the kit's own installation is what the modules ship today", () => {
   assert.deepEqual(s.local, [".github/workflows/auto-merge.yml"], "kit files edited at the root");
   assert.deepEqual(s.fragmentsMissingSlot, []);
 });
+
+test("session-settings: the gate goes red when the settings file widens what every session may do", () => {
+  if (!kit.modules.has("session-settings")) return;
+  const dir = tmp();
+  install(dir, ["session-settings"]);
+  const file = ".claude/settings.json";
+  const shipped = JSON.parse(read(dir, file));
+  assert.equal(gate(dir).status, 0);
+  const red = (label, change, id) => {
+    const s = structuredClone(shipped);
+    change(s);
+    write(dir, file, `${JSON.stringify(s, null, 2)}\n`);
+    const r = gate(dir);
+    assert.equal(r.status, 1, `${label}: the gate must fail\n${output(r)}`);
+    assert.match(r.stderr, new RegExp(`FAIL\\s+${id}:`), label);
+  };
+  red("the .env rule removed", (s) => { s.permissions.deny = s.permissions.deny.filter((r) => r !== "Read(.env)"); }, "SS-1");
+  red(".env itself carved out", (s) => { s.permissions.deny.push("Read(!.env)"); }, "SS-1");
+  red("a wildcard carve-out", (s) => { s.permissions.deny.push("Read(!.env.*)"); }, "SS-1");
+  red("bypass mode", (s) => { s.permissions.defaultMode = "bypassPermissions"; }, "SS-2");
+  red("all of Bash allowed", (s) => { s.permissions.allow = ["Bash(*)"]; }, "SS-2");
+  red("every project MCP server approved", (s) => { s.enableAllProjectMcpServers = true; }, "SS-2");
+  red("hooks disabled", (s) => { s.disableAllHooks = true; }, "SS-2");
+  write(dir, file, "{ not json\n");
+  assert.match(gate(dir).stderr, /FAIL\s+SS-1: [^\n]*not valid JSON/);
+  // What a project may decide stays green, and is said.
+  const relaxed = structuredClone(shipped);
+  relaxed.permissions.allow = ["Bash(npm test)"];
+  delete relaxed.sandbox;
+  write(dir, file, `${JSON.stringify(relaxed, null, 2)}\n`);
+  const r = gate(dir);
+  assert.equal(r.status, 0, output(r));
+  assert.match(r.stdout, /note\s+SS-2: the Bash sandbox is not enabled/);
+  // A personal settings file in git applies to everyone.
+  write(dir, file, `${JSON.stringify(shipped, null, 2)}\n`);
+  write(dir, ".claude/settings.local.json", "{}\n");
+  assert.equal(run(dir, "git", ["add", "-f", ".claude/settings.local.json"]).status, 0);
+  assert.match(run(dir, "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "" } }).stderr, /FAIL\s+SS-3:/);
+});

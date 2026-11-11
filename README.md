@@ -58,6 +58,7 @@ Running `init` again is safe: files already in place are left alone.
 |---|---|---|
 | `core` | day 1 | `CLAUDE.md` skeleton with its byte budget, `docs/` (conventions, ADR, runbooks), the findings catalogue, the gate `scripts/security-checks.sh` and its `guards.d/` |
 | `git-hooks` | day 1 | `pre-commit` (gitleaks on staged changes) and `pre-push` (the gate, offline) |
+| `session-settings` | day 1, opt-in | a `.claude/settings.json` that denies reading `.env` files and `secrets/`, turns on the Bash sandbox without dropping a prompt, and a guard against the settings that widen every session |
 | `agents` | day 1 | `implementer`, `verifier`, `doc-sync` and `reviewer` agents, and the tested Bash allowlist that confines the read-only ones |
 | `security-review` | day 1 | `security-reviewer` agent (fresh context, read-only), the project review skill, and a check that Claude Code plugins stay at the commit that was reviewed |
 | `ci-security` | first CI | `security.yml` in two tiers, GitHub Actions rules with zizmor at zero, pinned scanners, a Dependabot skeleton |
@@ -78,6 +79,7 @@ Each module's convention page says where its piece comes from and what has actua
 |---|---|
 | The installer | Tested: `test/` installs every module alone and all together into scratch projects and runs their gate. |
 | Bash allowlist of the agents | The decision logic comes from production. This kit's variant reads the verification commands from a config file and carries a fix the review below produced; it is covered by its test table, and must be checked live once in your project (`docs/conventions/agent-bash-guard.md` § Live check). |
+| `session-settings` | Written from Claude Code's documentation. The guard is tested; the settings file has never been read by a live session here. Its page has a live check. |
 | Agents, review skill, plugin pins | Adapted from production; the wording is new where project specifics were removed. |
 | `security.yml`, zizmor rules, `npm audit` gate | Ported from production workflows. This generic variant has not run on GitHub yet. |
 | `ci-workflow` | Never run on GitHub as shipped. The call to `security.yml` is the one its convention page documents; the pull-request path filter with re-inclusions is written from GitHub's documented rules, not from an observed run. |
@@ -88,7 +90,7 @@ Each module's convention page says where its piece comes from and what has actua
 
 Treat anything marked "has not run" as a draft until you have watched it work once.
 
-One fresh-context security review has been run on the kit, on the Bash allowlist, `auto-merge`, `claude-ci`, the installer, the security workflow and the digest. What it confirmed is fixed: a bypass of the allowlist through shell comments, a merge gate that judged the pull request's live listing instead of the commits being merged, writes through a symlink leaving the project, and claims in the pages that were wider than the code. One point it left open, what a CI session can push, was settled afterwards by reading the action at the pinned commit. It did not read `node-audit`, `openspec`, `security-review` or the smaller guards. One review is not an audit.
+One fresh-context security review has been run on the kit, on the Bash allowlist, `auto-merge`, `claude-ci`, the installer, the security workflow and the digest. What it confirmed is fixed: a bypass of the allowlist through shell comments, a merge gate that judged the pull request's live listing instead of the commits being merged, writes through a symlink leaving the project, and claims in the pages that were wider than the code. One point it left open, what a CI session can push, was settled afterwards by reading the action at the pinned commit. It did not read `node-audit`, `openspec`, `security-review`, `session-settings` or the smaller guards, and it predates the `TEST_HOLD_RE` gate of `auto-merge`. One review is not an audit.
 
 ## What lands in your project
 
@@ -101,6 +103,7 @@ SECURITY_REVIEW.md                 the findings catalogue (yours)
   agents/                          implementer, verifier, doc-sync, reviewer, security-reviewer
   hooks/                           the Bash allowlist, its tests, its config (yours)
   skills/project-security-review/  the project's review skill (yours)
+  settings.json                    secret files denied, Bash sandbox (yours)
   harness.json                     what the installer did
 .githooks/                         pre-commit, pre-push
 .github/
