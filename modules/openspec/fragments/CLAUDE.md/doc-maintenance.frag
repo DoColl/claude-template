@@ -1,1 +1,1 @@
-- Behaviour change → an OpenSpec change (`openspec/changes/<id>/`): tasks ticked as they land, delta specs kept current, archived once merged
+- Behaviour change → an OpenSpec change (`openspec/changes/<id>/`): tasks ticked as they land, delta specs kept current, synced into the specs and archived once merged
