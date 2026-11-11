@@ -37,6 +37,8 @@ const ALLOW_RO = [
   "git diff 'HEAD^' HEAD", "git show --stat \"HEAD^2\"", "git diff HEAD\\^ HEAD", "git diff HEAD -- ':^docs'", "git blame -L '/^export/,+5' src/a.ts", "grep -n -e '^import' src/a.ts",
   // a = or a ^ that the shell leaves alone: inside a word (HEAD~1 is not a pattern), quoted, or escaped
   "git show --stat HEAD~1", "git diff HEAD~2 HEAD", "cat a''=b", "cat \"=\"ls", "grep -e \\=x f",
+  // -U takes its number attached, as git reads it; --unified= likewise
+  "git diff --unified=10 HEAD", "git log -p -U1 -1", "git show -U0 HEAD",
 ];
 const BLOCK_RO = [
   // writes / deletes / installs / network / other programs
@@ -73,6 +75,8 @@ const BLOCK_RO = [
   "cat =ls", "git diff =x", "git log ^main", "cat ^a", "grep -e x ^f",
   "git diff HEAD^ HEAD", "git show --stat HEAD^2", "git diff HEAD -- :^docs", "git blame -L /^export/,+5 src/a.ts", "git log --format=%h^%s -1", "cat src/^x",
   "cat ''=ls", "cat \"\"=/bin/sh", "git diff ''=x", "grep -e x ''=f", "git log --oneline \"\"''=main HEAD", "git diff HEAD ''^x", "git log --oneline \"\"^main HEAD",
+  // git reads -U's value only attached: a bare -U leaves the next word to be parsed as an option of its own
+  "git diff -U --output=pwn.txt HEAD", "git log -p -U --output=pwn.txt -1", "git show -U --output=pwn.txt HEAD", "git diff -U 5 HEAD", "git diff -U--stat HEAD", "git diff --unified=--output=x HEAD",
   // a pattern never spans lines
   "grep -e 'a\ntouch x\nb' f", "git grep -n -e \"a\nb\" f", "grep -e 'a\rb' f",
   // readers: pattern never bare, dangerous options, unknown clusters

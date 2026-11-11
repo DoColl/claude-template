@@ -174,6 +174,9 @@ function projectRelative(tok) {
 }
 
 // Shared option walker: literal flags, value options, clusters; returns the positional args or an error string.
+// git reads the value of -U only attached (-U5): its value is optional, so a bare -U is a whole option and the
+// next word is parsed on its own — `git diff -U --output=x` writes x. Such an option never takes the next word.
+const ATTACHED_ONLY = ["-U"];
 function walkOptions(argv, { flags, values, letters = "", count = false, pattern = null }, who) {
   const positional = []; let patternSeen = !pattern;
   for (let k = 1; k < argv.length; k++) {
@@ -182,12 +185,12 @@ function walkOptions(argv, { flags, values, letters = "", count = false, pattern
     if (!a.startsWith("-") || (count && NUMBER.test(a))) { if (!a.startsWith("-")) positional.push(a); continue; }
     if (flags.includes(a)) continue;
     const attached = values.find(v => v.endsWith("=") ? a.startsWith(v) : a.startsWith(v) && a.length > v.length);
-    const separate = values.find(v => !v.endsWith("=") && a === v);
+    const separate = values.find(v => !v.endsWith("=") && a === v && !ATTACHED_ONLY.includes(v));
     if (attached || separate) {
       const opt = attached ?? separate; const val = attached ? a.slice(opt.length) : argv[++k];
       if (val === undefined) return `${who} ${opt} needs a value`;
       if (opt === pattern) { if (UNSAFE_PATTERN.test(val)) return "unsafe pattern"; patternSeen = true; continue; }
-      if (["-n", "-A", "-B", "-C", "--max-count="].includes(opt) && !NUMBER.test(val)) return `${who} ${opt} needs a number`;
+      if (["-n", "-A", "-B", "-C", "-U", "--unified=", "--max-count="].includes(opt) && !NUMBER.test(val)) return `${who} ${opt} needs a number`;
       if (!SAFE_VALUE.test(val)) return `unsafe value for ${opt}`;
       continue;
     }
