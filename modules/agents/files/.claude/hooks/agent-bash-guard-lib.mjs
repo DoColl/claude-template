@@ -131,13 +131,16 @@ function splitSegments(src) {
 // Filename expansion is refused in the same loop, for the same reason as
 // comments: the shell rewrites the word after this check has read it. An
 // unquoted `*`, `?` or `[` expands to the names in the directory, and a file
-// called `--output=x` then reaches git as an option nobody approved. A word
-// that starts with an unquoted `=` (zsh replaces `=name` with the path of that
-// command) or `^` (a negated pattern under zsh's extended globbing) changes
-// the same way. Quoted or escaped, each is a plain character and passes: git
-// and grep take their own patterns from the quoted form.
-const GLOB = "unquoted glob characters (* ? [) are not allowed — quote the argument: the shell would expand it into words this check never saw";
-const WORD_START = "a word cannot start with an unquoted = or ^ — quote it: the shell may expand it into something else";
+// called `--output=x` then reaches git as an option nobody approved. So does
+// an unquoted `^` under zsh's EXTENDED_GLOB, anywhere in a word: `^x` is every
+// name but x, `HEAD^` every name that begins with HEAD. A word that starts
+// with an unquoted `=` is replaced by zsh with the path of the command it
+// names. Empty quotes in front change nothing: zsh drops them before it looks
+// at the first character, so the test is on what the word holds so far, not
+// on whether a quote opened. Quoted or escaped, each is a plain character and
+// passes: git and grep take their own patterns from the quoted form.
+const GLOB = "unquoted glob characters (* ? [ ^) are not allowed: the shell would expand them into words this check never saw. Quote a pattern that git or grep reads itself (-- '*.md', --include='*.ts', -e '^x'), write HEAD~1 for HEAD^, and find files with the Glob tool: quoted, a pattern given to cat, head, tail, wc or ls is a file name";
+const WORD_START = "a word cannot start with an unquoted = (zsh replaces =name with the path of that command, empty quotes in front or not): quote it, '=x'";
 const REDIRECT_OK = /^([12]?>&[12]|(&|[12])?>{1,2}\/dev\/null)$/;
 function words(segment) {
   const out = []; let cur = ""; let q = null; let had = false; let quotedPart = false; let live = false;
@@ -152,8 +155,8 @@ function words(segment) {
     if (c === "\\") { const n = segment[i + 1] ?? ""; if (n === "<" || n === ">") throw new Error("escaped redirection characters are not allowed"); cur += n; i++; had = true; quotedPart = true; continue; }
     if (/\s/.test(c)) { flush(); continue; }
     if (c === "#") throw new Error(COMMENT); // splitSegments already refuses it; the two loops must agree
-    if (c === "*" || c === "?" || c === "[") throw new Error(GLOB);
-    if (!had && (c === "=" || c === "^")) throw new Error(WORD_START);
+    if (c === "*" || c === "?" || c === "[" || c === "^") throw new Error(GLOB);
+    if (cur === "" && c === "=") throw new Error(WORD_START);
     if (c === "<" || c === ">") live = true;
     cur += c; had = true;
   }

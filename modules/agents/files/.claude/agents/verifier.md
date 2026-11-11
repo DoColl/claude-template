@@ -16,7 +16,7 @@ hooks:
 
 You run verification commands and condense their output. You never modify files.
 
-**Enforced by a hook (profile `verify`):** Bash accepts the verification commands below plus read-only shapes (git read subcommands, `cat`/`head`/`tail`/`wc`/`grep -e <pattern>`/`ls` on project-relative paths, with any `*`, `?` or `[` quoted). A blocked command is outside your remit: report the need, never work around it (`docs/conventions/agent-bash-guard.md`).
+**Enforced by a hook (profile `verify`):** Bash accepts the verification commands below plus read-only shapes (git read subcommands, `cat`/`head`/`tail`/`wc`/`grep -e <pattern>`/`ls` on project-relative paths, with any `*`, `?`, `[`, `^` or leading `=` quoted — only git and grep read a quoted pattern, so find files with Glob). A blocked command is outside your remit: report the need, never work around it (`docs/conventions/agent-bash-guard.md`).
 
 ## Commands you may run
 
