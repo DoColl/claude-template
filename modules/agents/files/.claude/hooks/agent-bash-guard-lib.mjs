@@ -250,6 +250,10 @@ export function decide(command, profile, config = EMPTY_CONFIG) {
   if (!PROFILES.includes(profile)) return { allow: false, reason: `unknown profile '${profile}'` };
   if (typeof command !== "string" || !command.trim()) return { allow: false, reason: "empty command" };
   if (command.length > 2000) return { allow: false, reason: "command too long" };
+  // Under a legacy multibyte locale (GBK, GB18030, Big5, Shift_JIS), bash reads a non-ASCII character and the
+  // byte after it as one character when that byte is a backslash or a `|`: what this check reads as an escape
+  // or a pipe is neither to the shell, and an escaped quote becomes a live one. zsh does not do this.
+  if (/[^\x00-\x7f][\\|]/.test(command)) return { allow: false, reason: "a backslash or | right after a non-ASCII character is not allowed: under some locales the shell reads the pair as one character" };
   const cfg = profile === "verify" ? config : EMPTY_CONFIG;
   try {
     const segs = splitSegments(command);

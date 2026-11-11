@@ -39,6 +39,8 @@ const ALLOW_RO = [
   "git show --stat HEAD~1", "git diff HEAD~2 HEAD", "cat a''=b", "cat \"=\"ls", "grep -e \\=x f",
   // -U takes its number attached, as git reads it; --unified= likewise
   "git diff --unified=10 HEAD", "git log -p -U1 -1", "git show -U0 HEAD",
+  // a non-ASCII pattern is fine when no backslash or | follows the character
+  "grep -e '中文' f", "grep -e é f | head -3", "git grep -n -e 'é' -- src",
 ];
 const BLOCK_RO = [
   // writes / deletes / installs / network / other programs
@@ -77,6 +79,9 @@ const BLOCK_RO = [
   "cat ''=ls", "cat \"\"=/bin/sh", "git diff ''=x", "grep -e x ''=f", "git log --oneline \"\"''=main HEAD", "git diff HEAD ''^x", "git log --oneline \"\"^main HEAD",
   // git reads -U's value only attached: a bare -U leaves the next word to be parsed as an option of its own
   "git diff -U --output=pwn.txt HEAD", "git log -p -U --output=pwn.txt -1", "git show -U --output=pwn.txt HEAD", "git diff -U 5 HEAD", "git diff -U--stat HEAD", "git diff --unified=--output=x HEAD",
+  // under GBK, Big5 or Shift_JIS, bash reads a non-ASCII character and a following \ or | as one character: the
+  // escaped quote this check saw is a live quote to bash, and `touch PWNED` ran (bash 3.2 and 5.3, LC_ALL=zh_CN.GBK)
+  "grep -e 中\\' -e '; touch PWNED; ' -e 中\\' f", "grep -e é\\x f", "git grep -n -e 中|cat f",
   // a pattern never spans lines
   "grep -e 'a\ntouch x\nb' f", "git grep -n -e \"a\nb\" f", "grep -e 'a\rb' f",
   // readers: pattern never bare, dangerous options, unknown clusters
