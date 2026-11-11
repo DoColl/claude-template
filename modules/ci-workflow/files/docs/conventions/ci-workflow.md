@@ -25,7 +25,7 @@ The path filter has a trap. A CI workflow usually skips documentation, and `CLAU
 ## Checks
 
 - **GA-1, GA-2** apply to this workflow like any other.
-- Nothing checks the path filter in the project. The kit's own tests check that the documentation set is the same in every workflow it ships and that each re-included path is one the merge gate holds.
+- This module ships no check of the path filter. The kit's own tests check that the documentation set is the same in every workflow it ships and that each re-included path is one the merge gate holds.
 
 ## History
 

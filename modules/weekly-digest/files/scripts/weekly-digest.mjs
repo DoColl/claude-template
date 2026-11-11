@@ -33,9 +33,12 @@ const STALE_PR_HOURS = 48;
 const STALE_ALERT_DAYS = 7;
 const DEADLINE_SOON_DAYS = 7;
 
-// A path pattern of a workflow trigger, in the subset the digest reads: literal
-// characters, `*` (within a directory) and `**` (across directories).
+// A path pattern of a workflow trigger, in the subset the digest reads: ASCII
+// letters and digits, `_ . - @ /`, `*` (within a directory) and `**` (across
+// directories). A wider set would need more escaping in patternSource.
 const CI_PATTERN = /^[\w.\/*@-]+$/;
+const CI_PATTERN_SET = 'ASCII letters and digits, _ . - @ /, * and **';
+const CI_PATTERN_WAY_OUT = 'a ?, […] or {…} pattern written as the paths it covers, any other character as *';
 
 /** The project's settings, checked once: a typo must fail the self-test (WD-1), not a scheduled run. */
 export function checkConfig(c) {
@@ -48,8 +51,12 @@ export function checkConfig(c) {
     throw new Error('weekly-digest.config.mjs: maxAgeDays maps a workflow file name to a whole number of days');
   }
   const also = c.ciAlsoRunsOn;
-  if (also !== undefined && (!Array.isArray(also) || also.some((g) => !text(g) || !CI_PATTERN.test(g)))) {
-    throw new Error("weekly-digest.config.mjs: ciAlsoRunsOn lists path patterns as the CI workflow writes them ('.claude/**', '**/CLAUDE.md')");
+  if (also !== undefined && !Array.isArray(also)) {
+    throw new Error("weekly-digest.config.mjs: ciAlsoRunsOn is a list of the paths CI takes back ('.claude/**', '**/CLAUDE.md')");
+  }
+  const bad = also === undefined ? -1 : also.findIndex((g) => !text(g) || !CI_PATTERN.test(g));
+  if (bad !== -1) {
+    throw new Error(`weekly-digest.config.mjs: ciAlsoRunsOn entry ${JSON.stringify(also[bad]) ?? String(also[bad])} is outside what the digest reads (${CI_PATTERN_SET}): list the paths CI takes back, ${CI_PATTERN_WAY_OUT}`);
   }
   return { defaultBranch: c.defaultBranch, ciWorkflow: c.ciWorkflow, maxAgeDays: ages, ...(also === undefined ? {} : { ciAlsoRunsOn: also }) };
 }
@@ -119,7 +126,7 @@ export function loadRules(dir = join(ROOT, '.github/workflows')) {
 /** One path pattern of a workflow trigger as a regular expression source. */
 function patternSource(glob) {
   if (!CI_PATTERN.test(glob)) {
-    throw new Error(`the CI workflow's path pattern '${glob}' is outside what the digest reads (literal characters, * and **): list the paths in ciAlsoRunsOn (weekly-digest.config.mjs)`);
+    throw new Error(`the CI workflow's path pattern '${glob}' is outside what the digest reads (${CI_PATTERN_SET}): list the paths it takes back in ciAlsoRunsOn (weekly-digest.config.mjs), ${CI_PATTERN_WAY_OUT}`);
   }
   return glob.replace(/\./g, '\\.').replace(/\*\*\/|\*\*|\*/g, (m) => (m === '**/' ? '(?:.*/)?' : m === '**' ? '.*' : '[^/]*'));
 }
@@ -135,11 +142,19 @@ export function ciAlsoRe(patterns) {
  * exclusion (`'**'`, `'!**.md'`, then `'CLAUDE.md'`). A pull request touching
  * only such files does get a CI run, although every one of them is in the
  * docs-only set. Returns the patterns, [] when the trigger takes nothing back.
+ * Throws on what it cannot read rather than returning [] (WD-1 then points to
+ * `ciAlsoRunsOn`): a `pull_request` written as a flow mapping, a `paths` value
+ * that is neither a block list nor a one-line `[…]` list, and a path taken
+ * back before a later `!` exclusion — GitHub weighs each path against the
+ * entries in order, the last match deciding, so a later exclusion that does
+ * not match it leaves it taken back, while this reading would drop it.
  */
 export function readCiAlso(ciYml) {
-  const lines = ciYml.split('\n').map((l) => l.replace(/(^|\s)#.*$/, ''));
+  const lines = ciYml.split(/\r?\n/).map((l) => l.replace(/(^|\s)#.*$/, ''));
   const indentOf = (l) => l.match(/^ */)[0].length;
   const unquote = (v) => v.trim().replace(/^(['"])(.*)\1$/, '$2');
+  const unread = (what) => new Error(`the CI workflow's pull_request trigger ${what}, which the digest does not read: list the paths it takes back in ciAlsoRunsOn (weekly-digest.config.mjs)`);
+  if (lines.some((l) => /\bpull_request["']?\s*:\s*\{/.test(l))) throw unread('is a flow mapping ({…})');
   const start = lines.findIndex((l) => /^ +["']?pull_request["']?:\s*$/.test(l));
   if (start === -1) return [];
   const patterns = [];
@@ -150,12 +165,20 @@ export function readCiAlso(ciYml) {
     const item = l.match(/^ *- +(.*)$/);
     if (list !== null && item && indentOf(l) >= list) { patterns.push(unquote(item[1])); continue; }
     list = null;
-    const flow = l.match(/^ +paths:\s*\[(.*)\]\s*$/);
+    const key = l.match(/^ +["']?paths["']?\s*:(.*)$/);
+    if (!key) continue;
+    const flow = key[1].match(/^\s*\[(.*)\]\s*$/);
     if (flow) patterns.push(...flow[1].split(',').map(unquote).filter(Boolean));
-    else if (/^ +paths:\s*$/.test(l)) list = indentOf(l);
+    else if (!key[1].trim()) list = indentOf(l);
+    else throw unread(`has a paths value written another way (${key[1].trim()})`);
   }
+  const firstExclusion = patterns.findIndex((p) => p.startsWith('!'));
   const lastExclusion = patterns.findLastIndex((p) => p.startsWith('!'));
-  return lastExclusion === -1 ? [] : patterns.slice(lastExclusion + 1);
+  if (lastExclusion === -1) return [];
+  if (patterns.slice(firstExclusion + 1, lastExclusion).some((p) => !p.startsWith('!'))) {
+    throw unread('takes a path back before a later ! exclusion');
+  }
+  return patterns.slice(lastExclusion + 1);
 }
 
 /**

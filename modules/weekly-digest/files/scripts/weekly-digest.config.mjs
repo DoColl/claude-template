@@ -22,7 +22,8 @@ export default {
   // one — unless the CI workflow takes some paths back after skipping Markdown
   // (the Claude instruction files, typically). The digest reads them from the
   // `pull_request` trigger of the CI workflow: the `paths` entries after the
-  // last `!` exclusion. Set this only if your trigger is written another way,
-  // with the same patterns the workflow uses:
+  // last `!` exclusion. Set this only when WD-1 says it cannot read them, with
+  // ASCII letters and digits, `_ . - @ /`, `*` and `**` only (a `?`, `[…]` or
+  // `{…}` pattern written as the paths it covers, any other character as `*`):
   //   ciAlsoRunsOn: ['.claude/**', '**/.claude/**', 'CLAUDE.md', '**/CLAUDE.md'],
 };

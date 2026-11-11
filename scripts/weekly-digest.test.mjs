@@ -179,9 +179,23 @@ test('the paths CI runs on although they are documentation are read from its pul
     "on:\n  pull_request:\n    branches: [main]\n  push:\n    paths:\n      - '**'\n      - '!**.md'\n      - 'CLAUDE.md'\n",
     'on: [push, pull_request]\n',
     "on:\n  # pull_request:\n  #   paths: ['**', '!**.md', 'CLAUDE.md']\n  push:\n",
+    // positive entries before the only exclusion are the base set, not paths taken back
+    "on:\n  pull_request:\n    paths: ['CLAUDE.md', 'packages/**', '!packages/**/CHANGELOG.md']\n",
   ]) assert.deepEqual(readCiAlso(yml), [], yml);
   assert.equal(ciAlsoRe([]), null);
   assert.throws(() => ciAlsoRe(['docs/[a-c]*.md']), /outside what the digest reads/, 'a pattern the digest cannot read is loud, not ignored');
+  // Windows line endings and a quoted key read the same
+  assert.deepEqual(readCiAlso(CI_YML.replace(/\n/g, '\r\n')), readCiAlso(CI_YML));
+  assert.deepEqual(readCiAlso("on:\r\n  pull_request:\r\n    'paths':\r\n      - '**'\r\n      - '!**.md'\r\n      - 'CLAUDE.md'\r\n"), ['CLAUDE.md']);
+  // what it cannot read is loud too, never an empty list: GitHub would run CI on CLAUDE.md in each of these
+  for (const yml of [
+    CI_YML.replace("      - **/CLAUDE.md", "      - **/CLAUDE.md\n      - '!site/**'"), // a later exclusion that does not match the paths taken back
+    "on:\n  pull_request:\n    paths: ['**', '!**.md', 'CLAUDE.md', '!docs/**']\n",
+    "on:\n  pull_request: {paths: ['**', '!**.md', 'CLAUDE.md']}\n",
+    "on: {pull_request: {paths: ['**', '!**.md', 'CLAUDE.md']}}\n",
+    "on:\n  pull_request:\n    paths: [\n      '**', '!**.md',\n      'CLAUDE.md']\n",
+    "x: &p ['**', '!**.md', 'CLAUDE.md']\non:\n  pull_request:\n    paths: *p\n",
+  ]) assert.throws(() => readCiAlso(yml), /ciAlsoRunsOn/, yml);
 });
 
 test('the setting, when the project has one, replaces the reading; without a CI workflow there is nothing to read', () => inTmp((dir) => {
@@ -194,6 +208,7 @@ test('the setting, when the project has one, replaces the reading; without a CI 
   assert.equal(loadCiAlso(dir, { ...settings, ciAlsoRunsOn: [] }), null, 'an empty list says: nothing, whatever the trigger shows');
   writeFileSync(join(dir, 'ci.yml'), CI_YML.replace("'.claude/**'", "'.claude/{agents,skills}/**'"));
   assert.throws(() => loadCiAlso(dir, settings), /ciAlsoRunsOn/);
+  assert.ok(loadCiAlso(dir, { ...settings, ciAlsoRunsOn: ['.claude/agents/**', '.claude/skills/**'] }).test('.claude/agents/x.md'), 'the way out WD-1 points to');
 }));
 
 test('the CI workflow of this repository, if there is one, can be read', () => {
@@ -214,7 +229,10 @@ test('settings are checked on import', () => {
   assert.throws(() => checkConfig({ ...ok, maxAgeDays: ['nightly.yml'] }), /maxAgeDays/);
   assert.deepEqual(checkConfig({ ...ok, ciAlsoRunsOn: ['.claude/**', '**/CLAUDE.md'] }).ciAlsoRunsOn, ['.claude/**', '**/CLAUDE.md']);
   assert.ok(!('ciAlsoRunsOn' in checkConfig(ok)), 'unset: the trigger of the CI workflow is read');
-  for (const bad of ['CLAUDE.md', [''], [3], ['a b'], ['docs/[a-c].md'], ['!x']]) assert.throws(() => checkConfig({ ...ok, ciAlsoRunsOn: bad }), /ciAlsoRunsOn/, JSON.stringify(bad));
+  for (const bad of ['CLAUDE.md', [''], [3], [undefined], ['a b'], ['docs/[a-c].md'], ['!x']]) assert.throws(() => checkConfig({ ...ok, ciAlsoRunsOn: bad }), /ciAlsoRunsOn/, JSON.stringify(bad));
+  // the message names the entry and the way out, so that following it cannot loop back to the same error
+  assert.throws(() => checkConfig({ ...ok, ciAlsoRunsOn: ['CLAUDE.md', 'design notes/x.md'] }), /entry "design notes\/x\.md" is outside what the digest reads .* as \*/);
+  assert.ok(ciAlsoRe(checkConfig({ ...ok, ciAlsoRunsOn: ['design*notes/x.md'] }).ciAlsoRunsOn).test('design notes/x.md'));
 });
 
 test('PR reasons', () => {
