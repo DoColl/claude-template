@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  buildDigest, prReason, parseDeadline, safeText, readGateRe, readDocsRe, hasSchedule,
+  buildDigest, prReason, parseDeadline, safeText, readGateRe, readDocsRe, readTestRe, hasSchedule,
   scheduledWorkflows, loadRules, workflowName, ciWorkflowFile, checkConfig,
   MAX_AGE_DAYS, SELF, DEFAULT_BRANCH, CI_WORKFLOW,
 } from './weekly-digest.mjs';
@@ -77,10 +77,10 @@ test('docs-only set and gate regex are read from auto-merge.yml', () => {
 test('the project\'s PROJECT_GATE_RE is read with the kit\'s pattern', () => {
   // a function as the replacement: a pattern ending in $ followed by a quote would otherwise be read as "$'"
   const withOwn = (re) => AUTO_MERGE.replace('jobs:', () => `  PROJECT_GATE_RE: '${re}'\njobs:`);
-  const own = readGateRe(withOwn('^tools/hooks/|^AGENTS\\.md$'));
+  const own = readGateRe(withOwn('^tools/hooks/|^GEMINI\\.md$'));
   isGate(own);
   assert.ok(own.test('tools/hooks/pre-run.sh'));
-  assert.ok(own.test('agents.md'), 'case-insensitive, like the gate');
+  assert.ok(own.test('gemini.md'), 'case-insensitive, like the gate');
   assert.ok(!own.test('src/tools/hooks/x.ts'));
   assert.ok(!readGateRe(withOwn('^$')).test('src/x.ts'), 'as shipped, it adds nothing');
 });
@@ -98,6 +98,8 @@ test('rules: built-in without auto-merge.yml, read from it when installed, loud 
   assert.equal(read.autoMerge, true);
   assert.equal(read.gateRe.source, gateRe.source);
   assert.equal(read.docsRe.source, docsRe.source);
+  assert.equal(read.testRe, null, 'no TEST_HOLD_RE in this workflow');
+  assert.equal(builtin.testRe, null);
 
   writeFileSync(join(dir, 'auto-merge.yml'), AUTO_MERGE.replace('CLAUDE_GATE_RE', 'GATE'));
   assert.throws(() => loadRules(dir), /CLAUDE_GATE_RE not found/);
@@ -149,6 +151,11 @@ test('settings are checked on import', () => {
 
 test('PR reasons', () => {
   assert.equal(prReason(pr({}), res, now), 'CI green but not merged: check `auto-merge.yml`');
+  const held = { ...res, testRe: readTestRe("  TEST_HOLD_RE: '(^|/)tests?/'\n") };
+  assert.match(prReason(pr({ files: ['src/x.ts', 'Tests/x.test.ts'] }), held, now), /touches tests \(`TEST_HOLD_RE`\)/, 'a green pull request left open that touches held tests');
+  assert.equal(prReason(pr({}), held, now), 'CI green but not merged: check `auto-merge.yml`', 'no test touched: the pattern changes nothing');
+  assert.equal(readTestRe("  TEST_HOLD_RE: '^$'\n"), null, 'as shipped, it holds nothing');
+  assert.equal(readTestRe('jobs:\n'), null, 'an auto-merge.yml older than the pattern');
   assert.equal(prReason(pr({ createdAt: daysAgo(1) }), res, now), null, 'green and young: not the owner\'s move yet');
   assert.match(prReason(pr({ ci: null }), res, now), /no CI run/);
   assert.equal(prReason(pr({ ci: null, createdAt: new Date(now - 600000).toISOString() }), res, now), null);

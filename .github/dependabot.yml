@@ -1,0 +1,80 @@
+# Dependabot version updates (docs/conventions/dependabot.md).
+#
+# Read this before changing `groups`: patch and minor stay in SEPARATE groups.
+# A minor group whose CI goes red must not hold the patches, and where merges
+# are unattended the two do not deserve the same trust. If the auto-merge
+# module is installed, its gate reads the update metadata of these pull
+# requests: read its convention page before adding a group or an `allow:` key.
+#
+# Blind spots to keep in mind: Dependabot does NOT update lockfile overrides
+# or resolutions, vendored code, patches, or the tool pins held in a
+# workflow's `env:` (the scanner versions and checksums of security.yml), and
+# will not tell you when an override is itself pinned to a vulnerable version.
+# The periodic audit stays the net.
+#
+# `cooldown` keeps freshly published versions out of the merge path: a
+# compromised release is usually withdrawn within days. It does not apply to
+# security updates, which are proposed at once.
+#
+# This file is yours: the kit never overwrites it.
+version: 2
+updates:
+  # ------------------------------------------------------- GitHub Actions --
+  # Keeps the 40-char SHA pins current (guard GA-1 requires them). Dependabot
+  # maintains the `@<sha> # vX.Y.Z` form, so the check stays satisfied.
+  #
+  # HEADS UP: these pull requests edit `.github/workflows/**`, which a merge
+  # made with GITHUB_TOKEN can be refused without `workflows: write`
+  # (deliberately not granted to anything automated). Merge them by hand when
+  # that happens. Kept weekly regardless: stale action pins are a real
+  # supply-chain risk, and a hand merge is the right amount of friction for a
+  # pipeline edit.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 5
+    groups:
+      # A dependency joins the FIRST group it matches: a group that must not
+      # hold the others (actions pinned in a hand-merged workflow) goes above
+      # this line.
+      # harness:rows dependabot-actions-groups
+      actions-patch:
+        patterns: ["*"]
+        update-types: [patch]
+      actions-minor:
+        patterns: ["*"]
+        update-types: [minor]
+
+  # TODO(harness): one block per package ecosystem and directory of the
+  # project (npm, pip, gomod, cargo, maven, docker…), in the same two-group
+  # shape. Example:
+  #
+  # - package-ecosystem: npm
+  #   directory: /
+  #   schedule:
+  #     interval: weekly
+  #     day: monday
+  #     time: "06:00"
+  #   open-pull-requests-limit: 5
+  #   cooldown:
+  #     default-days: 5
+  #     semver-minor-days: 7
+  #     semver-patch-days: 3
+  #   groups:
+  #     root-patch:
+  #       patterns: ["*"]
+  #       update-types: [patch]
+  #     root-minor:
+  #       patterns: ["*"]
+  #       update-types: [minor]
+  #   # `ignore` holds the deliberate pins only — a major that is a migration
+  #   # to schedule, a set of packages that must move together — each with
+  #   # its reason:
+  #   # ignore:
+  #   #   - dependency-name: typescript
+  #   #     update-types: [version-update:semver-major]

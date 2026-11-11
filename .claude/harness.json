@@ -1,0 +1,150 @@
+{
+  "kit": {
+    "name": "claude-template",
+    "version": "0.1.0"
+  },
+  "modules": [
+    "core",
+    "ci-security",
+    "weekly-digest"
+  ],
+  "values": {
+    "PROJECT_NAME": "claude-template",
+    "CLAUDE_MD_BUDGET": "25000",
+    "DEFAULT_BRANCH": "main",
+    "CI_WORKFLOW": "CI"
+  },
+  "files": {
+    ".gitleaks.toml": {
+      "module": "core",
+      "seed": true
+    },
+    "CLAUDE.md": {
+      "module": "core",
+      "seed": true
+    },
+    "SECURITY_REVIEW.md": {
+      "module": "core",
+      "seed": true
+    },
+    "docs/adr/ADR-000-template.md": {
+      "module": "core",
+      "sha256": "405058821928b26f491bf6230db54fc00c3be0cf1ec4fbd5892b12ade1046ace"
+    },
+    "docs/adr/README.md": {
+      "module": "core",
+      "seed": true
+    },
+    "docs/conventions/README.md": {
+      "module": "core",
+      "seed": true
+    },
+    "docs/conventions/_template.md": {
+      "module": "core",
+      "sha256": "ca0dcf35e4986459ea9bb7c599cd535d7cd1200f419866d8b5d949046b79fc37"
+    },
+    "docs/conventions/claude-md.md": {
+      "module": "core",
+      "sha256": "83aefb23ee0fa9fec4d002a46d1f05138f0734adff8842cc3e2aa7e51f7cb43d"
+    },
+    "docs/conventions/local-gate.md": {
+      "module": "core",
+      "sha256": "e6427bce301224b88c97c2921575c5ae248f5913ce1820d1f3ee4c62e659d5a9"
+    },
+    "docs/conventions/review-tiers.md": {
+      "module": "core",
+      "sha256": "55186d97c6d81a9122b37eaa559266f7009b3ec676dd4a219f074c6b99107dad"
+    },
+    "docs/runbook/README.md": {
+      "module": "core",
+      "seed": true
+    },
+    "scripts/guards.d/10-claude-md.sh": {
+      "module": "core",
+      "sha256": "39b37c7177d56c401bf35de812e936d2763e499ec91344f82eaec1217719c011"
+    },
+    "scripts/guards.d/50-project.sh": {
+      "module": "core",
+      "seed": true
+    },
+    "scripts/guards.d/90-harness-todo.sh": {
+      "module": "core",
+      "sha256": "cee19c46e6ca62a399c4524e924f661e17dc004e504d66738f19402ea1dfd17c"
+    },
+    "scripts/guards.d/91-harness-drift.sh": {
+      "module": "core",
+      "sha256": "3ca6a094aa231d4e39bd8fef4ef50aa13409c85d3b1101db7335a6e65bb66097"
+    },
+    "scripts/guards.d/_lib.sh": {
+      "module": "core",
+      "sha256": "bfb2a19c38efdaefa9b49394afe4701c31d9591df1fb9f2ae338881733aea676"
+    },
+    "scripts/security-checks.sh": {
+      "module": "core",
+      "sha256": "4627407a1f45787a50b900c345780cf9d84113841b3f16b206d74873dc04c790"
+    },
+    ".github/dependabot.yml": {
+      "module": "ci-security",
+      "seed": true
+    },
+    ".github/workflows/security.yml": {
+      "module": "ci-security",
+      "sha256": "c11a7c0fb59b9d7453302124b5a5fc256acbdfefe863450da6bbed94218afc69"
+    },
+    ".github/zizmor.yml": {
+      "module": "ci-security",
+      "seed": true
+    },
+    "docs/conventions/dependabot.md": {
+      "module": "ci-security",
+      "sha256": "68112f8792bcbed9a363e6fec8382bd78b2c1521d95f2f7699907bbcaa76b7f8"
+    },
+    "docs/conventions/github-actions-rules.md": {
+      "module": "ci-security",
+      "sha256": "1134781a9252ceaf219d8e6240acf68583fb63aa512357c5af140bf98b32b615"
+    },
+    "docs/conventions/security-workflow.md": {
+      "module": "ci-security",
+      "sha256": "c62595e8f6f59d42bdb260677d7967c9b9c0faf265f8fcd5a708742e38a477ba"
+    },
+    "scripts/fetch-pinned-release.sh": {
+      "module": "ci-security",
+      "sha256": "f1a6eefd702bdf073ed51cd842eb0726acc1cea209d2d1e31b0f7c11b4d22c44"
+    },
+    "scripts/guards.d/30-github-actions.sh": {
+      "module": "ci-security",
+      "sha256": "02082c990ef2e299bc2e0a9384da2bd17d51ca3c6a00c3e75e6482cc3a2148a4"
+    },
+    ".github/workflows/weekly-digest.yml": {
+      "module": "weekly-digest",
+      "sha256": "b6d7268fdf0f6fbbfece6e47df1c93e1296bfc874365f879fd539df6fa084db4"
+    },
+    "docs/conventions/weekly-digest.md": {
+      "module": "weekly-digest",
+      "sha256": "4a1437c0a8f6f3ce7fade838d36f825abf33644377f1fee40efd30acc031c260"
+    },
+    "scripts/guards.d/42-weekly-digest.sh": {
+      "module": "weekly-digest",
+      "sha256": "c8788ec48d20ae85bd0575b328fc5f278f6354db3e0d5aad70c0f356913d7767"
+    },
+    "scripts/weekly-digest.config.mjs": {
+      "module": "weekly-digest",
+      "seed": true
+    },
+    "scripts/weekly-digest.mjs": {
+      "module": "weekly-digest",
+      "sha256": "3f47de1d08900b7fc6f409cc059f36d198a5249841f1084e89c7e992ee3a40d9"
+    },
+    "scripts/weekly-digest.test.mjs": {
+      "module": "weekly-digest",
+      "sha256": "4fb7d160eba427ad8d01ba86b7614036158c9e742c2bbda437143952ea228890"
+    }
+  },
+  "fragments": [
+    "ci-security:CLAUDE.md#conventions",
+    "ci-security:CLAUDE.md#security-workflow",
+    "ci-security:docs/conventions/README.md#conventions-index",
+    "weekly-digest:CLAUDE.md#conventions",
+    "weekly-digest:docs/conventions/README.md#conventions-index"
+  ]
+}
