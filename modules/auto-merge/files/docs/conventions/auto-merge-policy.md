@@ -4,7 +4,7 @@
 
 ## Status
 
-The workflow this module was ported from runs in production. This generic variant — the same two jobs, without the post-merge deploy dispatch and with the project-specific values turned into settings — **has not run live**. Its guard passes, and each of its checks was shown to fail on the change it is there to catch, but no pull request has gone through it: the first ones in your repository are its test. Watch the "Auto-merge after CI" runs on a docs-only pull request and on a code one before relying on it.
+The workflow this module was ported from runs in production. This generic variant — the same two jobs, without the post-merge deploy dispatch and with the project-specific values turned into settings — **has merged nothing yet**. Its guard passes, and each of its checks was shown to fail on the change it is there to catch. One part has run, on the kit's own repository: `promote-docs`, twice, holding a pull request that touched gated paths. No pull request has been merged by it, `promote-from-ci` has not run, and the hold on weakened tests has only been run on sample listings: the first pull requests in your repository are their test. Watch the "Auto-merge after CI" runs on a docs-only pull request and on a code one before relying on it.
 
 ## Why
 

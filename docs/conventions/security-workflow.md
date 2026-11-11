@@ -2,6 +2,10 @@
 
 **Rule (CLAUDE.md § Security workflow):** `.github/workflows/security.yml` has an enforcing tier that blocks merges (gitleaks over the full history, then `./scripts/security-checks.sh`) and an advisory tier that only logs (Semgrep, Trivy, a Syft SBOM) and runs on standalone triggers. Every scanner binary the workflow downloads is a pinned release verified by sha256; zizmor, which the gate runs, is pinned to an exact version on PyPI, without a hash. All are bumped by hand with the procedure below.
 
+## Status
+
+Ported from production workflows. This generic variant has run on the kit's own repository: the enforcing job called from a CI workflow, on pull requests and on a push to the default branch, and one standalone run on a documentation push where the enforcing job and the three advisory jobs (Semgrep, Trivy, the Syft SBOM and its artifact) all completed. The weekly schedule and the manual dispatch have not fired yet. That repository has no application code and no package manifest: the advisory scanners ran, with next to nothing to find.
+
 ## Why
 
 A check that blocks a merge has to be precise: every red run must point at something to fix. Deep scanners are not — their false-positive rate is too high to gate on each finding without triage, and a gate people learn to wave through is worse than none. So the two kinds of tool live in two tiers: the precise ones block, the noisy ones report, and a pattern that proves its worth in the advisory tier is promoted into a guard.

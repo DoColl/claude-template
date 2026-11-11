@@ -105,7 +105,7 @@
     },
     "docs/conventions/security-workflow.md": {
       "module": "ci-security",
-      "sha256": "ba5dd35bc6e1d58db44f69a0f7f582dc27c9d095cd00ec72c5e49cad32e6ca91"
+      "sha256": "c62595e8f6f59d42bdb260677d7967c9b9c0faf265f8fcd5a708742e38a477ba"
     },
     "scripts/fetch-pinned-release.sh": {
       "module": "ci-security",
