@@ -36,7 +36,7 @@ pipx run --spec 'zizmor==1.31.1' zizmor --offline <rendered project>/.github/wor
 
 ## The kit's own harness
 
-The kit installs part of itself at its root (`.claude/harness.json`): `core`, `ci-security`, `auto-merge` and `weekly-digest`, so that those guards and workflows run somewhere before a project trusts them. The root copies are installed files, never edited in place: change the module, then run `node bin/harness.mjs update .` — a test fails while a root copy is behind its module. The one root file edited by hand is `.github/workflows/auto-merge.yml`, for the kit's own `PROJECT_GATE_RE`: `modules/`, `lib/`, `bin/`, `skills/`, `test/`, `README.md` and `docs/module-authoring.md` are never merged unattended (rows in `scripts/auto-merge-paths.txt`).
+The kit installs part of itself at its root (`.claude/harness.json`): `core`, `ci-security` and `weekly-digest`, so that those guards and workflows run somewhere before a project trusts them. The root copies are installed files, never edited in place: change the module, then run `node bin/harness.mjs update .` — a test fails while a root copy is behind its module. `auto-merge` is not installed here: it needs a ruleset on the default branch, which is not enforced on this repository as it stands (the module's policy page, § Setting it up). Every pull request is merged by hand.
 
 - **The gate**: `./scripts/security-checks.sh` runs every guard in `scripts/guards.d/`, here and in CI. → `docs/conventions/local-gate.md`
 - **This file is budgeted**: under the bytes of its `harness:budget` line (CM-1), and every `docs/` path it names exists (CM-2). → `docs/conventions/claude-md.md`
@@ -46,10 +46,6 @@ The kit installs part of itself at its root (`.claude/harness.json`): `core`, `c
 <!-- harness:rows conventions -->
 
 `.github/workflows/security.yml` has two tiers. **Enforcing** (blocks merges; every run, including the one CI calls first): gitleaks over the full history, then `./scripts/security-checks.sh` — the same gate as on a laptop. **Advisory** (log-only; weekly cron, manual dispatch and docs-only pushes): Semgrep, Trivy, a Syft SBOM. Scanner binaries are pinned releases verified by sha256 (`scripts/fetch-pinned-release.sh`); zizmor is pinned to an exact PyPI version, without a hash. Never `curl … | sh`, never a bump without the procedure. → `docs/conventions/security-workflow.md`
-
-### Auto-merge policy
-
-`.github/workflows/auto-merge.yml` squash-merges **every** pull request whose `CI` run is green, pinned to the validated SHA, then deletes the head branch; docs-only pull requests (every file in `docs/**`, `**.md`, `LICENSE`, `.gitignore`) merge at once, without CI. **Never merged unattended**: a pull request touching Claude instruction files (`CLAUDE_GATE_RE`: `.claude/`, `CLAUDE.md`, `.githooks/`, `.mcp.json`, this workflow, the gate and what it runs or reads; the project's own in `PROJECT_GATE_RE`) or from a `claude/issue-*` head, and the Dependabot bumps the gate holds (majors, Action minors) — marked ready, merged by hand. Draft does **not** pause a pull request: cancel its CI run or close it. A merge here emits no `push` event. A workflow-touching pull request may be refused at merge while CI is green: merge it by hand, never grant `workflows: write`. A pull request runs its own copy of the workflows: the ruleset on the default branch (code-owner review for `.github/workflows/**`) is what holds one that rewrites them. → `docs/conventions/auto-merge-policy.md`
 
 <!-- harness:slot security-workflow -->
 ## Before pushing

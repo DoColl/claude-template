@@ -154,7 +154,7 @@ node --test test/*.test.mjs     # unit tests, static rules on every module, end-
 
 `CLAUDE.md` at the root of this repository holds the rules for changing the kit; `docs/module-authoring.md` the contract for modules.
 
-The kit installs part of itself at its root — `core`, `ci-security`, `auto-merge` and `weekly-digest` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
+The kit installs part of itself at its root — `core`, `ci-security` and `weekly-digest` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
 
 ## License and security
 

@@ -333,9 +333,8 @@ test("the kit's own installation is what the modules ship today", () => {
   const s = summarize(buildPlan({ kit, target: KIT_ROOT, mode: "update" }));
   const fix = "run `node bin/harness.mjs update .` at the root of the kit";
   assert.deepEqual([s.created, s.updated, s.outdated, s.dropped], [[], [], [], []], `a root copy is behind its module: ${fix}`);
-  assert.deepEqual(s.conflicts, [], `a root file edited here was changed in its module: ${fix} --force, then put the kit's own values back`);
-  // The one kit file edited here: the kit's own PROJECT_GATE_RE. It stays the module's file but for those lines.
-  assert.deepEqual(s.local, [".github/workflows/auto-merge.yml"], "kit files edited at the root");
+  assert.deepEqual(s.conflicts, [], `a root file was edited in place: ${fix} --force`);
+  assert.deepEqual(s.local, [], "no kit file is edited at the root: change the module instead");
   assert.deepEqual(s.fragmentsMissingSlot, []);
 });
 

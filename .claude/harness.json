@@ -6,7 +6,6 @@
   "modules": [
     "core",
     "ci-security",
-    "auto-merge",
     "weekly-digest"
   ],
   "values": {
@@ -116,22 +115,6 @@
       "module": "ci-security",
       "sha256": "02082c990ef2e299bc2e0a9384da2bd17d51ca3c6a00c3e75e6482cc3a2148a4"
     },
-    ".github/workflows/auto-merge.yml": {
-      "module": "auto-merge",
-      "sha256": "bb6525c2d21bf6eab4d8ccd9a89cea44070b83cc690ef806d35487c22b41bd7b"
-    },
-    "docs/conventions/auto-merge-policy.md": {
-      "module": "auto-merge",
-      "sha256": "5a2df4c8b935e64cb01c4ac719c7a89a3c591c786b450506bbac3142971ba099"
-    },
-    "scripts/auto-merge-paths.txt": {
-      "module": "auto-merge",
-      "seed": true
-    },
-    "scripts/guards.d/40-auto-merge.sh": {
-      "module": "auto-merge",
-      "sha256": "d52ecf094ec55172824e508958c740f4e66c784e1698f09be45420dcf9cf1a55"
-    },
     ".github/workflows/weekly-digest.yml": {
       "module": "weekly-digest",
       "sha256": "b6d7268fdf0f6fbbfece6e47df1c93e1296bfc874365f879fd539df6fa084db4"
@@ -158,8 +141,6 @@
     }
   },
   "fragments": [
-    "auto-merge:CLAUDE.md#security-workflow",
-    "auto-merge:docs/conventions/README.md#conventions-index",
     "ci-security:CLAUDE.md#conventions",
     "ci-security:CLAUDE.md#security-workflow",
     "ci-security:docs/conventions/README.md#conventions-index",

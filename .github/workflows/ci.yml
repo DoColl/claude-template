@@ -6,9 +6,8 @@ name: CI
 #
 # The first job calls security.yml: gitleaks, then the kit's own gate
 # (scripts/security-checks.sh), since the kit installs part of itself at its
-# root. The documentation set is skipped, as the auto-merge workflow expects
-# (docs/conventions/auto-merge-policy.md), and what the tests read or the kit
-# ships is taken back: every path taken back is one the merge gate holds.
+# root. The documentation set is skipped, and what the tests read or the kit
+# ships is taken back: a Markdown file under modules/ is shipped content.
 on:
   push:
     branches: [main]

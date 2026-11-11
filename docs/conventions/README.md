@@ -21,7 +21,6 @@ Decisions that outlive their context (a technology, a pattern, a trade-off) go t
 | `security-workflow.md` | `security.yml`: enforcing and advisory tiers, wiring into CI, pinned scanners and how to bump them | ci-security |
 | `github-actions-rules.md` | Workflow rules: zizmor at zero, SHA pins, token scope, artifact retention | GA-1, GA-2 |
 | `dependabot.md` | Dependabot: separate patch and minor groups, cooldown, deliberate pins, blind spots | ci-security |
-| `auto-merge-policy.md` | Unattended merges: what merges on green CI, what never does, Dependabot rules, what does not run after a merge | AM-1, AM-4, AM-5, AM-6 |
 | `weekly-digest.md` | Weekly digest of what waits on a human: sections, thresholds, titles-only rule, `deadline` issues | WD-1 |
 <!-- harness:rows conventions-index -->
 <!-- TODO(harness): one row per convention of your own. -->
