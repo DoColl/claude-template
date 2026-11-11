@@ -49,6 +49,10 @@ on:
   # Docs pull requests: a CI workflow that ignores docs paths never runs on
   # them, so workflow_run never fires. Use a direct pull_request trigger
   # constrained to the same paths, since the docs gate has no CI to wait for.
+  # For this event GitHub runs the workflow file as the PULL REQUEST writes
+  # it, not the default branch's: a pull request that edits this file gets its
+  # own promote-docs. Nothing in here can stop that; a ruleset on the default
+  # branch does (docs/conventions/auto-merge-policy.md § Setting it up).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:

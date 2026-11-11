@@ -118,11 +118,11 @@
     },
     ".github/workflows/auto-merge.yml": {
       "module": "auto-merge",
-      "sha256": "528d8be5974508e5c51e128e2f8037322041f2acbfdcf10620ca3355decb52e2"
+      "sha256": "bb6525c2d21bf6eab4d8ccd9a89cea44070b83cc690ef806d35487c22b41bd7b"
     },
     "docs/conventions/auto-merge-policy.md": {
       "module": "auto-merge",
-      "sha256": "1a541d5643f159b9ef7435b83e820146cccbc3a991b5c71cc650330a0daebfa8"
+      "sha256": "5a2df4c8b935e64cb01c4ac719c7a89a3c591c786b450506bbac3142971ba099"
     },
     "scripts/auto-merge-paths.txt": {
       "module": "auto-merge",
