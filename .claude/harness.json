@@ -121,11 +121,11 @@
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "4a1437c0a8f6f3ce7fade838d36f825abf33644377f1fee40efd30acc031c260"
+      "sha256": "db9affa21d21070eb12106f027b2caaf197e0507f9c4a052124ae36f93ac0bb8"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
-      "sha256": "c8788ec48d20ae85bd0575b328fc5f278f6354db3e0d5aad70c0f356913d7767"
+      "sha256": "9f8256dc7941107360d68a240ab5731e984bead56658663b1d23c216877d3cb8"
     },
     "scripts/weekly-digest.config.mjs": {
       "module": "weekly-digest",
@@ -133,11 +133,11 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "3f47de1d08900b7fc6f409cc059f36d198a5249841f1084e89c7e992ee3a40d9"
+      "sha256": "c9e9408d6fc5f2534eeb271cbb50fcb148a3bfdcff590f4d539a8bfd0b0f9df0"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",
-      "sha256": "4fb7d160eba427ad8d01ba86b7614036158c9e742c2bbda437143952ea228890"
+      "sha256": "dad990e4e14feb4ae4b306d45de7120921d80103f8ea1dc9c357d692f71d66b6"
     }
   },
   "fragments": [

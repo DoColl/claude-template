@@ -16,4 +16,14 @@ export default {
   // file name:
   //   'nightly.yml': 3,
   maxAgeDays: {},
+
+  // Documentation paths the CI workflow runs on all the same. A pull request
+  // touching only documentation gets no CI run, and the digest does not expect
+  // one — unless the CI workflow takes some paths back after skipping Markdown
+  // (the Claude instruction files, typically). The digest reads them from the
+  // `pull_request` trigger of the CI workflow: the `paths` entries after the
+  // last `!` exclusion. Set this only when WD-1 says it cannot read them, with
+  // ASCII letters and digits, `_ . - @ /`, `*` and `**` only (a `?`, `[…]` or
+  // `{…}` pattern written as the paths it covers, any other character as `*`):
+  //   ciAlsoRunsOn: ['.claude/**', '**/.claude/**', 'CLAUDE.md', '**/CLAUDE.md'],
 };

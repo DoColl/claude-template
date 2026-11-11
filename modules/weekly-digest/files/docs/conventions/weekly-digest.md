@@ -22,7 +22,7 @@ Once a week (cron `41 5 * * 5`, Friday morning UTC unless you change it — nomi
 
 | Section | Listed when |
 |---|---|
-| Pull requests | conflict with the default branch (mergeability is re-read while GitHub still says `unknown`); **no CI run** on the head commit after 1 h, unless every path is in the docs-only set (both sides of a rename count, a truncated file listing never qualifies); CI red; green but still open after 48 h, with the reason it did not merge (Claude instruction files, a Dependabot major or a bump the merge gate holds, a workflow change, unknown) |
+| Pull requests | conflict with the default branch (mergeability is re-read while GitHub still says `unknown`); **no CI run** on the head commit after 1 h, unless every path is in the docs-only set and none is a path CI runs on all the same (both sides of a rename count, a truncated file listing never qualifies); CI red; green but still open after 48 h, with the reason it did not merge (Claude instruction files, a Dependabot major or a bump the merge gate holds, a workflow change, unknown) |
 | Scheduled runs | the latest CI run of the default branch itself is not green (pull-request runs from a fork branch of the same name are ignored); a scheduled workflow's last scheduled run failed, or is older than its slack, or does not exist |
 | Dependabot alerts | an open issue labelled `dependabot-alert` that has been open for 7 days or more |
 | Deadlines | an open issue labelled `deadline` whose body has a `Due: YYYY-MM-DD` line that is past (the day itself is not overdue) or within 7 days, or that has the label and no such line |
@@ -45,6 +45,7 @@ Output: one issue labelled `weekly-digest`, **assigned to the repository owner**
 - `defaultBranch` — the branch pull requests are merged into.
 - `ciWorkflow` — the `name:` of the CI workflow a pull request waits for. The digest finds the workflow file carrying that name. If none does, no CI run is expected anywhere: pull requests are listed on conflicts and age only, and the digest says so in its footer.
 - `maxAgeDays` — the per-workflow slack described above.
+- `ciAlsoRunsOn` — optional. The documentation paths the CI workflow runs on all the same (`'.claude/**'`, `'**/CLAUDE.md'`), written with ASCII letters and digits, `_ . - @ /`, `*` and `**` only: a `?`, `[…]` or `{…}` pattern becomes the paths it covers, any other character (a space) a `*`. Unset, the digest reads them from the CI workflow (below); set it when WD-1 says the trigger cannot be read. An empty list means none.
 
 The thresholds (48 h, 7 days, 9 days) are constants at the top of `scripts/weekly-digest.mjs`.
 
@@ -54,7 +55,13 @@ When `.github/workflows/auto-merge.yml` exists, the digest reads two declaration
 
 When that workflow is not installed, the digest falls back to built-in values (`DEFAULT_GATE_RE` and `DEFAULT_DOCS_RE` in the script): any `.claude/` directory, `CLAUDE.md`, `CLAUDE.local.md` and `AGENTS.md`, `.githooks/`, a project `.mcp.json` or `.claude.json`, `.ripgreprc`, `.gitmodules`, `.husky/`, the `auto-merge` and `claude*` workflows, the gate and what it runs or reads (`scripts/security-checks.sh`, `scripts/guards.d/`, the kit's helper scripts, `.gitleaks.toml`, `.gitleaksignore`, `.github/zizmor.yml`, `scripts/reviewed-plugins.json`) for the first — the same list as the `CLAUDE_GATE_RE` the auto-merge module ships; Markdown files, `docs/`, `LICENSE` and `.gitignore` for the second. Nothing merges on its own in that setup, so a green pull request still open after 48 h is simply reported as waiting for a merge, and no reason points at a workflow that is not there.
 
-The docs-only set is what tells "no CI run is expected" from "the run is missing". It must match the `paths-ignore` of your CI workflow. If your CI runs on every pull request, the set never comes into play.
+The docs-only set is what tells "no CI run is expected" from "the run is missing". It must match what your CI workflow skips. If your CI runs on every pull request, the set never comes into play.
+
+### Documentation paths CI still runs on
+
+A CI workflow that skips Markdown also skips `CLAUDE.md` and the agent definitions, unless it takes them back: the gate has checks made for those files, and the kit's CI skeleton re-includes them in its `pull_request` trigger. The docs-only set still counts them as documentation — with `auto-merge.yml`, because that workflow holds them for a hand merge rather than sending them through CI; without it, because the built-in set takes every Markdown file — so on its own it would tell the digest that no run is expected on a pull request touching only `CLAUDE.md`. If its run then never started, the digest would list the pull request as "merge by hand", and the one fact worth a line, the missing run, would be lost.
+
+So the digest also reads the CI workflow, found by the name in `ciWorkflow`: in its `pull_request` trigger, the `paths` entries that follow the last `!` exclusion are the paths taken back. A pull request touching one of them is expected to have a run, whatever the docs-only set says. Read are a block list or a one-line `[…]` list, either line ending, with patterns made of ASCII letters and digits, `_ . - @ /`, `*` and `**`. What falls outside fails WD-1 with a pointer to `ciAlsoRunsOn`, rather than being ignored: another pattern character, a `paths` value written another way (a list over several lines, an alias), a `pull_request` written as a flow mapping, and a path taken back before a later exclusion — GitHub weighs each path against the entries in order and the last match decides, so a later `!` that does not match the path leaves it taken back, while "after the last exclusion" would drop it. A trigger that takes nothing back — no exclusion, `paths-ignore`, no `paths` at all — changes nothing.
 
 ### What feeds the alerts section
 
@@ -67,3 +74,4 @@ GitHub does not open issues for Dependabot alerts. The section lists issues labe
 ## History
 
 - Installed with the kit.
+- After a review of an installed project: a pull request touching only instruction files, on a project whose CI runs on them, would have been listed as a hand merge when its CI run had never started. The digest now reads which documentation paths the CI workflow takes back, or the `ciAlsoRunsOn` setting; a trigger it cannot read turns WD-1 red and only warns in a scheduled run. Unit-tested, and tried in rendered projects with the GitHub API stubbed; like the rest of the digest, not run live.
