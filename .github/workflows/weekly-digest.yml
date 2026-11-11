@@ -1,0 +1,53 @@
+name: Weekly digest
+
+# One issue a week (label `weekly-digest`, assigned to the repository owner)
+# listing what the harness is waiting on a human for: PRs that need a hand
+# merge, red or missing CI, conflicts, scheduled runs that failed or never
+# fired, Dependabot alert issues untriaged for 7 days, overdue `deadline`
+# issues. The previous digest is closed. Nothing is posted when nothing waits.
+# Logic and thresholds: scripts/weekly-digest.mjs (self-test WD-1),
+# docs/conventions/weekly-digest.md. Project settings:
+# scripts/weekly-digest.config.mjs.
+#
+# Read-only on code, PRs and runs; writes only issues and two labels. Never
+# merges, comments on a PR or triggers another workflow.
+
+on:
+  schedule:
+    # Weekly: Friday morning (UTC) unless you move it to the day you keep for
+    # this kind of follow-up. Nominal: crons fire late.
+    - cron: '41 5 * * 5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print the digest in the run summary, write nothing'
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: weekly-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    name: Build and post the digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read       # checkout: the script, its settings and auto-merge.yml's gate regex
+      pull-requests: read  # open PRs, their files and mergeable state
+      actions: read        # CI and scheduled runs
+      issues: write        # the digest issue, its labels, closing the previous one
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Digest
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        # DRY_RUN is either empty or the literal flag (set above), never input text.
+        run: node scripts/weekly-digest.mjs $DRY_RUN

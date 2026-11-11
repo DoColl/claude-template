@@ -49,6 +49,10 @@ on:
   # Docs pull requests: a CI workflow that ignores docs paths never runs on
   # them, so workflow_run never fires. Use a direct pull_request trigger
   # constrained to the same paths, since the docs gate has no CI to wait for.
+  # For this event GitHub runs the workflow file as the PULL REQUEST writes
+  # it, not the default branch's: a pull request that edits this file gets its
+  # own promote-docs. Nothing in here can stop that; a ruleset on the default
+  # branch does (docs/conventions/auto-merge-policy.md § Setting it up).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
@@ -68,8 +72,9 @@ env:
   GH_REPO: ${{ github.repository }}
   # Paths that are EXECUTED by Claude Code or git rather than read (ERE, matched
   # case-insensitively per path segment): any `.claude/` directory at any depth
-  # (and a `.claude` symlink entry), CLAUDE.md / CLAUDE.local.md anywhere, the
-  # git hooks directory, a project MCP config at any depth, the other paths a
+  # (and a `.claude` symlink entry), CLAUDE.md / CLAUDE.local.md / AGENTS.md
+  # anywhere (Claude Code reads an AGENTS.md as instructions wherever no
+  # CLAUDE.md stands in for it), the git hooks directory, a project MCP config at any depth, the other paths a
   # Claude CI action treats as configuration read from the working directory
   # (`.claude.json`, `.ripgreprc`, `.gitmodules`, `.husky/`), what runs Claude
   # in CI and this workflow, and the gate with everything it runs or reads: the
@@ -81,7 +86,7 @@ env:
   # Single source for both jobs; AM-1 (scripts/guards.d/40-auto-merge.sh) tests
   # the pattern on a table of paths and asserts both jobs use it. This is the
   # kit's list: leave it as it is, so an update of the kit can refresh it.
-  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)claude(\.local)?\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^\.github/zizmor\.ya?ml$|^\.gitleaks(\.toml|ignore)$|^scripts/guards\.d/|^scripts/(security-checks\.sh|fetch-pinned-release\.sh|plugin-pins(\.test)?\.mjs|reviewed-plugins\.json|auto-merge-paths\.txt)$'
+  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)(claude(\.local)?|agents)\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^\.github/zizmor\.ya?ml$|^\.gitleaks(\.toml|ignore)$|^scripts/guards\.d/|^scripts/(security-checks\.sh|fetch-pinned-release\.sh|plugin-pins(\.test)?\.mjs|reviewed-plugins\.json|auto-merge-paths\.txt)$'
   # The project's own additions to the list above, applied with it by both
   # jobs (same syntax, same matching). `^$` matches no path: nothing is added
   # as shipped. An empty or unusable pattern holds every pull request.
@@ -90,6 +95,18 @@ env:
   # hooks directory, a script one of your own guards runs), with a `hold` row
   # per path in scripts/auto-merge-paths.txt, then delete this note.
   PROJECT_GATE_RE: '^$'
+  # Tests an unattended merge must not weaken (ERE on paths, matched like the
+  # two patterns above). Green means merged, and green is whatever the tests
+  # say: a pull request that deletes or renames a file matching this pattern,
+  # or removes or rewrites a line of one, is held for a hand merge. A new test
+  # file, and lines added to an existing one, keep merging on green. `^$`
+  # matches no path: nothing is held as shipped. An unusable pattern holds
+  # every pull request that changes an existing file. A tripwire, not a proof:
+  # docs/conventions/auto-merge-policy.md § Tests that get weaker.
+  # TODO(harness): the paths of your tests and of their fixtures and
+  # snapshots (`(^|/)tests?/|\.(test|spec)\.[a-z]+$`), with `test` rows in
+  # scripts/auto-merge-paths.txt, then delete this note.
+  TEST_HOLD_RE: '^$'
   # Where a Dependabot major is held even when it is an indirect dependency's
   # security update (ERE on the changed paths; `.github/` is always held).
   # `.` matches every path: as shipped, every Dependabot major waits for a hand
@@ -162,8 +179,9 @@ jobs:
       # trailer that action parses out of Dependabot's commit message.
       #
       # Second exception: Claude instruction files (any `.claude/` directory,
-      # `CLAUDE.md`, `CLAUDE.local.md` — Claude Code walks up from its working
-      # directory, so a nested one counts too) steer every session that loads
+      # `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` — Claude Code walks up from
+      # its working directory and loads a subdirectory's file when it reads
+      # there, so a nested one counts too) steer every session that loads
       # them. A green CI proves nothing about them, so they never merge
       # unattended — the PR stays open for a hand merge.
       - name: Merge gate (Claude config, Dependabot breaking bumps and Action minors)
@@ -209,7 +227,7 @@ jobs:
           # gated path (CLAUDE.md → docs/legacy.md) is still seen. The count is
           # checked against the pull request's changed_files: any gap holds.
           RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
-                    --jq '{total: .total_commits, commits: [.commits[] | {login: (.author.login // "unknown"), message: .commit.message}], files: [.files[]? | [.filename, (.previous_filename // "")]]}')
+                    --jq '{total: .total_commits, commits: [.commits[] | {login: (.author.login // "unknown"), message: .commit.message}], files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
           ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
           if [ "$LISTED" != "$CHANGED" ]; then
@@ -225,6 +243,20 @@ jobs:
           CLAUDE_FILES=$(grep -i -E -c -e "$CLAUDE_GATE_RE" -e "$PROJECT_GATE_RE" <<< "$PATHS" || true)
           if [ "$CLAUDE_FILES" != "0" ]; then
             echo "::notice::PR #${PR} touches ${CLAUDE_FILES} file(s) matched by CLAUDE_GATE_RE or PROJECT_GATE_RE — never merged unattended, merge it by hand."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Tests that get weaker (AM-8). SHRUNK lists every file of the range
+          # that is not new and did more than gain lines — deleted, renamed
+          # (old and new path), a line removed or rewritten, or a change with
+          # no line count (a binary snapshot, a mode). One of them under
+          # TEST_HOLD_RE holds the pull request, whoever wrote it: the CI that
+          # just went green ran the tests as this pull request left them.
+          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE")
+          WEAKENED=0
+          if [ -n "$SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$SHRUNK" || true); fi
+          if [ "$WEAKENED" != "0" ]; then
+            echo "::notice::PR #${PR} deletes, renames or rewrites lines of ${WEAKENED} existing file(s) matched by TEST_HOLD_RE — never merged unattended, read what the tests lost and merge it by hand."
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -543,8 +575,9 @@ jobs:
             echo "::notice::PR #${PR}: unreadable base or head commit — leaving it for a hand merge."
             exit 0
           fi
-          ROWS=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
-                   --jq '.files[]? | [.filename, (.previous_filename // "")] | @tsv')
+          RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
+                    --jq '{files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
+          ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
           if [ "$LISTED" != "$CHANGED" ]; then
             echo "::notice::PR #${PR}: file listing incomplete (${LISTED} of ${CHANGED}) — leaving it for a hand merge."
@@ -565,6 +598,17 @@ jobs:
           fi
           if [ "$NON_DOCS" != "0" ]; then
             echo "PR #${PR} touches ${NON_DOCS} non-docs file(s) — deferring to the CI gate (promote-from-ci)."
+            exit 0
+          fi
+          # Tests that get weaker (AM-8, see promote-from-ci): a test or a
+          # fixture kept as documentation is held here too. It stays a draft:
+          # the one line that marks a pull request ready in this job is the
+          # gate's above (AM-4).
+          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE")
+          WEAKENED=0
+          if [ -n "$SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$SHRUNK" || true); fi
+          if [ "$WEAKENED" != "0" ]; then
+            echo "::notice::PR #${PR} deletes, renames or rewrites lines of ${WEAKENED} existing file(s) matched by TEST_HOLD_RE — never merged unattended, lift draft and merge it by hand."
             exit 0
           fi
           gh pr ready "$PR" || true

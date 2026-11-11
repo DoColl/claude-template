@@ -3,10 +3,44 @@ name: CI
 # The kit's own checks: the installer's tests (which install every module into
 # a scratch project and run its gate), then zizmor on every workflow the kit
 # ships, rendered as a project would get them, and on this file.
+#
+# The first job calls security.yml: gitleaks, then the kit's own gate
+# (scripts/security-checks.sh), since the kit installs part of itself at its
+# root. The documentation set is skipped, and what the tests read or the kit
+# ships is taken back: a Markdown file under modules/ is shipped content.
 on:
   push:
     branches: [main]
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!**.md'
+      - '!LICENSE'
+      - '!.gitignore'
+      - '.claude/**'
+      - '**/.claude/**'
+      - 'CLAUDE.md'
+      - '**/CLAUDE.md'
+      - 'modules/**'
+      - 'skills/**'
+      - 'README.md'
+      - 'docs/module-authoring.md'
   pull_request:
+    branches: [main]
+    paths:
+      - '**'
+      - '!docs/**'
+      - '!**.md'
+      - '!LICENSE'
+      - '!.gitignore'
+      - '.claude/**'
+      - '**/.claude/**'
+      - 'CLAUDE.md'
+      - '**/CLAUDE.md'
+      - 'modules/**'
+      - 'skills/**'
+      - 'README.md'
+      - 'docs/module-authoring.md'
 
 permissions: {}
 
@@ -15,8 +49,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  security:
+    name: Security
+    # `$/` is this repository at the caller's commit. `./` means the same to
+    # GitHub, but zizmor reports it (self-repository) and GA-2 would fail.
+    uses: $/.github/workflows/security.yml
+    # The ceiling for the called workflow: its jobs can only narrow it.
+    permissions:
+      contents: read
+
   test:
     name: Tests and workflow lint
+    needs: [security]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

@@ -1,0 +1,27 @@
+# zizmor triage config — https://docs.zizmor.sh/configuration/
+# zizmor runs at the version pinned in scripts/guards.d/30-github-actions.sh
+# (GA-2), on every contributor's machine and in security.yml's enforcing job,
+# and must report nothing, at any severity. This file records the triage
+# decisions that keep it there. Every ignore MUST carry a justification; a
+# real finding gets fixed, not ignored (CLAUDE.md § Findings policy).
+#
+# `file.yml:LINE` entries are anchored to one line on purpose: an edit above
+# them shifts the finding off its ignore and it comes back, which forces a
+# second look. Re-anchor the line then; never widen it to the whole file.
+#
+# This file is yours: the kit never overwrites it.
+rules:
+  # Every `uses:` pinned to a full SHA, written out rather than left to
+  # zizmor's default, so a future default cannot loosen the gate. GA-1 checks
+  # the same rule with grep, without the tool.
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin
+  # Shape of a triage decision (delete the example once you have a real one):
+  #
+  # dangerous-triggers:
+  #   ignore:
+  #     # Why the trigger is needed, who can reach it, and what bounds the job
+  #     # it starts — the same bar as any derogation.
+  #     - some-workflow.yml:8

@@ -8,5 +8,12 @@
 #   pass <path>   neither may match: keeps merging on green
 #
 # One `hold` row per kind of path you add to PROJECT_GATE_RE, and a `pass` row
-# for a neighbour the pattern must not catch. This file is yours: the kit never
+# for a neighbour the pattern must not catch.
+#
+# AM-8 runs TEST_HOLD_RE, the tests an unattended merge must not weaken, on:
+#
+#   test <path>       the pattern must match: deleting or rewriting lines of
+#                     this file holds the pull request
+#   not-test <path>   the pattern must not match
+# This file is yours: the kit never
 # overwrites it. It is itself held for a hand merge.
