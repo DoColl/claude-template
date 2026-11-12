@@ -14,7 +14,7 @@
 
 RW=.github/workflows/claude-rework.yml
 REVIEW=.github/workflows/claude-review.yml
-REWORK_DIGEST=325568bda8e01c3db64ceb787774ed0b8da3c502
+REWORK_DIGEST=6ede9db9f037144284a757310d45f5d4e74f0c4d
 
 command -v git >/dev/null 2>&1 || { fail "RW-1: git is needed to compute the digest"; finish; }
 
@@ -68,7 +68,11 @@ mutant red   "Bash made available"            rework 's/--tools Read,Grep,Glob,E
 mutant red   "edits anywhere"                 rework 's/Edit\(\.rework\/pr\/\*\*\)/Edit/'
 mutant red   "a third attempt"                rework 's/for k in 1 2; do/for k in 1 2 3; do/'
 mutant red   "held paths let through"         rework 's/\|\^docs\/conventions\/'"'"'$/'"'"'/'
-mutant red   "a forced push"                  rework 's/git push origin /git push --force origin /'
+mutant red   "an existing branch pushed to"   rework 's/ --force-with-lease="refs\/heads\/\$\{BRANCH\}:"//'
+mutant red   "names quoted again"             rework 's/--name-only -z --no-renames\)/--name-only --no-renames)/'
+mutant red   "links and modes let through"    rework "s/'mode change\|mode 120000\|mode 160000'/'never'/"
+mutant red   "a .git kept in the tree"        rework '/find \.rework\/pr -name \.git -prune -exec rm -rf/d'
+mutant red   "failed attempts not counted"    rework 's/startswith\("Automated rework started"\)/startswith("never")/'
 mutant red   "the verdict not kept"           review 's/^          name: claude-review-verdict$/          name: verdict/'
 mutant green "pin bump"                       rework 's/(actions\/checkout@)[0-9a-f]{40} # v[0-9.]+/\1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v7.0.2/'
 [ "$rw3" -eq 1 ] || ok "RW-3: every broken copy goes red, a pin bump stays green"

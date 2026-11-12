@@ -42,7 +42,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read # the review run's verdict artifact
-      pull-requests: read
+      pull-requests: write # the attempt marker on the held pull request
     outputs:
       go: ${{ steps.decide.outputs.go }}
       pr: ${{ steps.decide.outputs.pr }}
@@ -88,13 +88,21 @@ jobs:
             echo "PR #${PR} comes from ${HEAD_REF} — not reworked."
             exit 0
           fi
-          # Two attempts, counted by the pull requests they opened: a pull
-          # request outlives its branch, and nobody but an admin deletes one.
-          ATTEMPT=""
+          # Two attempts. Every attempt leaves a marker comment as soon as it
+          # is decided, so one that ends with no pull request (nothing to
+          # propose, a held path, a failed step) counts too; the pull requests
+          # attempts opened count as well, should markers be deleted. The
+          # larger count wins. A brake, not a lock: see the page.
+          MARKERS=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+                      --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("Automated rework started")))] | length' | jq -s 'add // 0')
+          OPENED=0
           for k in 1 2; do
             N=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=all&head=${GITHUB_REPOSITORY%%/*}:claude/rework-pr-${PR}-${k}" --jq 'length')
-            if [ "$N" = "0" ]; then ATTEMPT=$k; break; fi
+            if [ "$N" != "0" ]; then OPENED=$k; fi
           done
+          DONE=$(( MARKERS > OPENED ? MARKERS : OPENED ))
+          ATTEMPT=""
+          if [ "$DONE" -lt 2 ]; then ATTEMPT=$(( DONE + 1 )); fi
           {
             echo "pr=$PR"
             echo "head_sha=$HEAD_SHA"
@@ -104,6 +112,7 @@ jobs:
             echo "needs_human=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          gh pr comment "$PR" --body "Automated rework started, attempt ${ATTEMPT}/2, on ${HEAD_SHA:0:7}."
           echo "attempt=$ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "go=true" >> "$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/out"
@@ -145,6 +154,18 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
+      # Plain files only: no .git anywhere in it (git would read a
+      # configuration the session could write) and no symbolic link (an edit
+      # through one would land outside). A pristine copy is kept outside the
+      # workspace; the change is the difference between the two.
+      - name: Make the pull request's tree plain files
+        run: |
+          set -euo pipefail
+          find .rework/pr -name .git -prune -exec rm -rf {} +
+          find .rework/pr -type l -print -delete
+          mkdir -p "$RUNNER_TEMP/cmp"
+          cp -a .rework/pr "$RUNNER_TEMP/cmp/a"
+
       - name: Fetch the findings
         env:
           GH_TOKEN: ${{ github.token }}
@@ -164,12 +185,13 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           display_report: 'false'
           show_full_output: 'false'
-          # Read, search and edit only, and edits only under .rework/pr.
-          settings: '{"permissions":{"deny":["Read(//proc/**)","Read(//sys/**)","Read(//etc/**)","Read(//home/runner/work/_temp/**)","Read(~/.claude/**)","Read(~/.claude.json)","Read(.git/**)","Read(.rework/pr/.git/**)"]}}'
+          # Read, search and edit only; reads approved in the workspace, edits
+          # under .rework/pr only, and never a .git there.
+          settings: '{"permissions":{"deny":["Read(//proc/**)","Read(//sys/**)","Read(//etc/**)","Read(//home/runner/work/_temp/**)","Read(//home/runner/work/_actions/**)","Read(~/.claude/**)","Read(~/.claude.json)","Read(.git/**)","Edit(.rework/pr/**/.git/**)","Write(.rework/pr/**/.git/**)","Edit(.rework/pr/.git/**)","Write(.rework/pr/.git/**)"]}}'
           claude_args: >-
             --max-turns 60
             --tools Read,Grep,Glob,Edit,Write
-            --allowedTools Read,Grep,Glob,Edit(.rework/pr/**),Write(.rework/pr/**)
+            --allowedTools Read(./**),Grep,Glob,Edit(.rework/pr/**),Write(.rework/pr/**)
             --disallowedTools Bash,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Skill
           prompt: |
             You fix the blocking findings of an automated review in one pull request of this repository. You can read, search and edit files; you cannot run anything.
@@ -178,14 +200,25 @@ jobs:
 
             Fix what each finding names, and only that: no refactoring, no style change, no unrelated file. Never delete or weaken a test or a check. Never change an instruction file, a workflow, a guard or the findings catalogue under .rework/pr; a finding that can only be fixed there is left unfixed. A finding you cannot fix with confidence is left unfixed. When you are done, stop: a later step reads what you changed.
 
-      # What the session changed, and nothing else: the diff of the pull
-      # request's tree. Anything it may have written elsewhere is not taken.
+      # What the session changed, and nothing else: the difference between
+      # the pristine copy and the tree it edited, computed outside any
+      # repository, with no system or global git configuration. A link or a
+      # .git it created stops the run.
       - name: Collect the change
         run: |
           set -euo pipefail
-          git -C .rework/pr add -A
-          git -C .rework/pr diff --cached --binary > "$RUNNER_TEMP/rework.patch"
-          echo "$(git -C .rework/pr diff --cached --name-only | wc -l) file(s) changed"
+          if [ -n "$(find .rework/pr -type l -print -quit)" ] || [ -n "$(find .rework/pr -name .git -print -quit)" ]; then
+            echo "::error::The session created a symbolic link or a .git — nothing is passed on."
+            exit 1
+          fi
+          C="$RUNNER_TEMP/cmp"
+          cp -a .rework/pr "$C/b"
+          cd "$C"
+          export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CEILING_DIRECTORIES="$C"
+          rc=0
+          git -c core.quotePath=false diff --no-index --binary --no-renames --src-prefix= --dst-prefix= a b > "$RUNNER_TEMP/rework.patch" || rc=$?
+          if [ "$rc" -gt 1 ]; then echo "::error::The change could not be computed."; exit 1; fi
+          echo "$(grep -c '^diff --git ' "$RUNNER_TEMP/rework.patch" || true) file(s) changed"
 
       - name: Pass the change on
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -230,20 +263,30 @@ jobs:
             gh pr comment "$PR" --body "Automated rework, attempt ${ATTEMPT}/2: no change proposed. The findings wait for a human."
             exit 0
           fi
-          git apply --index "$RUNNER_TEMP/p/rework.patch"
-          CHANGED=$(git diff --cached --name-only)
-          HELD=$(grep -i -E -e "$REWORK_HOLD_RE" <<< "$CHANGED" || true)
+          git apply --index -p1 "$RUNNER_TEMP/p/rework.patch"
+          # Every changed path, unquoted and NUL-separated, without rename
+          # detection (a rename is a deletion and an addition, both judged).
+          HELD=""
+          while IFS= read -r -d '' f; do
+            if [[ "$f" == *[[:cntrl:]]* ]] || grep -q -i -E -e "$REWORK_HOLD_RE" <<< "$f"; then HELD="${HELD}${f}"$'\n'; fi
+          done < <(git -c core.quotePath=false diff --cached --name-only -z --no-renames)
+          # No link, no submodule, no mode change: plain file contents only.
+          if git diff --cached --summary --no-renames | grep -q -E 'mode change|mode 120000|mode 160000'; then
+            HELD="${HELD}(a link, a submodule or a mode change)"$'\n'
+          fi
           if [ -n "$HELD" ]; then
-            echo "::error::The rework changed held paths — nothing pushed:"
-            echo "$HELD"
-            gh pr comment "$PR" --body "Automated rework, attempt ${ATTEMPT}/2: the change touched paths that are never changed this way. Nothing was pushed; the findings wait for a human."
+            echo "::error::The rework changed held paths or file types — nothing pushed:"
+            printf '%s' "$HELD"
+            gh pr comment "$PR" --body "Automated rework, attempt ${ATTEMPT}/2: the change touched paths or file types that are never changed this way. Nothing was pushed; the findings wait for a human."
             exit 1
           fi
+          FILES=$(git -c core.quotePath=false diff --cached --name-only --no-renames | tr '`' "'")
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -q -m "Rework #${PR} (${ATTEMPT}/2): fix the blocking findings of the automated review"
-          # A new branch only: refused if it already exists, never forced.
-          git push origin "HEAD:refs/heads/${BRANCH}"
+          # A new branch only: the empty lease makes the push fail if the
+          # branch already exists, whatever it holds.
+          git push --force-with-lease="refs/heads/${BRANCH}:" origin "HEAD:refs/heads/${BRANCH}"
           {
             echo "Proposed fix of the blocking findings of the automated review of #${PR}, attempt ${ATTEMPT}/2."
             echo
@@ -251,7 +294,9 @@ jobs:
             echo
             echo "Files changed:"
             echo
-            sed 's/^/- /; s/`/'"'"'/g' <<< "$CHANGED"
+            echo '````text'
+            printf '%s\n' "$FILES"
+            echo '````'
           } > "$RUNNER_TEMP/body.md"
           URL=$(gh pr create --base "$HEAD_REF" --head "$BRANCH" --title "Rework #${PR} (${ATTEMPT}/2)" --body-file "$RUNNER_TEMP/body.md")
           gh pr comment "$PR" --body "Automated rework, attempt ${ATTEMPT}/2: ${URL}"
