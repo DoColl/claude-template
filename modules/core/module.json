@@ -1,7 +1,7 @@
 {
   "id": "core",
   "title": "Instruction file, docs skeleton and the local gate",
-  "summary": "CLAUDE.md under a byte budget, docs/ (conventions, ADR, runbooks), the findings catalogue, and scripts/security-checks.sh running every guard in scripts/guards.d/.",
+  "summary": "CLAUDE.md under a byte budget, docs/ (conventions, ADR, runbooks), the findings catalogue with a /retro skill that feeds it, and scripts/security-checks.sh running every guard in scripts/guards.d/.",
   "phase": "day-1",
   "order": 10,
   "required": true,

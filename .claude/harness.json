@@ -15,6 +15,10 @@
     "CI_WORKFLOW": "CI"
   },
   "files": {
+    ".claude/skills/retro/SKILL.md": {
+      "module": "core",
+      "sha256": "179a9d0a7e6e4bf76506e49de7f138648dc03d7d7e86c69153a76bdf6d07112c"
+    },
     ".gitleaks.toml": {
       "module": "core",
       "seed": true
@@ -49,7 +53,7 @@
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
-      "sha256": "e6427bce301224b88c97c2921575c5ae248f5913ce1820d1f3ee4c62e659d5a9"
+      "sha256": "88e7fdb3f3c15a22bbcc563e66676502715270a5f6f2c5cb3107c082633eceb8"
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",

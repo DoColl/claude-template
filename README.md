@@ -56,7 +56,7 @@ Running `init` again is safe: files already in place are left alone.
 
 | Module | Adopt | What it installs |
 |---|---|---|
-| `core` | day 1 | `CLAUDE.md` skeleton with its byte budget, `docs/` (conventions, ADR, runbooks), the findings catalogue, the gate `scripts/security-checks.sh` and its `guards.d/` |
+| `core` | day 1 | `CLAUDE.md` skeleton with its byte budget, `docs/` (conventions, ADR, runbooks), the findings catalogue and the `/retro` skill that feeds it, the gate `scripts/security-checks.sh` and its `guards.d/` |
 | `git-hooks` | day 1 | `pre-commit` (gitleaks on staged changes) and `pre-push` (the gate, offline) |
 | `session-settings` | day 1, opt-in | a `.claude/settings.json` that denies reading `.env` files and `secrets/`, turns on the Bash sandbox without dropping a prompt, and a guard against the settings that widen every session |
 | `agents` | day 1 | `implementer`, `verifier`, `doc-sync` and `reviewer` agents, and the tested Bash allowlist that confines the read-only ones |
@@ -85,6 +85,7 @@ Each module's convention page says where its piece comes from and what has actua
 | `npm audit` gate | Ported from a production workflow. This generic variant has not run on GitHub yet. |
 | `ci-workflow` | Not run as shipped. Its call to `security.yml` has run in the kit's own CI, which is written the same way. The pull-request path filter with re-inclusions is still written from GitHub's documented rules: no pull request touching only instruction files has been watched starting a run. |
 | `auto-merge` | The original runs in production. This generic variant has merged nothing yet. On the kit's own repository `promote-docs` ran twice and held a pull request that touched gated paths; the module was then uninstalled there, its ruleset not being enforced. No unattended merge, no `promote-from-ci` run and no `TEST_HOLD_RE` hold has been watched: your first pull requests are their test. |
+| `/retro` skill | Written for the kit. Never run live. |
 | `weekly-digest` | Unit-tested. Never run live, in the project it comes from either. |
 | `claude-ci` | Not exercised end to end; only its push hook was replayed locally, against the push wrapper of the pinned action. For private repositories only. |
 | `openspec` guard | Its validation command was run against OpenSpec CLI 1.10.0 in one installed project (an empty project, a scaffolded change, a valid change, a spec alone), and the guard itself in a scratch project (a change with no delta stays red until it declares `skip_specs: true`). Not run in CI: the kit installs no CLI there. |
@@ -104,6 +105,7 @@ SECURITY_REVIEW.md                 the findings catalogue (yours)
   agents/                          implementer, verifier, doc-sync, reviewer, security-reviewer
   hooks/                           the Bash allowlist, its tests, its config (yours)
   skills/project-security-review/  the project's review skill (yours)
+  skills/retro/                    the retrospective that feeds the findings catalogue
   settings.json                    secret files denied, Bash sandbox (yours)
   harness.json                     what the installer did
 .githooks/                         pre-commit, pre-push
