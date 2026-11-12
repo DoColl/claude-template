@@ -14,7 +14,7 @@
 
 RW=.github/workflows/claude-rework.yml
 REVIEW=.github/workflows/claude-review.yml
-REWORK_DIGEST=6ede9db9f037144284a757310d45f5d4e74f0c4d
+REWORK_DIGEST=aac6a9295ace39aab1e08da7f10b16227f4772e0
 
 command -v git >/dev/null 2>&1 || { fail "RW-1: git is needed to compute the digest"; finish; }
 
@@ -67,11 +67,14 @@ mutant red   "started by the pull request"    rework 's/^  workflow_run: # zizmo
 mutant red   "Bash made available"            rework 's/--tools Read,Grep,Glob,Edit,Write/--tools Read,Grep,Glob,Edit,Write,Bash/'
 mutant red   "edits anywhere"                 rework 's/Edit\(\.rework\/pr\/\*\*\)/Edit/'
 mutant red   "a third attempt"                rework 's/for k in 1 2; do/for k in 1 2 3; do/'
-mutant red   "held paths let through"         rework 's/\|\^docs\/conventions\/'"'"'$/'"'"'/'
+mutant red   "held paths let through"         rework 's/\|\^docs\/conventions\///'
 mutant red   "an existing branch pushed to"   rework 's/ --force-with-lease="refs\/heads\/\$\{BRANCH\}:"//'
 mutant red   "names quoted again"             rework 's/--name-only -z --no-renames\)/--name-only --no-renames)/'
 mutant red   "links and modes let through"    rework "s/'mode change\|mode 120000\|mode 160000'/'never'/"
-mutant red   "a .git kept in the tree"        rework '/find \.rework\/pr -name \.git -prune -exec rm -rf/d'
+mutant red   "a .git kept in the tree"        rework '/find \.rework\/pr -iname \.git -prune -exec rm -rf/d'
+mutant red   "Grep approved everywhere"       rework 's/--allowedTools Read\(\.\/\*\*\),/--allowedTools Read(.\/**),Grep,Glob,/'
+mutant red   ".gitattributes let through"     rework 's/\|\(\^\|\/\)\\\.gitattributes\$//'
+mutant red   "no concurrency group"           rework '/^  group: claude-rework-/d'
 mutant red   "failed attempts not counted"    rework 's/startswith\("Automated rework started"\)/startswith("never")/'
 mutant red   "the verdict not kept"           review 's/^          name: claude-review-verdict$/          name: verdict/'
 mutant green "pin bump"                       rework 's/(actions\/checkout@)[0-9a-f]{40} # v[0-9.]+/\1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v7.0.2/'

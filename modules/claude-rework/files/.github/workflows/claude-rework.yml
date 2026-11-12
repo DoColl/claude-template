@@ -26,12 +26,22 @@ on:
 
 permissions: {}
 
+# One run at a time per held commit: two holds of the same commit finishing
+# together would otherwise both count zero attempts. The review's run name
+# names the commit, and only the review's own file sets it.
+concurrency:
+  group: claude-rework-${{ github.event.workflow_run.display_title }}
+  cancel-in-progress: false
+
 env:
   # Paths a rework never changes: what the unattended merge holds for a hand
   # merge (instruction files, hooks, MCP and tool configs, the gate and its
-  # guards, scanner configs, the findings catalogue, convention pages), and
-  # every workflow. Matched case-insensitively.
-  REWORK_HOLD_RE: '(^|/)\.claude(/|$)|(^|/)(claude(\.local)?|agents)\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/|^\.gitleaks(\.toml|ignore)$|^scripts/guards\.d/|^scripts/(security-checks\.sh|fetch-pinned-release\.sh|plugin-pins(\.test)?\.mjs|reviewed-plugins\.json|auto-merge-paths\.txt)$|^security_review[^/]*\.md$|^docs/conventions/'
+  # guards, scanner configs, the findings catalogue, convention pages), every
+  # workflow, and what changes how a change is shown or a tree is opened
+  # (.gitattributes can collapse a file in the review's diff; editor and
+  # container configs run on whoever opens the tree). Matched
+  # case-insensitively.
+  REWORK_HOLD_RE: '(^|/)\.claude(/|$)|(^|/)(claude(\.local)?|agents)\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/|^\.gitleaks(\.toml|ignore)$|^scripts/guards\.d/|^scripts/(security-checks\.sh|fetch-pinned-release\.sh|plugin-pins(\.test)?\.mjs|reviewed-plugins\.json|auto-merge-paths\.txt)$|^security_review[^/]*\.md$|^docs/conventions/|(^|/)\.gitattributes$|^\.devcontainer/|^\.vscode/'
 
 jobs:
   prepare:
@@ -161,7 +171,7 @@ jobs:
       - name: Make the pull request's tree plain files
         run: |
           set -euo pipefail
-          find .rework/pr -name .git -prune -exec rm -rf {} +
+          find .rework/pr -iname .git -prune -exec rm -rf {} +
           find .rework/pr -type l -print -delete
           mkdir -p "$RUNNER_TEMP/cmp"
           cp -a .rework/pr "$RUNNER_TEMP/cmp/a"
@@ -185,13 +195,16 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           display_report: 'false'
           show_full_output: 'false'
-          # Read, search and edit only; reads approved in the workspace, edits
-          # under .rework/pr only, and never a .git there.
-          settings: '{"permissions":{"deny":["Read(//proc/**)","Read(//sys/**)","Read(//etc/**)","Read(//home/runner/work/_temp/**)","Read(//home/runner/work/_actions/**)","Read(~/.claude/**)","Read(~/.claude.json)","Read(.git/**)","Edit(.rework/pr/**/.git/**)","Write(.rework/pr/**/.git/**)","Edit(.rework/pr/.git/**)","Write(.rework/pr/.git/**)"]}}'
+          # Read, search and edit only; reads approved in the workspace (Grep
+          # and Glob are approved there without a rule, and a rule naming them
+          # bare would approve them everywhere), edits under .rework/pr only,
+          # never a .git there; reads and writes outside the working directory
+          # blocked where the installed Claude Code knows those settings.
+          settings: '{"permissions":{"blockReadsOutsideWorkingDirectories":true,"blockWritesOutsideWorkingDirectories":true,"deny":["Read(//proc/**)","Read(//sys/**)","Read(//etc/**)","Read(//home/runner/work/_temp/**)","Read(//home/runner/work/_actions/**)","Read(~/.claude/**)","Read(~/.claude.json)","Read(.git/**)","Edit(.rework/pr/**/.git/**)","Write(.rework/pr/**/.git/**)","Edit(.rework/pr/.git/**)","Write(.rework/pr/.git/**)"]}}'
           claude_args: >-
             --max-turns 60
             --tools Read,Grep,Glob,Edit,Write
-            --allowedTools Read(./**),Grep,Glob,Edit(.rework/pr/**),Write(.rework/pr/**)
+            --allowedTools Read(./**),Edit(.rework/pr/**),Write(.rework/pr/**)
             --disallowedTools Bash,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task,Skill
           prompt: |
             You fix the blocking findings of an automated review in one pull request of this repository. You can read, search and edit files; you cannot run anything.
@@ -207,7 +220,7 @@ jobs:
       - name: Collect the change
         run: |
           set -euo pipefail
-          if [ -n "$(find .rework/pr -type l -print -quit)" ] || [ -n "$(find .rework/pr -name .git -print -quit)" ]; then
+          if [ -n "$(find .rework/pr -type l -print -quit)" ] || [ -n "$(find .rework/pr -iname .git -print -quit)" ]; then
             echo "::error::The session created a symbolic link or a .git — nothing is passed on."
             exit 1
           fi
