@@ -4,7 +4,7 @@
 
 ## Status
 
-The call to `security.yml` and the triggers are the ones `security-workflow.md` § Wiring describes. This file **has not run on GitHub** as shipped. The call to `security.yml`, in this exact form, has run in the kit's own CI workflow; the path filter with negations and re-inclusions is written from GitHub's documented filter rules, not from an observed run. Open one pull request that only touches `CLAUDE.md` and check that the run starts.
+The call to `security.yml` and the triggers are the ones `security-workflow.md` § Wiring describes. Run live once, on 2026-11-12, in a throwaway private repository (the kit at commit `e677e3d` plus the fixes below; `claude-code-action` at `f27be6b`, which installed Claude Code 2.1.302), with one test job added after the call. Observed: a documentation-only pull request started no run; one that only touched `CLAUDE.md` did, through the re-inclusion; one opened into another branch started none, and its `edited` event started one once it was retargeted onto the default branch. In your repository, open one pull request that only touches `CLAUDE.md` and check that the run starts.
 
 ## Why
 
@@ -35,3 +35,4 @@ The `pull_request` trigger lists `edited` on top of GitHub's default types (`ope
 
 - Installed with the kit.
 - `edited` added to the `pull_request` types, so that a retargeted pull request gets its own run.
+- First live run (§ Status): the path filter and the `edited` type behaved as described.

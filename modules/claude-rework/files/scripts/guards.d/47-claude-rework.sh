@@ -14,7 +14,7 @@
 
 RW=.github/workflows/claude-rework.yml
 REVIEW=.github/workflows/claude-review.yml
-REWORK_DIGEST=21ca8d5c709a004b625109ba2e23a832bd7f7e18
+REWORK_DIGEST=3a2e5e7dd0e0c698628785310599fa0c8201c30f
 
 command -v git >/dev/null 2>&1 || { fail "RW-1: git is needed to compute the digest"; finish; }
 
@@ -76,6 +76,7 @@ mutant red   "Grep approved everywhere"       rework 's/--allowedTools Read\(\.\
 mutant red   ".gitattributes let through"     rework 's/\|\(\^\|\/\)\\\.gitattributes\$//'
 mutant red   "no concurrency group"           rework '/^  group: claude-rework-/d'
 mutant red   "failed attempts not counted"    rework 's/startswith\("Automated rework started"\)/startswith("never")/'
+mutant red   "a commit reworked twice"        rework 's/if \[ "\$SEEN" != "0" \]; then/if false; then/'
 mutant red   "the verdict not kept"           review 's/^          name: claude-review-verdict$/          name: verdict/'
 mutant red   "propose cannot read the patch"  rework '/^      actions: read # this run.s rework-patch artifact$/d'
 mutant green "pin bump"                       rework 's/(actions\/checkout@)[0-9a-f]{40} # v[0-9.]+/\1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v7.0.2/'
