@@ -54,7 +54,8 @@ on:
   # must start this workflow too. A name is no proof — any workflow can carry
   # it — so the job accepts a review run only when it was itself started by
   # workflow_run (a file only the default branch can hold) from the review's
-  # file, and the sign-off step reads runs by file. With no review workflow,
+  # file, and the sign-off step reads the review's runs by file (CI's by
+  # name: every one must be green). With no review workflow,
   # that name never fires.
   workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: ["__HARNESS_CI_WORKFLOW__", "Claude review"]
@@ -198,17 +199,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ steps.event.outputs.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           # `sha:` matches any open PR that CONTAINS the commit (a stacked PR,
-          # a sibling): keep only the one whose head IS the validated SHA.
-          FOUND=$(gh pr list --search "sha:$HEAD_SHA" --state open --json number,headRefOid,headRefName \
-                 --jq '[.[] | select(.headRefOid == $ENV.HEAD_SHA)][0] // empty | [.number, .headRefName] | @tsv')
-          if [ -z "$FOUND" ]; then
-            echo "No open PR found for SHA $HEAD_SHA — skipping"
+          # a sibling): keep only the one whose head IS the validated SHA, and
+          # only into the default branch — the branch the review and the gate
+          # judge against. Two such pull requests are one too many to choose
+          # from: a hand merge.
+          FOUND=$(gh pr list --search "sha:$HEAD_SHA" --state open --base "$DEFAULT_BRANCH" --json number,headRefOid,headRefName \
+                 --jq '[.[] | select(.headRefOid == $ENV.HEAD_SHA) | [.number, .headRefName] | @tsv]')
+          COUNT=$(jq 'length' <<< "$FOUND")
+          if [ "$COUNT" = "0" ]; then
+            echo "No open PR into ${DEFAULT_BRANCH} found for SHA $HEAD_SHA — skipping"
             exit 0
           fi
-          IFS=$'\t' read -r PR HEAD_REF <<< "$FOUND"
+          if [ "$COUNT" != "1" ]; then
+            echo "::notice::${COUNT} open pull requests into ${DEFAULT_BRANCH} have head ${HEAD_SHA:0:7} — leaving them for a hand merge."
+            exit 0
+          fi
+          IFS=$'\t' read -r PR HEAD_REF <<< "$(jq -r '.[0]' <<< "$FOUND")"
           # The job's if: refuses a claude/issue-* head for a CI run; a review
           # run's head is the default branch, so the pull request's own head
           # branch is checked here.
@@ -334,6 +344,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.find-pr.outputs.pr }}
           HEAD_SHA: ${{ steps.event.outputs.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           # The gate judges what the merge below will bring in, not what the
@@ -356,6 +367,13 @@ jobs:
           fi
           if [ "$PR_HEAD" != "$HEAD_SHA" ]; then
             echo "::notice::PR #${PR}: head moved since the validated SHA — left as is, its own run decides."
+            exit 0
+          fi
+          # Reviewed and signed off against the default branch: a pull request
+          # retargeted elsewhere since would land a diff nobody judged.
+          if [ "$BASE_REF" != "$DEFAULT_BRANCH" ]; then
+            echo "::notice::PR #${PR}: its base is ${BASE_REF}, not ${DEFAULT_BRANCH} — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if ! [[ "$BASE_SHA" =~ ^[0-9a-f]{40,64}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40,64}$ ]]; then

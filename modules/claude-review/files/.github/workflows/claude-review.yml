@@ -72,7 +72,9 @@ jobs:
 
       # The default branch, which is what workflow_run checks out: every file
       # Claude Code executes or obeys (CLAUDE.md, .claude/, .mcp.json) is one
-      # that was already merged. No credential is kept in git's configuration.
+      # that was already merged. The checkout keeps no credential; the action
+      # then writes this job's read-only token into the origin URL for its own
+      # git setup, under .git/, which the session is denied reading.
       - name: Check out the default branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

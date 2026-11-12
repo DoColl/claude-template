@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AM-1, AM-4, AM-5, AM-6, AM-7, AM-8 — invariants of .github/workflows/auto-merge.yml
+# AM-1, AM-4, AM-5, AM-6, AM-7, AM-8, AM-9 — invariants of .github/workflows/auto-merge.yml
 # (docs/conventions/auto-merge-policy.md). That workflow merges pull requests
 # with nobody watching, so what it must never do is pinned here.
 #
@@ -30,6 +30,10 @@
 #         waited for, the CI one and the automated review, and nothing merges
 #         before the sign-off step has read both: its signoff_state, extracted
 #         from between its markers, is run on tables of runs.
+#   AM-9  the CI workflow waited for lists `edited` among its pull_request
+#         types, so a pull request retargeted to the default branch is tested
+#         against it (a heuristic on the `types:` line: a workflow written
+#         another way fails until it says it plainly).
 #   AM-8  tests that get weaker. Green means merged, and green is what the
 #         tests say, so a pull request that deletes, renames or rewrites lines
 #         of an existing file under TEST_HOLD_RE is held. The workflow's own
@@ -559,6 +563,32 @@ if ! grep -qxF "      (github.event.workflow_run.event == 'pull_request' || (git
    || ! grep -qxF '          if [[ "$HEAD_REF" == claude/issue-* ]]; then' "$AM"; then
   bad 6 "a review run is accepted only when started by workflow_run from .github/workflows/claude-review.yml, its commit is read from its run name, and the pull request's own claude/issue-* head is refused"
 fi
+# When the review is required, and that it cannot be switched off from the
+# pull request or by an outage: its file is looked up on the default branch,
+# only a 404 means "not installed", any other failure stops the job, and only
+# Dependabot is exempt. Each line pinned; the counts keep a second assignment
+# from undoing them.
+for line in \
+  '          if OUT=$(gh api "repos/${GITHUB_REPOSITORY}/contents/${REVIEW_PATH}?ref=${DEFAULT_BRANCH}" --jq '"'"'.sha'"'"' 2>&1); then' \
+  '            REVIEW=required' \
+  '              *"(HTTP 404)"*) REVIEW=none ;;' \
+  '          if [ "$AUTHOR" = "dependabot[bot]" ] || [ "$AUTHOR" = "app/dependabot" ] || [ "$AUTHOR" = "dependabot" ]; then' \
+  '          REVIEW_STATE=skipped' \
+  '          if [ "$REVIEW" = required ]; then' \
+  '          if [ "$(jq -r '"'"'.total'"'"' <<< "$CI_RUNS")" -gt 100 ]; then' \
+  "      group: auto-merge-\${{ github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.display_title || format('Claude review of {0}', github.event.workflow_run.head_sha) }}" \
+  '          FOUND=$(gh pr list --search "sha:$HEAD_SHA" --state open --base "$DEFAULT_BRANCH" --json number,headRefOid,headRefName \' \
+  '          if [ "$COUNT" != "1" ]; then' \
+  '          if [ "$BASE_REF" != "$DEFAULT_BRANCH" ]; then'; do
+  grep -qxF -- "$line" "$AM" || bad 6 "sign-off line missing or changed: $line"
+done
+if ! grep -qF '              *) echo "$OUT"; echo "::error::Could not tell whether ${REVIEW_PATH} exists' "$AM"; then
+  bad 6 "a failed lookup of the review file must stop the job, never read as \"not installed\""
+fi
+n_req=$(grep -cE 'REVIEW=required' "$AM" || true); n_none=$(grep -cE 'REVIEW=none' "$AM" || true); n_skip=$(grep -cE 'REVIEW_STATE=skipped' "$AM" || true)
+if [ "$n_req" != "1" ] || [ "$n_none" != "2" ] || [ "$n_skip" != "1" ]; then
+  bad 6 "REVIEW=required once, REVIEW=none twice (404, Dependabot), REVIEW_STATE=skipped once — found $n_req, $n_none, $n_skip"
+fi
 if ! grep -qxF '          if [ "$CI_STATE" != ok ]; then' "$AM"; then
   bad 6 "the sign-off step must stop unless CI is ok"
 fi
@@ -719,10 +749,21 @@ if [ -n "$ci_name" ]; then
   for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
     [ -f "$wf" ] || continue
     name=$(sed -n 's/^name:[[:space:]]*//p' "$wf" | head -n 1 | sed -e 's/[[:space:]]*#.*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/")
-    if [ "$name" = "$ci_name" ]; then found=1; fi
+    if [ "$name" = "$ci_name" ]; then
+      found=1
+      # AM-9: a pull request retargeted to the default branch starts no run
+      # unless `edited` is among the pull_request types; the commit's only CI
+      # run could then be a copy that a pull request into another branch ran.
+      if ! grep -qE '^ +types: \[(.*[, ])?edited *(,.*)?\]' "$wf"; then
+        fail "AM-9: $wf (\"$ci_name\") must list 'edited' in its pull_request types — a pull request retargeted to the default branch would otherwise be merged on a CI run of another branch's copy (auto-merge-policy.md § The gate judges what is merged)"
+        am9=1
+      fi
+    fi
   done
   if [ "$found" = 0 ]; then
     note "no workflow named \"$ci_name\" under .github/workflows/ — until one exists, only docs-only pull requests are merged"
+  elif [ "${am9:-0}" = 0 ]; then
+    ok "AM-9: the CI workflow runs again when a pull request is retargeted"
   fi
 fi
 

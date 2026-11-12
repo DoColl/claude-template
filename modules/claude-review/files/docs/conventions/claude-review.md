@@ -38,23 +38,23 @@ It then looks for the pull request: the one open pull request into the default b
 
 The session returns JSON against a fixed schema: `pass` or `hold`, a two-sentence summary, findings marked `blocking` or `minor`. A second job, with no Claude in it and `pull-requests: write`, posts the verdict as a comment inside a fenced block (its backticks replaced, so the model's text renders as text and mentions nobody) and fails the run unless the verdict is `pass`. A review job that failed, timed out or returned nothing usable is a hold.
 
-A held pull request waits for a human: read the comment, then fix and push (a new run follows) or merge by hand. Re-running the review does not help: the unattended merge requires every review run that names the commit to be green at its first attempt, so a hold stays a hold for that commit.
+A held pull request waits for a human: read the comment, then fix and push (a new run follows) or merge by hand. Re-running the review does not help: the unattended merge requires every review run that names the commit to be green at its first attempt, so a hold stays a hold for that commit — while it is among the review's latest 100 runs, which is where the merge looks.
 
-**For that commit only.** A new commit gets a new review, even one with the same tree: amending and force-pushing after a hold rolls the dice again. Someone allowed to delete workflow runs could also remove a held run. A hold is a brake on a session that goes wrong, not a lock against someone who can push.
+**For that commit only, and not for ever.** A new commit gets a new review, even one with the same tree: amending and force-pushing after a hold rolls the dice again. Every end of a CI run starts a review run, most of them with nothing to review, so a hundred re-runs of any cheap CI run push a held run out of that window, and a CI re-run of the held commit then starts a fresh review. Someone allowed to delete workflow runs could also remove a held run. A hold is a brake on a session that goes wrong, not a lock against someone who can push.
 
 ## What is not reviewed
 
 - **Documentation-only pull requests**: CI does not run on them, so neither does the review.
 - **Forks** and **Dependabot**: the job does not go on; Dependabot's pull requests have their own merge gate.
 - **Pull requests whose CI is red**: nothing to review until it is green.
-- **Pull requests a bot opens**: the action refuses to start for an actor that is not a user unless `allowed_bots` names it. As shipped, such a run fails, which holds the pull request. Name a bot there only after reading `docs/security.md` of the action at the pinned commit.
+- **Pull requests a bot pushes to**: the action refuses to start unless the actor of the run — for this trigger, whoever pushed the commit CI ran on, and the actor of that CI run — is a user with write access, or a bot `allowed_bots` names. Who opened the pull request is not what is checked. As shipped, such a run fails, which holds the pull request. Name a bot there only after reading `docs/security.md` of the action at the pinned commit.
 - **Pull requests into another branch**: none is found, and the run fails.
 
 ## Merging unattended
 
 A flow that merges on green must wait for this run as well as for CI. The kit's unattended merge does so by itself when `.github/workflows/claude-review.yml` exists on the default branch: the review's end starts it, it accepts a review run only when `workflow_run` started it from this file, reads the commit from the run name, and merges only once every CI run and every review run for that commit are green. Any other merge automation must do the same, or it merges before the review is in.
 
-The chain is three workflows long (CI, then the review, then the merge): GitHub does not follow `workflow_run` further than that, so nothing can be added after the merge by the same means.
+The chain is CI, then the review, then the merge: two `workflow_run` links. GitHub documents that it follows at most three levels of workflows chained by `workflow_run` beyond the first, so one more link after the merge would still fire, and no more.
 
 ## Who already holds the secret
 
