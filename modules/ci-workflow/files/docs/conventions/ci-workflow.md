@@ -4,7 +4,7 @@
 
 ## Status
 
-The call to `security.yml` and the triggers are the ones `security-workflow.md` § Wiring describes. Run live once, on 2026-11-12, in a throwaway private repository (the kit at commit `e677e3d` plus the `claude-rework` fixes; `claude-code-action` at `f27be6b`, which installed Claude Code 2.1.302), with one test job added after the call. Observed: a documentation-only pull request started no run; one that only touched `CLAUDE.md` did, through the re-inclusion; one opened into another branch started none, and its `edited` event started one once it was retargeted onto the default branch. In your repository, open one pull request that only touches `CLAUDE.md` and check that the run starts.
+The call to `security.yml` and the triggers are the ones `security-workflow.md` § Wiring describes. Run live once, on 2026-11-12, in a throwaway private repository (the kit at commit `e677e3d` plus the `actions: read` fix of `claude-rework`; `claude-code-action` at `f27be6b`, which installed Claude Code 2.1.302), with one test job added after the call. Observed: a documentation-only pull request started no run; one that only touched `CLAUDE.md` did, through the re-inclusion; one opened into another branch started none, and its `edited` event started one once it was retargeted onto the default branch. In your repository, open one pull request that only touches `CLAUDE.md` and check that the run starts.
 
 ## Why
 
