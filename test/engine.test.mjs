@@ -213,7 +213,8 @@ test("the docs paths agree across the shipped workflows, and CI re-includes only
   assert.deepEqual(list(security, /\n  push:\n(?:.*\n)*?    paths:\n((?:      - .*\n)+)/), docs, "security.yml, push");
   assert.deepEqual(list(autoMerge, /\n  pull_request:\n(?:.*\n)*?    paths:\n((?:      - .*\n)+)/), docs, "auto-merge.yml, pull_request");
   const review = read(kit.modules.get("claude-review").dir, "files/.github/workflows/claude-review.yml");
-  assert.deepEqual(list(review, /\n  pull_request:\n(?:.*\n)*?    paths:\n((?:      - .*\n)+)/), pr, "claude-review.yml reviews the pull requests CI runs on");
+  assert.match(review, /\n  workflow_run: # zizmor: ignore\[dangerous-triggers\]\n    workflows: \["__HARNESS_CI_WORKFLOW__"\]\n    types: \[completed\]\n/, "claude-review.yml follows CI, so it reviews the pull requests CI runs on");
+  assert.doesNotMatch(review, /\n  pull_request(_target)?:/, "claude-review.yml is never started by a pull request");
   assert.ok(autoMerge.includes("grep -E -v -c '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)'"), "auto-merge.yml, NON_DOCS");
   const gate = new RegExp(/^  CLAUDE_GATE_RE: '(.*)'$/m.exec(autoMerge)[1], "i");
   const back = pr.slice(lastExclusion + 1);

@@ -24,10 +24,12 @@
 #         dependabot.yml must not widen version updates (`allow`).
 #   AM-6  the merge is the commit CI validated: the pull request is selected
 #         by its head SHA, every merge call passes that SHA, and the SHA comes
-#         from the triggering event. Two workflows are waited for, the CI one
-#         and the automated review, and nothing merges before the sign-off
-#         step has read both: its signoff_state, extracted from between its
-#         markers, is run on tables of runs.
+#         from the triggering event — a CI run's head, or the commit a review
+#         run names in its run name, a review run being accepted only when
+#         workflow_run started it from the review's file. Two workflows are
+#         waited for, the CI one and the automated review, and nothing merges
+#         before the sign-off step has read both: its signoff_state, extracted
+#         from between its markers, is run on tables of runs.
 #   AM-8  tests that get weaker. Green means merged, and green is what the
 #         tests say, so a pull request that deletes, renames or rewrites lines
 #         of an existing file under TEST_HOLD_RE is held. The workflow's own
@@ -543,11 +545,19 @@ okline=$(grep -cF 'echo "ok=true" >> "$GITHUB_OUTPUT"' "$AM" || true)
 if [ "$okline" != "1" ]; then
   bad 6 "the sign-off step must write ok=true in exactly one place (found $okline)"
 fi
-if ! grep -qxF "          CI_STATE=\$(signoff_state '.name == \$ENV.CI_NAME' latest <<< \"\$RUNS\")" "$AM" \
-   || ! grep -qxF "            REVIEW_STATE=\$(signoff_state '.path == \$ENV.REVIEW_PATH' every <<< \"\$RUNS\")" "$AM" \
+if ! grep -qxF "          CI_STATE=\$(signoff_state '.name == \$ENV.CI_NAME' rerun-ok <<< \"\$CI_RUNS\")" "$AM" \
+   || ! grep -qxF "            REVIEW_STATE=\$(signoff_state '.path == \$ENV.REVIEW_PATH' first-attempt <<< \"\$REVIEW_RUNS\")" "$AM" \
+   || ! grep -qF "actions/workflows/claude-review.yml/runs?event=workflow_run&per_page=100" "$AM" \
+   || ! grep -qF 'select(.display_title == ("Claude review of " + $ENV.HEAD_SHA))' "$AM" \
    || ! grep -qxF "          export REVIEW_PATH=.github/workflows/claude-review.yml" "$AM" \
    || ! grep -qxF "            ok|skipped) echo \"ok=true\" >> \"\$GITHUB_OUTPUT\" ;;" "$AM"; then
-  bad 6 "the sign-off step must judge CI by name at each file's latest run, the review by its file at every run, and say ok only for ok or skipped"
+  bad 6 "the sign-off step must judge every CI run by name, every review run started by workflow_run and naming the commit at its first attempt, and say ok only for ok or skipped"
+fi
+if ! grep -qxF "      (github.event.workflow_run.event == 'pull_request' || (github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/claude-review.yml')) &&" "$AM" \
+   || ! grep -qxF '              if ! [[ "$RUN_TITLE" =~ ^Claude\ review\ of\ [0-9a-f]{40}$ ]]; then' "$AM" \
+   || ! grep -qxF '          RUN_TITLE: ${{ github.event.workflow_run.display_title }}' "$AM" \
+   || ! grep -qxF '          if [[ "$HEAD_REF" == claude/issue-* ]]; then' "$AM"; then
+  bad 6 "a review run is accepted only when started by workflow_run from .github/workflows/claude-review.yml, its commit is read from its run name, and the pull request's own claude/issue-* head is refused"
 fi
 if ! grep -qxF '          if [ "$CI_STATE" != ok ]; then' "$AM"; then
   bad 6 "the sign-off step must stop unless CI is ok"
@@ -559,29 +569,30 @@ elif ! command -v jq > /dev/null 2>&1; then
   if [ -n "${CI:-}" ]; then bad 6 "jq is needed to run signoff_state"; else note "AM-6: jq not found — signoff_state not run"; fi
 else
   eval "$sblock"
-  am6() { # am6 <expected> <label> <latest|every> <runs: name|path|run_number|run_attempt|status|conclusion, one per line>
+  am6() { # am6 <expected> <label> <rerun-ok|first-attempt> <runs: name|path|run_number|run_attempt|status|conclusion, one per line>
     local got runs filter
     runs=$(jq -Rn '{runs: [inputs | split("|") | {name: .[0], path: .[1], run_number: (.[2] | tonumber), run_attempt: (.[3] | tonumber), status: .[4], conclusion: (if .[5] == "" then null else .[5] end)}]}' <<< "$4")
-    if [ "$3" = latest ]; then filter='.name == $ENV.CI_NAME'; else filter='.path == $ENV.REVIEW_PATH'; fi
+    if [ "$3" = rerun-ok ]; then filter='.name == $ENV.CI_NAME'; else filter='.path == $ENV.REVIEW_PATH'; fi
     got=$(CI_NAME=CI REVIEW_PATH=.github/workflows/claude-review.yml signoff_state "$filter" "$3" <<< "$runs")
     [ "$got" = "$1" ] || bad 6 "signoff_state on '$2': $got, expected $1"
   }
   ci=.github/workflows/ci.yml; rv=.github/workflows/claude-review.yml
-  am6 ok      'CI green'                     latest "CI|$ci|4|1|completed|success"
-  am6 pending 'CI running'                   latest "CI|$ci|4|1|in_progress|"
-  am6 none    'no CI run'                    latest "Claude review|$rv|2|1|completed|success"
-  am6 ok      'CI red, then green on a run'  latest "$(printf 'CI|%s|3|1|completed|failure\nCI|%s|4|1|completed|success' $ci $ci)"
-  am6 ok      'CI re-run attempt'            latest "CI|$ci|4|2|completed|success"
-  am6 red     'CI green, then red'           latest "$(printf 'CI|%s|3|1|completed|success\nCI|%s|4|1|completed|failure' $ci $ci)"
-  am6 red     'a borrowed name cannot cover' latest "$(printf 'CI|%s|4|1|completed|failure\nCI|.github/workflows/fake.yml|9|1|completed|success' $ci)"
-  am6 ok      'review green'                 every  "$(printf 'CI|%s|4|1|completed|success\nClaude review|%s|2|1|completed|success' $ci $rv)"
-  am6 red     'review held'                  every  "Claude review|$rv|2|1|completed|failure"
-  am6 red     'review skipped'               every  "Claude review|$rv|2|1|completed|skipped"
-  am6 pending 'review running'               every  "Claude review|$rv|2|1|queued|"
-  am6 none    'review by name, other file'   every  "Claude review|.github/workflows/fake.yml|2|1|completed|success"
-  am6 red     'a hold, then a pass'          every  "$(printf 'Claude review|%s|2|1|completed|failure\nClaude review|%s|3|1|completed|success' $rv $rv)"
-  am6 red     'a review re-run until pass'   every  "Claude review|$rv|2|2|completed|success"
-  am6 red     'a review re-run, in flight'   every  "Claude review|$rv|2|2|in_progress|"
+  am6 ok      'CI green'                       rerun-ok "CI|$ci|4|1|completed|success"
+  am6 pending 'CI running'                     rerun-ok "CI|$ci|4|1|in_progress|"
+  am6 none    'no CI run'                      rerun-ok "Claude review|$rv|2|1|completed|success"
+  am6 ok      'CI re-run attempt'              rerun-ok "CI|$ci|4|2|completed|success"
+  am6 ok      'two green CI runs'              rerun-ok "$(printf 'CI|%s|3|1|completed|success\nCI|%s|4|1|completed|success' $ci $ci)"
+  am6 red     'a later green run cannot cover' rerun-ok "$(printf 'CI|%s|3|1|completed|failure\nCI|%s|4|1|completed|success' $ci $ci)"
+  am6 red     'a borrowed name cannot cover'   rerun-ok "$(printf 'CI|%s|4|1|completed|failure\nCI|.github/workflows/fake.yml|9|1|completed|success' $ci)"
+  am6 ok      'review green'                   first-attempt "Claude review|$rv|2|1|completed|success"
+  am6 red     'review held'                    first-attempt "Claude review|$rv|2|1|completed|failure"
+  am6 red     'review cancelled'               first-attempt "Claude review|$rv|2|1|completed|cancelled"
+  am6 pending 'review running'                 first-attempt "Claude review|$rv|2|1|queued|"
+  am6 none    'review by name, other file'     first-attempt "Claude review|.github/workflows/fake.yml|2|1|completed|success"
+  am6 red     'a hold, then a pass'            first-attempt "$(printf 'Claude review|%s|2|1|completed|failure\nClaude review|%s|3|1|completed|success' $rv $rv)"
+  am6 red     'a review re-run until pass'     first-attempt "Claude review|$rv|2|2|completed|success"
+  am6 red     'a review re-run, in flight'     first-attempt "Claude review|$rv|2|2|in_progress|"
+  am6 red     'an unknown mode is strict'      strict "Claude review|$rv|2|2|completed|success"
 fi
 # The pull request is the one whose head IS the validated SHA (a `sha:` search
 # also returns stacked and sibling pull requests)…
@@ -594,9 +605,12 @@ if [ "$pinned" != "$merging" ]; then
   bad 6 "$merging merge call(s) but $pinned pass sha=\"\$HEAD_SHA\" — every merge must be pinned to the validated head"
 fi
 # …and it is the event's SHA, never the pull request's current head.
-foreign=$(grep -E '^ +HEAD_SHA: ' "$AM" | grep -cvE '^ +HEAD_SHA: \$\{\{ github\.event\.(workflow_run\.head_sha|pull_request\.head\.sha) \}\}$' || true)
+foreign=$(grep -E '^ +HEAD_SHA: ' "$AM" | grep -cvE '^ +HEAD_SHA: \$\{\{ (steps\.event\.outputs\.head_sha|github\.event\.pull_request\.head\.sha) \}\}$' || true)
 if [ "$foreign" != "0" ]; then
-  bad 6 "HEAD_SHA must come from the triggering event (workflow_run.head_sha or pull_request.head.sha) in every step"
+  bad 6 "HEAD_SHA must come from the triggering event (the 'Commit to judge' step, or pull_request.head.sha) in every step"
+fi
+if ! grep -qxF '          RUN_HEAD: ${{ github.event.workflow_run.head_sha }}' "$AM"; then
+  bad 6 "the 'Commit to judge' step must read a CI run's commit from workflow_run.head_sha"
 fi
 pass 6 "the merge is pinned to the SHA of the event, once CI and the review have both signed off"
 
