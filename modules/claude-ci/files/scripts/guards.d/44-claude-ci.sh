@@ -4,9 +4,9 @@
 #   CC-1  every workflow carries `permissions: {}` at the top level.
 #   CC-2  claude.yml is the only workflow that mentions a Claude secret or
 #         action (comments count: Actions expands `${{ }}` in a `#` line of a
-#         `run:` block), and none reads all the secrets. One exception:
-#         claude-review.yml, the automated pull-request review, when the guard
-#         that pins it byte for byte (45-claude-review.sh) is installed too.
+#         `run:` block), and none reads all the secrets. Exceptions, each only
+#         next to the guard that pins it byte for byte: claude-review.yml
+#         (45-claude-review.sh) and claude-rework.yml (47-claude-rework.sh).
 #   CC-3  claude.yml is, byte for byte, the file CLAUDE_YML_DIGEST was taken
 #         from, pins aside.
 #   CC-4  those checks can fail: a table of broken copies must all go red, and
@@ -31,9 +31,12 @@ digest() {
   sed -E 's/^( *(- )?uses: [^@ ]+)@[0-9a-f]{40} # v[0-9.]+$/\1@SHA/' "$1" | git hash-object --stdin
 }
 
-# The review workflow is let in only next to the guard that pins it.
+# The review and rework workflows are let in only next to the guard that pins
+# each of them.
 review_pinned=no
 [ -f scripts/guards.d/45-claude-review.sh ] && review_pinned=yes
+rework_pinned=no
+[ -f scripts/guards.d/47-claude-rework.sh ] && rework_pinned=yes
 
 # check <workflows dir> [yes|no]: prints one line per problem; the caller counts
 # them. The second argument says whether the review workflow is pinned.
@@ -53,11 +56,12 @@ check() {
       '') ;;
       "$dir/claude.yml") ;;
       "$dir/claude-review.yml") [ "$pinned" = yes ] || extra="$extra $f" ;;
+      "$dir/claude-rework.yml") [ "${3:-$rework_pinned}" = yes ] || extra="$extra $f" ;;
       *) extra="$extra $f" ;;
     esac
   done <<< "$out"
   if [ -n "$extra" ] || ! grep -qxF "$dir/claude.yml" <<< "$out"; then
-    echo "CC-2: only claude.yml (and claude-review.yml, pinned by 45-claude-review.sh) may touch a Claude secret, the action or all the secrets, got: $(tr "\n" " " <<< "$out")"
+    echo "CC-2: only claude.yml (and claude-review.yml and claude-rework.yml, each pinned by its guard) may touch a Claude secret, the action or all the secrets, got: $(tr "\n" " " <<< "$out")"
   fi
 
   got=$(digest "$dir/claude.yml")
@@ -106,7 +110,7 @@ mutant() { # $1 = red|green, $2 = label, $3 = file, $4 = sed -E script, $5 = fil
     fail "CC-4: mutant '$2' changed nothing in $3"; cc4=1
     return 0
   fi
-  if [ -z "$(check "$tmp/wf" "${6:-yes}" 2>/dev/null)" ]; then got=green; else got=red; fi
+  if [ -z "$(check "$tmp/wf" "${6:-yes}" "${6:-yes}" 2>/dev/null)" ]; then got=green; else got=red; fi
   if [ "$got" != "$1" ]; then fail "CC-4: mutant '$2' is $got, wanted $1"; cc4=1; fi
 }
 
@@ -122,6 +126,7 @@ mutant red "second reader, hidden file"     zz-harness-fixture.yml 's/^name: (.*
 mutant red "a second Claude workflow"       zz-harness-fixture.yml 's/^name: (.*)$/name: \1 anthropics\/claude-code-base-action/' claude-triage.yml
 mutant red "a name that globs to claude.yml" zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' 'claud[e].yml'
 mutant red "the review workflow, unpinned"  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 anthropics\/claude-code-action/' claude-review.yml no
+mutant red "the rework workflow, unpinned"  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 anthropics\/claude-code-action/' claude-rework.yml no
 mutant green "the review workflow, pinned"  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 anthropics\/claude-code-action/' claude-review.yml yes
 mutant green "pin bump"                     claude.yml 's/(actions\/checkout@)[0-9a-f]{40} # v[0-9.]+/\1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v7.0.2/'
 

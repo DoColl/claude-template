@@ -141,7 +141,9 @@ if [ "$merging" = "0" ] || [ "$merging" != "$gated" ]; then
   bad 1 "$merging job(s) merge but $gated apply the CLAUDE_GATE_RE and PROJECT_GATE_RE gate — every merging job must"
 fi
 # And every one refuses a head a CI Claude session wrote, in its job `if:`.
-heads=$(grep -cE "^ +!startsWith\(github\.event\.[a-z_.]+, 'claude/issue-'\)$" "$AM" || true)
+heads=$(grep -cE "^ +!startsWith\(github\.event\.[a-z_.]+, 'claude/issue-'\)( &&)?$" "$AM" || true)
+rework_heads=$(grep -cE "^ +!startsWith\(github\.event\.[a-z_.]+, 'claude/rework-'\)( &&)?$" "$AM" || true)
+[ "$rework_heads" = "$merging" ] || bad 1 "$merging job(s) merge but $rework_heads refuse claude/rework-* heads — every merging job must"
 if [ "$merging" != "$heads" ]; then
   bad 1 "$merging job(s) merge but $heads refuse claude/issue-* heads — every merging job must"
 fi
@@ -560,7 +562,7 @@ fi
 if ! grep -qxF "      (github.event.workflow_run.event == 'pull_request' || (github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/claude-review.yml')) &&" "$AM" \
    || ! grep -qxF '              if ! [[ "$RUN_TITLE" =~ ^Claude\ review\ of\ [0-9a-f]{40}$ ]]; then' "$AM" \
    || ! grep -qxF '          RUN_TITLE: ${{ github.event.workflow_run.display_title }}' "$AM" \
-   || ! grep -qxF '          if [[ "$HEAD_REF" == claude/issue-* ]]; then' "$AM"; then
+   || ! grep -qxF '          if [[ "$HEAD_REF" == claude/issue-* || "$HEAD_REF" == claude/rework-* ]]; then' "$AM"; then
   bad 6 "a review run is accepted only when started by workflow_run from .github/workflows/claude-review.yml, its commit is read from its run name, and the pull request's own claude/issue-* head is refused"
 fi
 # When the review is required, and that it cannot be switched off from the

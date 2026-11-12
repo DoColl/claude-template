@@ -5,8 +5,9 @@
 #         was taken from, pins and the CI workflow's name aside.
 #   CR-2  claude-review.yml is the only workflow that mentions a Claude secret
 #         or action (comments count: Actions expands `${{ }}` in a `#` line of
-#         a `run:` block) — with claude.yml, only next to the guard that pins
-#         it (44-claude-ci.sh) — none reads all the secrets, and
+#         a `run:` block) — with claude.yml and claude-rework.yml, each only
+#         next to the guard that pins it (44-claude-ci.sh, 47-claude-rework.sh)
+#         — none reads all the secrets, and
 #         claude-review.yml carries `permissions: {}` at the top level.
 #   CR-3  those checks can fail: a table of broken copies must all go red, and
 #         a pin bump must stay green.
@@ -17,7 +18,7 @@
 shopt -s dotglob nullglob # GitHub loads a workflow named .x.yml
 
 WF=.github/workflows
-CLAUDE_REVIEW_DIGEST=343a0ff2000d758646bce2927e03df4b32c12fcf
+CLAUDE_REVIEW_DIGEST=06587432bff048b8dfa794414934ee9b04a350e6
 
 if [ ! -f "$WF/claude-review.yml" ]; then
   fail "CR-1: $WF/claude-review.yml is missing — restore it, or remove this guard along with the workflow"
@@ -35,6 +36,8 @@ digest() {
 # The issue workflow is let in only next to the guard that pins it.
 issue_pinned=no
 [ -f scripts/guards.d/44-claude-ci.sh ] && issue_pinned=yes
+rework_pinned=no
+[ -f scripts/guards.d/47-claude-rework.sh ] && rework_pinned=yes
 
 # check <workflows dir> [yes|no]: prints one line per problem; the caller
 # counts them. The second argument says whether claude.yml is pinned.
@@ -55,11 +58,12 @@ check() {
     case "$f" in
       ''|"$dir/claude-review.yml") ;;
       "$dir/claude.yml") [ "$pinned" = yes ] || bad="$bad $f" ;;
+      "$dir/claude-rework.yml") [ "${3:-$rework_pinned}" = yes ] || bad="$bad $f" ;;
       *) bad="$bad $f" ;;
     esac
   done <<< "$out"
   if [ -n "$bad" ]; then
-    echo "CR-2: only claude-review.yml (and claude.yml, pinned by 44-claude-ci.sh) may touch a Claude secret, the action or all the secrets, got:$bad"
+    echo "CR-2: only claude-review.yml (and claude.yml and claude-rework.yml, each pinned by its guard) may touch a Claude secret, the action or all the secrets, got:$bad"
   fi
   if ! grep -qxE 'permissions: *\{\}' "$dir/claude-review.yml"; then
     echo "CR-2: claude-review.yml has no top-level 'permissions: {}' line"
@@ -96,7 +100,7 @@ mutant() { # $1 = red|green, $2 = label, $3 = file, $4 = sed -E script, $5 = fil
     fail "CR-3: mutant '$2' changed nothing in $3"; cr3=1
     return 0
   fi
-  if [ -z "$(check "$tmp/wf" "${6:-yes}" 2>/dev/null)" ]; then got=green; else got=red; fi
+  if [ -z "$(check "$tmp/wf" "${6:-yes}" "${6:-yes}" 2>/dev/null)" ]; then got=green; else got=red; fi
   if [ "$got" != "$1" ]; then fail "CR-3: mutant '$2' is $got, wanted $1"; cr3=1; fi
 }
 
@@ -114,6 +118,7 @@ mutant red "second reader, all secrets"     zz-harness-fixture.yml 's/^name: (.*
 mutant red "a third Claude workflow"        zz-harness-fixture.yml 's/^name: (.*)$/name: \1 anthropics\/claude-code-base-action/' claude-triage.yml
 mutant red "a name that globs to claude.yml" zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' 'claud[e].yml'
 mutant red "the issue workflow, unpinned"  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' claude.yml no
+mutant red "the rework workflow, unpinned"  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' claude-rework.yml no
 mutant green "the issue workflow, pinned"  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' claude.yml yes
 mutant green "pin bump"                     claude-review.yml 's/(actions\/checkout@)[0-9a-f]{40} # v[0-9.]+/\1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v7.0.2/'
 mutant green "another CI workflow name"     claude-review.yml 's/^    workflows: \[".*"\]$/    workflows: ["Tests on every push"]/'

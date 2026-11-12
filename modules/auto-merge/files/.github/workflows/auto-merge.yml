@@ -38,8 +38,8 @@
 #
 # Never merged unattended, by either job: a pull request touching a path
 # CLAUDE_GATE_RE or PROJECT_GATE_RE matches (what Claude Code or git
-# EXECUTES), or coming from a claude/issue-* head (what a CI Claude session
-# wrote).
+# EXECUTES), or coming from a claude/issue-* or claude/rework-* head (what a
+# CI Claude session wrote).
 
 name: Auto-merge after CI
 
@@ -147,7 +147,8 @@ jobs:
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       (github.event.workflow_run.event == 'pull_request' || (github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/claude-review.yml')) &&
-      !startsWith(github.event.workflow_run.head_branch, 'claude/issue-')
+      !startsWith(github.event.workflow_run.head_branch, 'claude/issue-') &&
+      !startsWith(github.event.workflow_run.head_branch, 'claude/rework-')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # One run at a time per commit: CI's end and the review's end would
@@ -219,10 +220,10 @@ jobs:
             exit 0
           fi
           IFS=$'\t' read -r PR HEAD_REF <<< "$(jq -r '.[0]' <<< "$FOUND")"
-          # The job's if: refuses a claude/issue-* head for a CI run; a review
-          # run's head is the default branch, so the pull request's own head
-          # branch is checked here.
-          if [[ "$HEAD_REF" == claude/issue-* ]]; then
+          # The job's if: refuses a claude/issue-* or claude/rework-* head for
+          # a CI run; a review run's head is the default branch, so the pull
+          # request's own head branch is checked here.
+          if [[ "$HEAD_REF" == claude/issue-* || "$HEAD_REF" == claude/rework-* ]]; then
             echo "::notice::PR #${PR} comes from ${HEAD_REF}, a branch a CI Claude session wrote — never unattended."
             exit 0
           fi
@@ -691,7 +692,8 @@ jobs:
     if: >-
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      !startsWith(github.event.pull_request.head.ref, 'claude/issue-')
+      !startsWith(github.event.pull_request.head.ref, 'claude/issue-') &&
+      !startsWith(github.event.pull_request.head.ref, 'claude/rework-')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

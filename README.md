@@ -66,8 +66,8 @@ Running `init` again is safe: files already in place are left alone.
 | `node-audit` | first CI, Node projects | an `npm audit` gate with per-advisory derogations |
 | `auto-merge` | pull-request flow | unattended squash-merge on green CI (and a green automated review where `claude-review` is installed), with the gates that hold instruction files, CI-session branches, risky bumps and — once the project names its tests — changes that delete or rewrite existing test lines, for a human |
 | `claude-review` | pull-request flow | an automated, read-only Claude review of every code pull request, started once its CI is green; with `auto-merge`, a merge waits for CI and the review |
+| `claude-rework` | pull-request flow | when the review holds a pull request, a read-and-edit-only Claude session proposes a fix of its blocking findings as a pull request into the held one, pushed by a job without Claude; two attempts, then `needs-human` |
 | `weekly-digest` | pull-request flow | one issue a week listing what waits on a human |
-| `claude-rework` | on demand | instructions for a Claude Code cloud scheduled task that, when the review holds a pull request, proposes a fix of its blocking findings as a pull request into the held one; two attempts, then `needs-human` |
 | `claude-ci` | on demand | `@claude` on plain issues of a private repository, with the job token only |
 | `openspec` | on demand | the OpenSpec convention (specs for current behaviour, changes for work in flight) and its validation guard |
 
@@ -90,7 +90,7 @@ Each module's convention page says where its piece comes from and what has actua
 | `/retro` skill | Written for the kit. Never run live. |
 | `claude-review` | Never run live. Written from the action's source at the pinned commit; its guard and the sign-off logic of `auto-merge` are tested on tables, not against GitHub. Started by CI's end (`workflow_run`), so the chain CI → review → merge has never been watched firing either. |
 | `weekly-digest` | Unit-tested. Never run live, in the project it comes from either. |
-| `claude-rework` | Never run live. The instructions and the guard are tested; the scheduled task, its trigger and its pushes are configured in Claude Code on the web and have not been watched. |
+| `claude-rework` | Never run live. Its guard is tested; the workflow has not run, and no model has executed its prompt. |
 | `claude-ci` | Not exercised end to end; only its push hook was replayed locally, against the push wrapper of the pinned action. For private repositories only. |
 | `openspec` guard | Its validation command was run against OpenSpec CLI 1.10.0 in one installed project (an empty project, a scaffolded change, a valid change, a spec alone), and the guard itself in a scratch project (a change with no delta stays red until it declares `skip_specs: true`). Not run in CI: the kit installs no CLI there. |
 
@@ -106,7 +106,7 @@ Most of the kit is distilled from one production codebase, which stays unnamed. 
 |---|---|---|---|
 | [anthropics/claude-code-action](https://github.com/anthropics/claude-code-action) | MIT | `f27be6b` (v1.0.252) | The action that `claude-ci` and `claude-review` pin; for `claude-review`, the base-ref checkout pattern and the behaviour read in its source (`docs/conventions/claude-review.md` § Sources). |
 | [mattpocock/skills](https://github.com/mattpocock/skills) | MIT | `5863806` (2026-11-12) | The idea of the `/retro` skill and of the retrospective task (`docs/conventions/local-gate.md` § Sources); the three brakes of an automated flow, behind `claude-review`, and the rework task, behind `claude-rework` (their pages, § Sources). Ideas only, no text copied. |
-| [Claude Code documentation](https://code.claude.com/docs/en/routines) | — | 2026-11-12 | How scheduled tasks start, what identity they push with, auto mode (`docs/conventions/claude-rework.md` § Sources). |
+| [Claude Code documentation](https://code.claude.com/docs/en/routines) | — | 2026-11-12 | Why `claude-rework` does not run as a scheduled task: where such a task starts and what identity it pushes with (`docs/conventions/claude-rework.md` § Sources). |
 
 ## What lands in your project
 

@@ -164,20 +164,27 @@ jobs:
             text=$(jq -r '"Verdict: \(.verdict)\n\n\(.summary)\n" + ([.findings[] | "\n- [\(.severity)] \(.file)\(if .line then ":\(.line)" else "" end): \(.finding)"] | join(""))' <<< "$VERDICT_JSON" | tr '`' "'" | head -c 60000)
           fi
           printf 'Automated review of %s\n\n````text\n%s\n````\n' "$HEAD_SHA" "$text" > "$RUNNER_TEMP/review.md"
-          # No pull request found: nothing to comment on, the run fails all the
-          # same. A hold (a verdict with findings, not a failed job) labels the
-          # pull request `review-held`, which whatever reworks held pull
-          # requests can start on; a pass removes the label. The label must
-          # exist in the repository (docs/conventions/claude-review.md).
+          # No pull request found: nothing to comment on, the run fails all the same.
           if [[ "$PR" =~ ^[0-9]+$ ]]; then
             gh pr comment "$PR" --body-file "$RUNNER_TEMP/review.md"
-            if [ "$verdict" = "hold" ]; then
-              gh pr edit "$PR" --add-label review-held || echo "::warning::PR #${PR}: could not add the review-held label — create it in the repository."
-            elif [ "$verdict" = "pass" ]; then
-              gh pr edit "$PR" --remove-label review-held > /dev/null 2>&1 || true
-            fi
           fi
+          # The verdict, kept with this run for whatever acts on a hold: a
+          # comment can be posted by any workflow, an artifact of this run only
+          # by this file, as the default branch holds it.
+          mkdir -p "$RUNNER_TEMP/verdict"
+          jq -n --arg pr "$PR" --arg head "$HEAD_SHA" --arg v "$verdict" --argjson review "$(jq -c '. // {}' <<< "${VERDICT_JSON:-null}" 2>/dev/null || echo '{}')" \
+            '{pr: $pr, head_sha: $head, verdict: $v, review: $review}' > "$RUNNER_TEMP/verdict/verdict.json"
           if [ "$verdict" != "pass" ]; then
             echo "::error::Automated review: ${verdict}. The pull request waits for a human."
             exit 1
           fi
+
+      - name: Keep the verdict with the run
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: claude-review-verdict
+          path: ${{ runner.temp }}/verdict/verdict.json
+          if-no-files-found: ignore
+          # Read within minutes by whatever acts on a hold; nothing later.
+          retention-days: 1

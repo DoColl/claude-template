@@ -1,13 +1,16 @@
 {
   "id": "claude-rework",
-  "title": "Rework of held pull requests, proposed by a Claude Code cloud session",
-  "summary": "Instructions for a Claude Code scheduled task, started when the automated review labels a pull request review-held: it fixes the blocking findings on a branch of its own and opens a pull request into the held one, for a human to merge; two attempts, then needs-human.",
-  "phase": "on-demand",
+  "title": "Rework of held pull requests, proposed for a human merge",
+  "summary": "A workflow started by a review that held: a Claude session that can only read and edit files fixes the blocking findings on a copy of the pull request's tree, and a job without Claude pushes one new branch and opens a pull request into the held one; two attempts, then needs-human.",
+  "phase": "pr-flow",
   "order": 47,
-  "requires": ["core", "claude-review"],
+  "requires": [
+    "core",
+    "claude-review"
+  ],
   "postInstall": [
-    "Read docs/conventions/claude-rework.md: the scheduled task is created in Claude Code on the web, not by this installer.",
-    "Create the repository labels review-held and needs-human.",
-    "Never run live by the kit's authors: hold a throwaway pull request on purpose and watch the first rework."
+    "For a PRIVATE repository only: read docs/conventions/claude-rework.md first.",
+    "Create the repository label needs-human: after two attempts the rework adds it.",
+    "Never run live by the kit's authors: hold a throwaway pull request on purpose and read the first rework's run and pull request."
   ]
 }
