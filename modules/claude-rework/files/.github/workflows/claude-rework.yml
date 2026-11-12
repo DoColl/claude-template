@@ -103,8 +103,9 @@ jobs:
           # propose, a held path, a failed step) counts too; the pull requests
           # attempts opened count as well, should markers be deleted. The
           # larger count wins. A brake, not a lock: see the page.
-          MARKERS=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
-                      --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("Automated rework started")))] | length' | jq -s 'add // 0')
+          MARKER_BODIES=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR}/comments" \
+                            --jq '[.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("Automated rework started"))) | .body]' | jq -s 'add // []')
+          MARKERS=$(jq 'length' <<< "$MARKER_BODIES")
           OPENED=0
           for k in 1 2; do
             N=$(gh api "repos/${GITHUB_REPOSITORY}/pulls?state=all&head=${GITHUB_REPOSITORY%%/*}:claude/rework-pr-${PR}-${k}" --jq 'length')
@@ -122,7 +123,16 @@ jobs:
             echo "needs_human=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          gh pr comment "$PR" --body "Automated rework started, attempt ${ATTEMPT}/2, on ${HEAD_SHA:0:7}."
+          # One attempt per commit: a re-run of the review, or a second review
+          # run of the same commit, starts no second session on it — after the
+          # cap, so that the hand-over still happens. The marker names the full
+          # commit; the short form is what markers said before.
+          SEEN=$(jq --arg s "$HEAD_SHA" '[.[] | select(endswith(" on " + $s + ".") or endswith(" on " + $s[0:7] + "."))] | length' <<< "$MARKER_BODIES")
+          if [ "$SEEN" != "0" ]; then
+            echo "PR #${PR}: an attempt already ran on ${HEAD_SHA:0:7} — nothing to rework until a new commit."
+            exit 0
+          fi
+          gh pr comment "$PR" --body "Automated rework started, attempt ${ATTEMPT}/2, on ${HEAD_SHA}."
           echo "attempt=$ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "go=true" >> "$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/out"
@@ -249,6 +259,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      actions: read # this run's rework-patch artifact
       contents: write # push the new branch
       pull-requests: write # open the pull request, comment on the held one
     steps:
