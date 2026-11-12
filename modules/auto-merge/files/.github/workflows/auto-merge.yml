@@ -31,9 +31,10 @@
 #
 # Two sign-offs: where the project has an automated review workflow on its
 # default branch (.github/workflows/claude-review.yml), a code pull request
-# merges only once the latest run of the CI workflow AND of that review are
-# green for the same commit. Either one finishing starts this workflow; the
-# second to finish merges.
+# merges only once the CI workflow AND that review are green for the same
+# commit. The review is started by CI's end (workflow_run), so it always runs
+# the default branch's file, and names the commit it reviewed in its run name;
+# its end starts this workflow, which then merges.
 #
 # Never merged unattended, by either job: a pull request touching a path
 # CLAUDE_GATE_RE or PROJECT_GATE_RE matches (what Claude Code or git
@@ -49,10 +50,13 @@ on:
   # only on a green run whose event is pull_request and whose head is in this
   # repository, they check nothing out and execute nothing the pull request
   # carries.
-  # The second name is the automated review, which may finish after CI: its
-  # end must start this workflow too. A name is no proof — any workflow can
-  # carry it — so the sign-off step below checks the runs by file, not by the
-  # name that triggered it. With no review workflow, it never fires.
+  # The second name is the automated review, which CI's end starts: its end
+  # must start this workflow too. A name is no proof — any workflow can carry
+  # it — so the job accepts a review run only when it was itself started by
+  # workflow_run (a file only the default branch can hold) from the review's
+  # file, and the sign-off step reads the review's runs by file (CI's by
+  # name: every one must be green). With no review workflow,
+  # that name never fires.
   workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: ["__HARNESS_CI_WORKFLOW__", "Claude review"]
     types: [completed]
@@ -136,63 +140,115 @@ jobs:
     # elevated permissions otherwise). A claude/issue-* head is a branch a CI
     # Claude session wrote, and opening its pull request is not reading it:
     # never unattended.
+    # A review run's own head is the default branch: its pull request's head
+    # branch is checked in find-pr instead.
     if: >-
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.event == 'pull_request' || (github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/claude-review.yml')) &&
       !startsWith(github.event.workflow_run.head_branch, 'claude/issue-')
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # One run at a time per commit: CI and the review finishing together would
-    # otherwise both see two green runs and both try to merge. Keyed on the
-    # commit, so pull requests never wait for each other; a run left pending
-    # here and replaced by a newer one loses nothing, the newer one re-reads
-    # everything.
+    # One run at a time per commit: CI's end and the review's end would
+    # otherwise both see two green sign-offs and both try to merge. Keyed on
+    # the commit judged, written the way the review names it, so pull requests
+    # never wait for each other; a run left pending here and replaced by a
+    # newer one loses nothing, the newer one re-reads everything.
     concurrency:
-      group: auto-merge-${{ github.event.workflow_run.head_sha }}
+      group: auto-merge-${{ github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.display_title || format('Claude review of {0}', github.event.workflow_run.head_sha) }}
       cancel-in-progress: false
     permissions:
       pull-requests: write # mark ready, merge
       contents: write # merge, delete the head branch
       actions: read # the sign-offs: the runs of CI and of the review
     steps:
+      # The commit to judge (AM-6). A CI run started by a pull request carries
+      # it as its head. A review run's head is the default branch: the commit
+      # it reviewed is in its run name, which only the default branch's file
+      # sets (the job's if: accepted the run for that reason).
+      - name: Commit to judge
+        id: event
+        env:
+          EVENT: ${{ github.event.workflow_run.event }}
+          RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
+          RUN_TITLE: ${{ github.event.workflow_run.display_title }}
+        run: |
+          set -euo pipefail
+          case "$EVENT" in
+            pull_request)
+              if ! [[ "$RUN_HEAD" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error::No commit could be read from the triggering run — nothing was decided."
+                exit 1
+              fi
+              SHA=$RUN_HEAD ;;
+            workflow_run)
+              # A review run that had nothing to review names no commit.
+              if ! [[ "$RUN_TITLE" =~ ^Claude\ review\ of\ [0-9a-f]{40}$ ]]; then
+                echo "Review run without a commit (${RUN_TITLE:0:80}) — nothing to decide."
+                exit 0
+              fi
+              SHA=${RUN_TITLE#Claude review of } ;;
+            *) echo "::error::Unexpected event ${EVENT} — nothing was decided."; exit 1 ;;
+          esac
+          echo "head_sha=$SHA" >> "$GITHUB_OUTPUT"
+
       - name: Find PR for head_sha
         id: find-pr
+        if: steps.event.outputs.head_sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ steps.event.outputs.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           # `sha:` matches any open PR that CONTAINS the commit (a stacked PR,
-          # a sibling): keep only the one whose head IS the CI-validated SHA.
-          PR=$(gh pr list --search "sha:$HEAD_SHA" --state open --json number,headRefOid \
-                 --jq '[.[] | select(.headRefOid == $ENV.HEAD_SHA)][0].number // empty')
-          if [ -z "$PR" ]; then
-            echo "No open PR found for SHA $HEAD_SHA — skipping"
+          # a sibling): keep only the one whose head IS the validated SHA, and
+          # only into the default branch — the branch the review and the gate
+          # judge against. Two such pull requests are one too many to choose
+          # from: a hand merge.
+          FOUND=$(gh pr list --search "sha:$HEAD_SHA" --state open --base "$DEFAULT_BRANCH" --json number,headRefOid,headRefName \
+                 --jq '[.[] | select(.headRefOid == $ENV.HEAD_SHA) | [.number, .headRefName] | @tsv]')
+          COUNT=$(jq 'length' <<< "$FOUND")
+          if [ "$COUNT" = "0" ]; then
+            echo "No open PR into ${DEFAULT_BRANCH} found for SHA $HEAD_SHA — skipping"
+            exit 0
+          fi
+          if [ "$COUNT" != "1" ]; then
+            echo "::notice::${COUNT} open pull requests into ${DEFAULT_BRANCH} have head ${HEAD_SHA:0:7} — leaving them for a hand merge."
+            exit 0
+          fi
+          IFS=$'\t' read -r PR HEAD_REF <<< "$(jq -r '.[0]' <<< "$FOUND")"
+          # The job's if: refuses a claude/issue-* head for a CI run; a review
+          # run's head is the default branch, so the pull request's own head
+          # branch is checked here.
+          if [[ "$HEAD_REF" == claude/issue-* ]]; then
+            echo "::notice::PR #${PR} comes from ${HEAD_REF}, a branch a CI Claude session wrote — never unattended."
             exit 0
           fi
           echo "pr=$PR" >> "$GITHUB_OUTPUT"
 
-      # Both sign-offs, read from the runs of this commit, whichever workflow
-      # started this one (AM-6). CI: every workflow named __HARNESS_CI_WORKFLOW__,
-      # each at its latest run, must be green — a second workflow borrowing the
-      # name cannot stand in for a red one, and a flaky run may be re-run. The
-      # review: when its file is on the default branch, EVERY run of it for this
-      # commit must be green at its first attempt — a hold stays a hold until a
-      # new commit, and re-running a review until the model says pass holds
-      # too. A pending one means the review's own end will start this again.
-      # Dependabot's pull requests get no review (its run has no secret) and
-      # keep their own gate below. A run is known by its file path, not by who
-      # opened it: see auto-merge-policy.md § Residual risks for what a run of
-      # the same file from another pull request can do.
+      # Both sign-offs, whichever workflow started this one (AM-6).
+      # CI: every run of a workflow named __HARNESS_CI_WORKFLOW__ for this commit
+      # must be green (a flaky run may be re-run). Every run, not the latest: a
+      # pull request into another branch can run its own copy of a workflow on
+      # the same commit, and a green copy must not cover a red original.
+      # The review: when its file is on the default branch, every run of it
+      # that names this commit must be green at its first attempt — a hold
+      # stays a hold until a new commit, and a review re-run until the model
+      # says pass holds too. Review runs are started by workflow_run, so their
+      # file is always the default branch's; they are found by the commit their
+      # run name carries, among the review's latest 100 runs (an older one is
+      # not found, and the pull request waits for a human). A pending one means
+      # its own end will start this again. Dependabot's pull requests get no
+      # review (it skips them) and keep their own gate below.
       - name: Sign-offs (CI, and the review where there is one)
         id: signoff
         if: steps.find-pr.outputs.pr != ''
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.find-pr.outputs.pr }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ steps.event.outputs.head_sha }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           CI_NAME: '__HARNESS_CI_WORKFLOW__'
         run: |
@@ -214,29 +270,30 @@ jobs:
           if [ "$AUTHOR" = "dependabot[bot]" ] || [ "$AUTHOR" = "app/dependabot" ] || [ "$AUTHOR" = "dependabot" ]; then
             REVIEW=none
           fi
-          RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" \
+          CI_RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" \
                    --jq '{total: .total_count, runs: [.workflow_runs[] | {name, path: (.path | split("@")[0]), run_number, run_attempt, status, conclusion}]}')
-          if [ "$(jq -r '.total' <<< "$RUNS")" -gt 100 ]; then
+          if [ "$(jq -r '.total' <<< "$CI_RUNS")" -gt 100 ]; then
             echo "::notice::PR #${PR}: more than 100 runs for ${HEAD_SHA:0:7} — leaving it for a hand merge."
             exit 0
           fi
           # >>> signoff_state (AM-6 extracts this block). stdin: the runs; $1: a jq
-          # filter selecting the workflow's runs; $2: latest (each file at its
-          # latest run, re-runs allowed) or every (every run, first attempt
-          # only). Prints ok, pending, red or none.
+          # filter selecting the workflow's runs; $2: rerun-ok (every run green,
+          # at whatever attempt) or first-attempt (every run green at its first
+          # attempt; any other value is as strict). Prints ok, pending, red or none.
           signoff_state() {
             jq -r --arg mode "$2" "[.runs[] | select($1)]
-              | if \$mode == \"latest\" then group_by(.path) | map(max_by(.run_number)) else . end
               | if length == 0 then \"none\"
-                elif any((\$mode != \"latest\" and .run_attempt != 1) or (.status == \"completed\" and .conclusion != \"success\")) then \"red\"
+                elif any((\$mode != \"rerun-ok\" and .run_attempt != 1) or (.status == \"completed\" and .conclusion != \"success\")) then \"red\"
                 elif all(.status == \"completed\") then \"ok\"
                 else \"pending\" end"
           }
           # <<< signoff_state
-          CI_STATE=$(signoff_state '.name == $ENV.CI_NAME' latest <<< "$RUNS")
+          CI_STATE=$(signoff_state '.name == $ENV.CI_NAME' rerun-ok <<< "$CI_RUNS")
           REVIEW_STATE=skipped
           if [ "$REVIEW" = required ]; then
-            REVIEW_STATE=$(signoff_state '.path == $ENV.REVIEW_PATH' every <<< "$RUNS")
+            REVIEW_RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/claude-review.yml/runs?event=workflow_run&per_page=100" \
+                     --jq '{runs: [.workflow_runs[] | select(.display_title == ("Claude review of " + $ENV.HEAD_SHA)) | {name, path: (.path | split("@")[0]), run_number, run_attempt, status, conclusion}]}')
+            REVIEW_STATE=$(signoff_state '.path == $ENV.REVIEW_PATH' first-attempt <<< "$REVIEW_RUNS")
           fi
           echo "PR #${PR} at ${HEAD_SHA:0:7}: CI ${CI_STATE}, review ${REVIEW_STATE}"
           if [ "$CI_STATE" != ok ]; then
@@ -286,7 +343,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.find-pr.outputs.pr }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ steps.event.outputs.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           # The gate judges what the merge below will bring in, not what the
@@ -309,6 +367,13 @@ jobs:
           fi
           if [ "$PR_HEAD" != "$HEAD_SHA" ]; then
             echo "::notice::PR #${PR}: head moved since the validated SHA — left as is, its own run decides."
+            exit 0
+          fi
+          # Reviewed and signed off against the default branch: a pull request
+          # retargeted elsewhere since would land a diff nobody judged.
+          if [ "$BASE_REF" != "$DEFAULT_BRANCH" ]; then
+            echo "::notice::PR #${PR}: its base is ${BASE_REF}, not ${DEFAULT_BRANCH} — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if ! [[ "$BASE_SHA" =~ ^[0-9a-f]{40,64}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40,64}$ ]]; then
@@ -489,7 +554,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.find-pr.outputs.pr }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ steps.event.outputs.head_sha }}
         run: |
           set -euo pipefail
           HEAD=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
@@ -505,7 +570,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ steps.find-pr.outputs.pr }}
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_SHA: ${{ steps.event.outputs.head_sha }}
           BASE_REF: ${{ steps.gate.outputs.base_ref }}
         run: |
           set -euo pipefail

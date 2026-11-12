@@ -2,7 +2,7 @@
 # CR-1..3 — the automated review stays read-only and off the pull request's
 # tree (docs/conventions/claude-review.md). Offline.
 #   CR-1  claude-review.yml is, byte for byte, the file CLAUDE_REVIEW_DIGEST
-#         was taken from, pins aside.
+#         was taken from, pins and the CI workflow's name aside.
 #   CR-2  claude-review.yml is the only workflow that mentions a Claude secret
 #         or action (comments count: Actions expands `${{ }}` in a `#` line of
 #         a `run:` block) — with claude.yml, only next to the guard that pins
@@ -17,7 +17,7 @@
 shopt -s dotglob nullglob # GitHub loads a workflow named .x.yml
 
 WF=.github/workflows
-CLAUDE_REVIEW_DIGEST=765f0eebd05e5a7ef88b7e99d94bcc50aa4deeda
+CLAUDE_REVIEW_DIGEST=1826b3c4fed81fe6f350eb3825416fe5410b8023
 
 if [ ! -f "$WF/claude-review.yml" ]; then
   fail "CR-1: $WF/claude-review.yml is missing — restore it, or remove this guard along with the workflow"
@@ -25,8 +25,11 @@ if [ ! -f "$WF/claude-review.yml" ]; then
 fi
 command -v git >/dev/null 2>&1 || { fail "CR-1: git is needed to compute the digest"; finish; }
 
+# Pins aside, and the name of the CI workflow the review follows, which the
+# installer writes per project.
 digest() {
-  sed -E 's/^( *(- )?uses: [^@ ]+)@[0-9a-f]{40} # v[0-9.]+$/\1@SHA/' "$1" | git hash-object --stdin
+  sed -E -e 's/^( *(- )?uses: [^@ ]+)@[0-9a-f]{40} # v[0-9.]+$/\1@SHA/' \
+         -e 's/^    workflows: \["[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}"\]$/    workflows: ["CI"]/' "$1" | git hash-object --stdin
 }
 
 # The issue workflow is let in only next to the guard that pins it.
@@ -98,20 +101,22 @@ mutant() { # $1 = red|green, $2 = label, $3 = file, $4 = sed -E script, $5 = fil
 }
 
 mutant red "one byte changed"               claude-review.yml 's/^name: Claude review$/name: Claude review /'
-mutant red "the pull request's tree"        claude-review.yml 's/^( +ref: )\$\{\{ github\.event\.pull_request\.base\.sha \}\}$/\1${{ github.event.pull_request.head.sha }}/'
-mutant red "Bash allowed"                   claude-review.yml 's/--allowedTools Read,Grep,Glob/--allowedTools Read,Grep,Glob,Bash/'
-mutant red "any target branch"              claude-review.yml 's/ && github\.event\.pull_request\.base\.ref == github\.event\.repository\.default_branch//'
+mutant red "started by the pull request"    claude-review.yml 's/^  workflow_run: # zizmor: ignore\[dangerous-triggers\]$/  pull_request:/'
+mutant red "a commit named on every run"    claude-review.yml "s/ \\|\\| 'Claude review, nothing to review'//"
+mutant red "credentials kept"               claude-review.yml 's/persist-credentials: false/persist-credentials: true/'
 mutant red "binary files let through"       claude-review.yml "/'\\^Binary files '/d"
+mutant red "Bash allowed"                   claude-review.yml 's/--allowedTools Read,Grep,Glob/--allowedTools Read,Grep,Glob,Bash/'
 mutant red "Bash made available"            claude-review.yml 's/--tools Read,Grep,Glob/--tools Read,Grep,Glob,Bash/'
-mutant red "forks let in"                   claude-review.yml 's/github\.event\.pull_request\.head\.repo\.full_name == github\.repository && //'
+mutant red "forks let in"                   claude-review.yml 's/^(    if: .*) && github\.event\.workflow_run\.head_repository\.full_name == github\.repository/\1/'
 mutant red "action pinned to a tag"         claude-review.yml 's/(claude-code-action@)[0-9a-f]{40} # v[0-9.]+/\1v1/'
 mutant red "second reader"                  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.claude_code_oauth_token }}/'
 mutant red "second reader, all secrets"     zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ toJSON(secrets) }}/'
 mutant red "a third Claude workflow"        zz-harness-fixture.yml 's/^name: (.*)$/name: \1 anthropics\/claude-code-base-action/' claude-triage.yml
-mutant green "pin bump"                     claude-review.yml 's/(actions\/checkout@)[0-9a-f]{40} # v[0-9.]+/\1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v7.0.2/'
 mutant red "a name that globs to claude.yml" zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' 'claud[e].yml'
 mutant red "the issue workflow, unpinned"  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' claude.yml no
 mutant green "the issue workflow, pinned"  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' claude.yml yes
+mutant green "pin bump"                     claude-review.yml 's/(actions\/checkout@)[0-9a-f]{40} # v[0-9.]+/\1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v7.0.2/'
+mutant green "another CI workflow name"     claude-review.yml 's/^    workflows: \[".*"\]$/    workflows: ["Tests on every push"]/'
 [ "$cr3" -eq 1 ] || ok "CR-3: every broken copy goes red, a pin bump stays green"
 
 finish

@@ -22,6 +22,10 @@ The path filter has a trap. A CI workflow usually skips documentation, and `CLAU
 - **A project without code** keeps the file as installed: one job, the gate. The `TODO(harness)` block stays until there is something to build or test.
 - **This file is a seed**: the kit never overwrites it. A project that already has a CI workflow does not need this module; it adds the call to its own.
 
+### Retargeted pull requests
+
+The `pull_request` trigger lists `edited` on top of GitHub's default types (`opened`, `synchronize`, `reopened`). A pull request retargeted to the default branch is an `edited` event: without it, no run of this workflow would test it against the default branch, and the only run of its commit could be one that a pull request into another branch started, from that branch's copy of this file. The `auto-merge` module fails its gate (AM-9) on a CI workflow without it. The price: a title or description edit re-runs CI.
+
 ## Checks
 
 - **GA-1, GA-2** apply to this workflow like any other.
@@ -30,3 +34,4 @@ The path filter has a trap. A CI workflow usually skips documentation, and `CLAU
 ## History
 
 - Installed with the kit.
+- `edited` added to the `pull_request` types, so that a retargeted pull request gets its own run.

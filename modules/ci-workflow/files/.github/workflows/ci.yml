@@ -14,6 +14,12 @@ on:
     paths-ignore: ['docs/**', '**.md', 'LICENSE', '.gitignore']
   pull_request:
     branches: [__HARNESS_DEFAULT_BRANCH__]
+    # `edited` on top of the default types: a pull request retargeted to the
+    # default branch must be tested against it. Without it, the only run of a
+    # commit can be one a pull request into another branch started, from that
+    # branch's copy of this file (auto-merge-policy.md, AM-9). It also fires on
+    # a title or description edit: the price of a re-run.
+    types: [opened, synchronize, reopened, edited]
     # The same documentation set is skipped here, written as `paths` with
     # negations because `paths-ignore` cannot take anything back. The last
     # lines take the Claude instruction files back: they are Markdown, but the

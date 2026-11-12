@@ -1,10 +1,13 @@
 {
   "id": "claude-review",
   "title": "Automated review of pull requests by Claude, read-only",
-  "summary": "A workflow that reviews every code pull request of a private repository: the session reads the diff from the default branch's tree, with read tools only, and a job without Claude posts the verdict and fails the run unless it is a pass. With auto-merge, a pull request merges only once CI and the review are both green.",
+  "summary": "A workflow that reviews every code pull request of a private repository once its CI is green: started by CI's end, it reads the diff from the default branch's tree with read tools only, and a job without Claude posts the verdict and fails the run unless it is a pass.",
   "phase": "pr-flow",
   "order": 45,
   "requires": ["core"],
+  "placeholders": {
+    "CI_WORKFLOW": { "prompt": "Name of the CI workflow that must be green before a merge (its `name:`)", "default": "CI", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}" }
+  },
   "postInstall": [
     "For a PRIVATE repository only: read docs/conventions/claude-review.md first.",
     "Add the repository secret CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`), unless the repository already has it.",

@@ -46,7 +46,7 @@ A bump is a hand merge: nothing runs the action before it is merged, and the dig
 `scripts/guards.d/44-claude-ci.sh`:
 
 - **CC-1** — every workflow has a top-level `permissions: {}`.
-- **CC-2** — `claude.yml` is the only workflow that names a Claude secret or action, and no workflow reads all the secrets (`secrets: inherit`, `toJSON(secrets)`…). One exception: `claude-review.yml`, the automated pull-request review, when `scripts/guards.d/45-claude-review.sh` pins it byte for byte too. Without that guard it is refused like any other.
+- **CC-2** — `claude.yml` is the only workflow that names a Claude secret or action, and no workflow reads all the secrets (`secrets: inherit`, `toJSON(secrets)`…). One exception: `claude-review.yml`, the automated pull-request review, when the guard that pins it (`scripts/guards.d/45-claude-review.sh`) is present. CC-2 checks that the file exists, not what it contains: a stub would pass, and a stub is a change to `scripts/guards.d/`, which is never merged unattended. Without that file the review workflow is refused like any other.
 - **CC-3** — `claude.yml` is byte for byte the reviewed file, pins aside. A deliberate change updates `CLAUDE_YML_DIGEST` in the guard, in the same pull request; the guard prints the new value.
 - **CC-4** — the checks can fail: a table of broken copies must all go red, a pin bump must stay green, and the pre-push hook must refuse every ref but `claude/issue-*`.
 
