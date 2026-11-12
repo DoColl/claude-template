@@ -31,6 +31,18 @@ That second place is not installed with this page. The gate is local until a CI 
 
 The manifest is the reference of that comparison, so HD-1 says nothing about a change that writes the manifest: an installation or an update of the kit. There the reference is the kit's checkout, which whoever installs has at hand: `node <kit>/bin/harness.mjs update . --dry-run` compares each file with what that kit renders. It must print `nothing to write`, with no `left alone`, `would be updated` or `CONFLICTS` list; name the kit commit installed from in the pull request.
 
+### Feeding the catalogue: `/retro`
+
+The catalogue only grows if someone turns a mistake into a finding. `.claude/skills/retro/` is a skill run by hand after a session that made a mistake, needed a correction or took far longer than it should. It reads the session's evidence and what the project already has, lists the incidents, and gives each one destination, cheapest to enforce first: a check (a finding with its ID, its row and its guard), a review rule, a pointer, an access to set up, an instruction to prune, or no action with its reason. It proposes; it changes nothing until the user picks.
+
+It is declared `disable-model-invocation: true`: no session starts it on its own, and its description costs no context until it is called.
+
+Status: written for the kit, never run live. Treat its first runs as its test.
+
+## Sources
+
+- [mattpocock/skills](https://github.com/mattpocock/skills), MIT licence, read at commit `5863806` (2026-11-12): the idea of a retrospective that proposes changes to an agent's environment (`skills/engineering/retro`), its split between a mechanical violation, which gets a deterministic check, and a judgement call, which gets a written rule, and the retrospective task of its software-factory notes (`skills/in-progress/software-factory/EXAMPLE-TASKS.md`). The skill's text, its order of destinations and its tie to this catalogue are the kit's own; no text was copied.
+
 ## Checks
 
 The gate checks itself only in the obvious way: with no guard to run, it fails rather than report success.
@@ -40,3 +52,4 @@ The gate checks itself only in the obvious way: with no guard to run, it fails r
 ## History
 
 - Installed with the kit.
+- The `/retro` skill added, to turn a session's mistakes into findings.

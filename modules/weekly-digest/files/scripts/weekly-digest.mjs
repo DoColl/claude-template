@@ -79,7 +79,7 @@ export const SELF = 'weekly-digest.yml';
 // Claude Code or git EXECUTE rather than read, and the docs-only set a CI
 // workflow usually ignores. With auto-merge.yml, its own declarations are read
 // instead, so the digest and the merge gate cannot drift.
-export const DEFAULT_GATE_RE = '(^|/)\\.claude(/|$)|(^|/)(claude(\\.local)?|agents)\\.md$|^\\.githooks(/|$)|(^|/)\\.mcp\\.json$|(^|/)\\.claude\\.json$|(^|/)\\.ripgreprc$|(^|/)\\.gitmodules$|(^|/)\\.husky(/|$)|^\\.github/workflows/(auto-merge|claude[^/]*)\\.ya?ml$|^\\.github/zizmor\\.ya?ml$|^\\.gitleaks(\\.toml|ignore)$|^scripts/guards\\.d/|^scripts/(security-checks\\.sh|fetch-pinned-release\\.sh|plugin-pins(\\.test)?\\.mjs|reviewed-plugins\\.json|auto-merge-paths\\.txt)$';
+export const DEFAULT_GATE_RE = '(^|/)\\.claude(/|$)|(^|/)(claude(\\.local)?|agents)\\.md$|^\\.githooks(/|$)|(^|/)\\.mcp\\.json$|(^|/)\\.claude\\.json$|(^|/)\\.ripgreprc$|(^|/)\\.gitmodules$|(^|/)\\.husky(/|$)|^\\.github/workflows/(auto-merge|claude[^/]*)\\.ya?ml$|^\\.github/zizmor\\.ya?ml$|^\\.gitleaks(\\.toml|ignore)$|^scripts/guards\\.d/|^scripts/(security-checks\\.sh|fetch-pinned-release\\.sh|plugin-pins(\\.test)?\\.mjs|reviewed-plugins\\.json|auto-merge-paths\\.txt)$|^security_review[^/]*\\.md$';
 export const DEFAULT_DOCS_RE = '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)';
 
 /**

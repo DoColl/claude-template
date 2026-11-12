@@ -10,7 +10,7 @@ Ported from a workflow designed after a security review of running an agent in C
 
 A CI session holds a token and executes what it reads. The question is therefore whose text and whose tree reach it.
 
-- On a **pull request**, the checkout is the pull request's tree: its code, but also its instruction files, settings and hooks — the files a session executes. Running an agent there hands the job's token to whoever wrote the pull request. The action has mechanisms to put trusted configuration back before a session starts; this kit does not rely on them as a boundary, and does not run Claude on pull requests at all. If you want that, evaluate it yourself at the action version you pin.
+- On a **pull request**, the checkout is the pull request's tree: its code, but also its instruction files, settings and hooks — the files a session executes. Running an agent there hands the job's token to whoever wrote the pull request. The action has mechanisms to put trusted configuration back before a session starts; this kit does not rely on them as a boundary, and this workflow never runs on a pull request. The kit's automated review (`claude-review.yml`, a separate module) does, under other constraints: the default branch's tree, the pull request as a diff, read tools only (its own convention page).
 - `issue_comment` runs the **default branch's** workflow file, and on a plain issue the tree is the default branch. No unmerged file reaches a run.
 - An issue whose text was not written by a collaborator is refused by its **label**: `dependabot-alert` (advisory summaries) and `weekly-digest` (titles gathered from pull requests). If another workflow of yours files third-party text as issues, give those issues one of these labels or add its label to the job's `if:`.
 - The issue author and the commenter must both be an owner, a member or a collaborator of the repository (`author_association`). That is an association, not a permission level: a collaborator with read-only access passes it. On top of it, the action itself refuses to start for an actor without write access; never set its `allowed_non_write_users`.
@@ -46,7 +46,7 @@ A bump is a hand merge: nothing runs the action before it is merged, and the dig
 `scripts/guards.d/44-claude-ci.sh`:
 
 - **CC-1** — every workflow has a top-level `permissions: {}`.
-- **CC-2** — `claude.yml` is the only workflow that names a Claude secret or action, and no workflow reads all the secrets (`secrets: inherit`, `toJSON(secrets)`…).
+- **CC-2** — `claude.yml` is the only workflow that names a Claude secret or action, and no workflow reads all the secrets (`secrets: inherit`, `toJSON(secrets)`…). One exception: `claude-review.yml`, the automated pull-request review, when `scripts/guards.d/45-claude-review.sh` pins it byte for byte too. Without that guard it is refused like any other.
 - **CC-3** — `claude.yml` is byte for byte the reviewed file, pins aside. A deliberate change updates `CLAUDE_YML_DIGEST` in the guard, in the same pull request; the guard prints the new value.
 - **CC-4** — the checks can fail: a table of broken copies must all go red, a pin bump must stay green, and the pre-push hook must refuse every ref but `claude/issue-*`.
 
@@ -55,4 +55,5 @@ They stop a regression, not a deliberate edit by someone who can change the guar
 ## History
 
 - Installed with the kit. Differences from the workflow it was ported from: the issue author and the commenter must both be an owner, a member or a collaborator; `weekly-digest` issues are refused as well; the two zizmor exceptions (`dangerous-triggers` on `issue_comment`, `artipacked` on the checkout) are inline comments next to their justification instead of entries in `.github/zizmor.yml`.
+- CC-2 lets in a second Claude workflow, the automated review, only next to the guard that pins it; a third one stays refused.
 - A review of the kit asked what a session can really push. The action was read at the pinned commit and its push wrapper replayed against the hook; § What a run holds now states what was read instead of pointing at "the action's tool allowlist".
