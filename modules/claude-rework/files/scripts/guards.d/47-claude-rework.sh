@@ -14,7 +14,7 @@
 
 RW=.github/workflows/claude-rework.yml
 REVIEW=.github/workflows/claude-review.yml
-REWORK_DIGEST=aac6a9295ace39aab1e08da7f10b16227f4772e0
+REWORK_DIGEST=21ca8d5c709a004b625109ba2e23a832bd7f7e18
 
 command -v git >/dev/null 2>&1 || { fail "RW-1: git is needed to compute the digest"; finish; }
 
@@ -77,6 +77,7 @@ mutant red   ".gitattributes let through"     rework 's/\|\(\^\|\/\)\\\.gitattri
 mutant red   "no concurrency group"           rework '/^  group: claude-rework-/d'
 mutant red   "failed attempts not counted"    rework 's/startswith\("Automated rework started"\)/startswith("never")/'
 mutant red   "the verdict not kept"           review 's/^          name: claude-review-verdict$/          name: verdict/'
+mutant red   "propose cannot read the patch"  rework '/^      actions: read # this run.s rework-patch artifact$/d'
 mutant green "pin bump"                       rework 's/(actions\/checkout@)[0-9a-f]{40} # v[0-9.]+/\1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v7.0.2/'
 [ "$rw3" -eq 1 ] || ok "RW-3: every broken copy goes red, a pin bump stays green"
 

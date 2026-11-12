@@ -249,6 +249,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      actions: read # this run's rework-patch artifact
       contents: write # push the new branch
       pull-requests: write # open the pull request, comment on the held one
     steps:
