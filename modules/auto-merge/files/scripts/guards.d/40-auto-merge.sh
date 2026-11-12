@@ -22,10 +22,12 @@
 #         shapes that must merge and on the ones that must hold; the author
 #         check, the exact `merge` verdict and MAJOR_HOLD_RE are pinned, and
 #         dependabot.yml must not widen version updates (`allow`).
-#   AM-6  the merge is the commit CI validated, of one CI workflow: a single
-#         workflow name is waited for, the pull request is selected by its head
-#         SHA, every merge call passes that SHA, and the SHA comes from the
-#         triggering event.
+#   AM-6  the merge is the commit CI validated: the pull request is selected
+#         by its head SHA, every merge call passes that SHA, and the SHA comes
+#         from the triggering event. Two workflows are waited for, the CI one
+#         and the automated review, and nothing merges before the sign-off
+#         step has read both: its signoff_state, extracted from between its
+#         markers, is run on tables of runs.
 #   AM-8  tests that get weaker. Green means merged, and green is what the
 #         tests say, so a pull request that deletes, renames or rewrites lines
 #         of an existing file under TEST_HOLD_RE is held. The workflow's own
@@ -522,13 +524,57 @@ if [ -e .github/dependabot.yaml ]; then
 fi
 pass 5 "Dependabot: patch and minor merge, majors and unreadable bumps hold, foreign commits hold"
 
-# ── AM-6 — the merge is the commit CI validated, of one CI workflow ──────────
-# workflow_run fires once per listed workflow: two names would merge as soon as
-# either is green. One name, in the form the installer writes.
-waited=$(grep -cE '^    workflows: \["[^",]+"\]$' "$AM" || true)
+# ── AM-6 — the merge is the commit CI validated, after both sign-offs ────────
+# workflow_run fires once per listed workflow, and on whichever finishes: so
+# exactly the CI workflow and the review are listed, and the gate (which every
+# merge sits behind) runs only once the sign-off step has said ok. A third name
+# would add a trigger nothing checks.
+waited=$(grep -cE '^    workflows: \["[^",]+", "Claude review"\]$' "$AM" || true)
 listed=$(grep -cE '^ +workflows:' "$AM" || true)
 if [ "$waited" != "1" ] || [ "$listed" != "1" ]; then
-  bad 6 "workflow_run must wait for exactly one workflow, written workflows: [\"<name>\"] — a second name merges on whichever is green first"
+  bad 6 "workflow_run must wait for exactly two workflows, written workflows: [\"<CI name>\", \"Claude review\"]"
+fi
+if ! grep -qxF "        if: steps.find-pr.outputs.pr != '' && steps.signoff.outputs.ok == 'true'" "$AM"; then
+  bad 6 "the merge gate must run only once the sign-off step said ok (if: steps.find-pr.outputs.pr != '' && steps.signoff.outputs.ok == 'true')"
+fi
+okline=$(grep -cF 'echo "ok=true" >> "$GITHUB_OUTPUT"' "$AM" || true)
+if [ "$okline" != "1" ]; then
+  bad 6 "the sign-off step must write ok=true in exactly one place (found $okline)"
+fi
+if ! grep -qxF "          CI_STATE=\$(signoff_state '.name == \$ENV.CI_NAME' <<< \"\$RUNS\")" "$AM" \
+   || ! grep -qxF "            REVIEW_STATE=\$(signoff_state '.path == \$ENV.REVIEW_PATH' <<< \"\$RUNS\")" "$AM" \
+   || ! grep -qxF "          export REVIEW_PATH=.github/workflows/claude-review.yml" "$AM" \
+   || ! grep -qxF "            ok|skipped) echo \"ok=true\" >> \"\$GITHUB_OUTPUT\" ;;" "$AM"; then
+  bad 6 "the sign-off step must judge CI by name, the review by its file, and say ok only for ok or skipped"
+fi
+if ! grep -qxF '          if [ "$CI_STATE" != ok ]; then' "$AM"; then
+  bad 6 "the sign-off step must stop unless CI is ok"
+fi
+sblock=$(sed -n '/# >>> signoff_state/,/# <<< signoff_state/p' "$AM" | sed 's/^ *//')
+if [ "$(grep -c '^ *signoff_state() {' "$AM" || true)" != "1" ] || ! grep -q '^signoff_state() {' <<< "$sblock"; then
+  bad 6 "signoff_state() must be defined once, between its >>> / <<< markers"
+elif ! command -v jq > /dev/null 2>&1; then
+  if [ -n "${CI:-}" ]; then bad 6 "jq is needed to run signoff_state"; else note "AM-6: jq not found — signoff_state not run"; fi
+else
+  eval "$sblock"
+  am6() { # am6 <expected> <label> <runs as JSON lines: name|path|run_number|status|conclusion>
+    local got runs
+    runs=$(jq -Rn '{runs: [inputs | split("|") | {name: .[0], path: .[1], run_number: (.[2] | tonumber), status: .[3], conclusion: (if .[4] == "" then null else .[4] end)}]}' <<< "$3")
+    got=$(CI_NAME=CI REVIEW_PATH=.github/workflows/claude-review.yml signoff_state "$4" <<< "$runs")
+    [ "$got" = "$1" ] || bad 6 "signoff_state on '$2': $got, expected $1"
+  }
+  ci='.name == $ENV.CI_NAME'; rv='.path == $ENV.REVIEW_PATH'
+  am6 ok      'CI green'                     'CI|.github/workflows/ci.yml|4|completed|success' "$ci"
+  am6 pending 'CI running'                   'CI|.github/workflows/ci.yml|4|in_progress|' "$ci"
+  am6 none    'no CI run'                    'Claude review|.github/workflows/claude-review.yml|2|completed|success' "$ci"
+  am6 ok      'red, then green on a re-run'  "$(printf 'CI|.github/workflows/ci.yml|3|completed|failure\nCI|.github/workflows/ci.yml|4|completed|success')" "$ci"
+  am6 red     'green, then red'              "$(printf 'CI|.github/workflows/ci.yml|3|completed|success\nCI|.github/workflows/ci.yml|4|completed|failure')" "$ci"
+  am6 red     'a borrowed name cannot cover' "$(printf 'CI|.github/workflows/ci.yml|4|completed|failure\nCI|.github/workflows/fake.yml|9|completed|success')" "$ci"
+  am6 ok      'review green'                 "$(printf 'CI|.github/workflows/ci.yml|4|completed|success\nClaude review|.github/workflows/claude-review.yml|2|completed|success')" "$rv"
+  am6 red     'review held'                  'Claude review|.github/workflows/claude-review.yml|2|completed|failure' "$rv"
+  am6 red     'review skipped'               'Claude review|.github/workflows/claude-review.yml|2|completed|skipped' "$rv"
+  am6 pending 'review running'               'Claude review|.github/workflows/claude-review.yml|2|queued|' "$rv"
+  am6 none    'review by name, other file'   'Claude review|.github/workflows/fake.yml|2|completed|success' "$rv"
 fi
 # The pull request is the one whose head IS the validated SHA (a `sha:` search
 # also returns stacked and sibling pull requests)…
@@ -545,7 +591,7 @@ foreign=$(grep -E '^ +HEAD_SHA: ' "$AM" | grep -cvE '^ +HEAD_SHA: \$\{\{ github\
 if [ "$foreign" != "0" ]; then
   bad 6 "HEAD_SHA must come from the triggering event (workflow_run.head_sha or pull_request.head.sha) in every step"
 fi
-pass 6 "the merge is pinned to the SHA of the event, for the one workflow waited for"
+pass 6 "the merge is pinned to the SHA of the event, once CI and the review have both signed off"
 
 # ── AM-7 — the gate judges the range that is merged ─────────────────────────
 # The merge is pinned to HEAD_SHA; the gate must read the same thing. A listing
@@ -646,7 +692,7 @@ fi
 pass 8 "a pull request that deletes, renames or rewrites lines of an existing file under TEST_HOLD_RE is held by the $merging merging job(s)"
 
 # Advisory: nothing merges code until the workflow waited for exists.
-ci_name=$(sed -n 's/^    workflows: \["\(.*\)"]$/\1/p' "$AM")
+ci_name=$(sed -n 's/^    workflows: \["\([^"]*\)", "Claude review"]$/\1/p' "$AM")
 if [ -n "$ci_name" ]; then
   found=0
   for wf in .github/workflows/*.yml .github/workflows/*.yaml; do

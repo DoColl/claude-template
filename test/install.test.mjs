@@ -91,7 +91,7 @@ test("day-1 and the pull-request flow install in one run, and the CI workflow ca
   const r = cli("init", dir, "--modules", ids, "--set", "CI_WORKFLOW=Build and test");
   assert.equal(r.status, 0, output(r));
   assert.match(read(dir, ".github/workflows/ci.yml"), /^name: Build and test\n/);
-  assert.match(read(dir, ".github/workflows/auto-merge.yml"), /^    workflows: \["Build and test"\]$/m);
+  assert.match(read(dir, ".github/workflows/auto-merge.yml"), /^    workflows: \["Build and test", "Claude review"\]$/m);
   const g = gate(dir);
   assert.equal(g.status, 0, output(g));
   assert.doesNotMatch(g.stdout, /security\.yml is not called by any workflow|no workflow named/, "nothing is left to wire by hand");

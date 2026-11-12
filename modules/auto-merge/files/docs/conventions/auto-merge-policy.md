@@ -4,7 +4,7 @@
 
 ## Status
 
-The workflow this module was ported from runs in production. This generic variant — the same two jobs, without the post-merge deploy dispatch and with the project-specific values turned into settings — **has merged nothing yet**. Its guard passes, and each of its checks was shown to fail on the change it is there to catch. One part has run, on the kit's own repository: `promote-docs`, twice, holding a pull request that touched gated paths. No pull request has been merged by it, `promote-from-ci` has not run, and the hold on weakened tests has only been run on sample listings: the first pull requests in your repository are their test. Watch the "Auto-merge after CI" runs on a docs-only pull request and on a code one before relying on it.
+The workflow this module was ported from runs in production. The two sign-offs (CI and the automated review) are new to this variant: their logic is run by the guard on tables of runs, never against GitHub. This generic variant — the same two jobs, without the post-merge deploy dispatch and with the project-specific values turned into settings — **has merged nothing yet**. Its guard passes, and each of its checks was shown to fail on the change it is there to catch. One part has run, on the kit's own repository: `promote-docs`, twice, holding a pull request that touched gated paths. No pull request has been merged by it, `promote-from-ci` has not run, and the hold on weakened tests has only been run on sample listings: the first pull requests in your repository are their test. Watch the "Auto-merge after CI" runs on a docs-only pull request and on a code one before relying on it.
 
 ## Why
 
@@ -16,7 +16,7 @@ The price is that the CI workflow *is* the review. Whatever must hold before a c
 
 `.github/workflows/auto-merge.yml` has two jobs, one per trigger:
 
-- **`promote-from-ci`** — `workflow_run` on `__HARNESS_CI_WORKFLOW__`, for pull requests with code. It acts only on a successful run that a `pull_request` event started, from a branch of this repository (never a fork).
+- **`promote-from-ci`** — `workflow_run` on `__HARNESS_CI_WORKFLOW__` and on the automated review, for pull requests with code. It acts only on a successful run that a `pull_request` event started, from a branch of this repository (never a fork), and merges only once both have signed off (§ The gate judges what is merged).
 - **`promote-docs`** — `pull_request` filtered on `docs/**`, `**.md`, `LICENSE`, `.gitignore`, for the pull requests a CI workflow that ignores those paths never runs on. Nothing to wait for, so it merges at once.
 
 The merge is a synchronous server-side call (`PUT /repos/…/pulls/N/merge`, squash first, a merge commit as the fallback): no checkout, no local git, nothing from the pull request is executed. Native auto-merge (`gh pr merge --auto`) is not used because it depends on a repository setting GitHub does not offer on every plan for private repositories; since `workflow_run` only fires once CI has concluded, a synchronous merge leaves no window worth closing.
@@ -84,7 +84,9 @@ So the gate never lists the pull request live. One read gives its base, its head
 
 A read that fails is not a head that moved. If the pull request cannot be read from the API, the job fails with an error and merges nothing; it does not end green on a "head moved" notice that nobody would look at. No call is fed straight into `read` through a here-string, where a failure leaves the variables empty and the step successful.
 
-`workflow_run` fires once per workflow it lists, so the list holds **one** name. Two names would merge as soon as either is green. Keep security checks in their own file if you like, but call it from the CI workflow as a reusable workflow so that one conclusion covers both.
+`workflow_run` fires once per workflow it lists, and on whichever finishes. The list holds two names: the CI workflow and `Claude review`, the automated review. Neither name is trusted: a sign-off step reads the runs of the commit and lets the gate run only when both are green — every workflow named like the CI one, each at its latest run (a second workflow borrowing the name cannot stand in for a red one), and, when `.github/workflows/claude-review.yml` exists on the default branch, the latest run **of that file**. Without that file the review is not required and its name never fires. A review still running means its own end will start the workflow again; a review that held leaves the pull request to a human (its comment says why). Dependabot's pull requests are not reviewed (their runs get no secret) and keep their own gate. Any other check that must hold before a merge belongs in the CI workflow, called as a reusable workflow so that one conclusion covers both.
+
+The job has a `concurrency` group keyed on the commit, so that CI and the review finishing together do not both try to merge. Pull requests never share a group; for one commit, a run left pending and replaced by a newer one loses nothing, since the newer one re-reads everything (§ After the merge explains why no group spans pull requests).
 
 ## A pull request runs its own copy of this workflow
 
@@ -109,7 +111,7 @@ The workflow dispatches nothing by default, which leaves one honest limit: `__HA
 3. No loop: the dispatched run's event is `workflow_dispatch`, which `promote-from-ci` ignores.
 4. If the dispatched run skips tests because "the pull request was green", it must not skip them when the default branch moved during the pull request's CI. Decide that **after** the merge (commits on the default branch since the CI run was created, minus the merge commit itself — decided before, two merges seconds apart both see "nothing moved"), fall back to the full run on any doubt, and have the target workflow honour the shortcut only while the default branch's head still is `merged_sha`. If it deploys, the deploy waits for every test job. These are the invariants AM-2 and AM-3 pinned in the workflow this one comes from; bring them back in `scripts/guards.d/40-auto-merge.sh` with the dispatch.
 
-No `concurrency` group belongs on these jobs: GitHub keeps one running and one pending run per group and cancels the older pending one, so with three merges in a minute one pull request would silently not be merged. Concurrent runs are safe — the merge call is atomic per pull request.
+No `concurrency` group spanning pull requests belongs on these jobs: GitHub keeps one running and one pending run per group and cancels the older pending one, so with three merges in a minute one pull request would silently not be merged. Runs for different pull requests are safe concurrently — the merge call is atomic per pull request. The only group is per commit (§ AM-7 above).
 
 ## Head branch deletion
 
@@ -172,3 +174,4 @@ AM-2 and AM-3 are unused: they belong to a post-merge dispatch (§ After the mer
 - `TEST_HOLD_RE` and AM-8: a pull request that deletes or rewrites lines of an existing test is held. Unit-tested by the guard on sample listings; like the rest of this workflow, not yet watched on a live pull request.
 - First live run, on the kit's own repository: `promote-docs` ran from the pull request's copy of the workflow. The page now says so, and a ruleset on the default branch is a prerequisite rather than a suggestion.
 - The kit's own repository uninstalled this module after that run: its ruleset was not enforced there. The prerequisite now says to check enforcement before installing.
+- Two sign-offs: the workflow also reacts to the automated review, and a code pull request merges only once the CI workflow and, where `.github/workflows/claude-review.yml` exists on the default branch, that review are both green for its commit (AM-6). Not run live.

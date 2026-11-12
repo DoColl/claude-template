@@ -20,7 +20,7 @@ node <kit>/bin/harness.mjs status .        # only if .claude/harness.json exists
 
 ## 3. Choose the modules with the user
 
-Present the modules grouped by phase (`day-1`, `first-ci`, `pr-flow`, `on-demand`), each with its one-line summary. `core` is always installed; what a module requires is added automatically. Recommend the day-1 set (the modules flagged `recommended`) for a new project, and the later phases only when the project has what they need — a CI workflow before `auto-merge`, a private repository before `claude-ci`. The choice is the user's: ask, do not decide for them.
+Present the modules grouped by phase (`day-1`, `first-ci`, `pr-flow`, `on-demand`), each with its one-line summary. `core` is always installed; what a module requires is added automatically. Recommend the day-1 set (the modules flagged `recommended`) for a new project, and the later phases only when the project has what they need — a CI workflow before `auto-merge`, a private repository before `claude-ci` or `claude-review`. The choice is the user's: ask, do not decide for them.
 
 For a new repository on GitHub that will work through pull requests, offer the whole set in one run rather than a second installation later — each installation is its own pull request to read and merge by hand:
 
