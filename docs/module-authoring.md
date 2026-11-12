@@ -90,7 +90,7 @@ A module that enforces something ships a guard: `files/scripts/guards.d/NN-<name
 - One line per check, starting with its ID (`AM-3: …`). IDs are stable; the header comment of the guard says what each one checks and why.
 - A guard that needs the network checks `offline` and skips. A guard whose tool is missing skips locally and fails when `$CI` is set, if the check is mandatory.
 - A freshly installed module passes its own guard, in a project that contains only that module and what it requires.
-- Numbers: `10` core, `15` session-settings, `20` agents, `25` security-review, `30` ci-security, `35` node-audit, `40` auto-merge, `42` weekly-digest, `44` claude-ci, `46` openspec, `50` the project's own, `90`–`99` advisory (`90` the gaps left to fill, `91` the kit files that drifted from their recorded hash).
+- Numbers: `10` core, `15` session-settings, `20` agents, `25` security-review, `30` ci-security, `35` node-audit, `40` auto-merge, `42` weekly-digest, `44` claude-ci, `45` claude-review, `46` openspec, `50` the project's own, `90`–`99` advisory (`90` the gaps left to fill, `91` the kit files that drifted from their recorded hash).
 
 Tests a guard runs ship with the module, next to the code they test. Always name the test file (`node --test scripts/x.test.mjs`), never a directory: an older Node takes a directory argument for a module to run and fails.
 
@@ -102,6 +102,10 @@ Tests a guard runs ship with the module, next to the code they test. Always name
 - No `${{ … }}` inside `run:` — pass values through `env:`.
 - A tool is installed from a pinned release verified by checksum, never `curl … | sh`.
 - zizmor reports nothing on the rendered workflow, at any severity; an unfixable finding is silenced in `.github/zizmor.yml` with its justification.
+
+## Credits
+
+A piece drawn from a public source names it on its convention page, under `## Sources`: the repository or URL, its licence, the commit or date read, and what was taken (an idea, a pattern, text). The same line goes to the kit's `README.md` § Sources and credits. Copied text keeps the licence notice the source requires. This is the one place a name from outside the kit belongs; the rule below is about the project a piece was first written for, which stays unnamed.
 
 ## What a module must not contain
 

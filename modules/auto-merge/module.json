@@ -1,7 +1,7 @@
 {
   "id": "auto-merge",
   "title": "Unattended merge on green CI",
-  "summary": "Squash-merges every pull request whose CI run is green, pinned to the commit CI validated; docs-only ones merge at once. Never unattended: Claude instruction files, a CI Claude session's branch, a Dependabot bump the gate holds, and existing tests that lose lines once the project names its tests.",
+  "summary": "Squash-merges every pull request whose CI (and review, if any) is green, pinned to the validated commit; docs-only ones merge at once. Never unattended: Claude instruction files, a CI Claude session's branch, a Dependabot bump the gate holds, and existing tests that lose lines once the project names its tests.",
   "phase": "pr-flow",
   "order": 40,
   "requires": ["core"],

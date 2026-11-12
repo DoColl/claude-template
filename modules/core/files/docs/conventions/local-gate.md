@@ -39,6 +39,10 @@ It is declared `disable-model-invocation: true`: no session starts it on its own
 
 Status: written for the kit, never run live. Treat its first runs as its test.
 
+## Sources
+
+- [mattpocock/skills](https://github.com/mattpocock/skills), MIT licence, read at commit `5863806` (2026-11-12): the idea of a retrospective that proposes changes to an agent's environment (`skills/engineering/retro`), its split between a mechanical violation, which gets a deterministic check, and a judgement call, which gets a written rule, and the retrospective task of its software-factory notes (`skills/in-progress/software-factory/EXAMPLE-TASKS.md`). The skill's text, its order of destinations and its tie to this catalogue are the kit's own; no text was copied.
+
 ## Checks
 
 The gate checks itself only in the obvious way: with no guard to run, it fails rather than report success.

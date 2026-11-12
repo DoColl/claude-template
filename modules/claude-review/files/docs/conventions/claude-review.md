@@ -55,6 +55,11 @@ The comment and the run log are as visible as the repository. On a public reposi
 
 A bump is a hand merge (the file is gated). At the new commit, re-read what decides the properties above: the entry point and its inputs (`action.yml`), the mode chosen for a `pull_request` event with a prompt, which MCP servers that mode configures, how it obtains and configures the GitHub token and git, `--json-schema` and the `structured_output` output, the human-actor check, and the Claude Code version it installs. Then re-run the two throwaway pull requests.
 
+## Sources
+
+- [anthropics/claude-code-action](https://github.com/anthropics/claude-code-action), MIT licence, read at the pinned commit `f27be6b` (v1.0.252): `docs/security.md` for the pattern of checking out the base ref rather than the pull request's head, the list of configuration paths the action restores from the base branch, and the human-actor check; the source (`src/modes/detector.ts`, `src/modes/agent/index.ts`, `src/mcp/install-mcp-server.ts`, `src/entrypoints/run.ts`) for the mode chosen, the MCP servers configured and the `structured_output` output. The pins are copied from this kit's `claude.yml`.
+- [mattpocock/skills](https://github.com/mattpocock/skills), MIT licence, read at commit `5863806` (2026-11-12): the three brakes of an automated flow (automated checks, automated review, human review) and the advice to open one trigger at a time, from `skills/in-progress/software-factory/SKILL.md`. Ideas only; no text was copied.
+
 ## Checks
 
 `scripts/guards.d/45-claude-review.sh`:

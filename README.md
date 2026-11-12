@@ -64,7 +64,7 @@ Running `init` again is safe: files already in place are left alone.
 | `ci-security` | first CI | `security.yml` in two tiers, GitHub Actions rules with zizmor at zero, pinned scanners, a Dependabot skeleton |
 | `ci-workflow` | first CI, when the project has no CI workflow yet | a seed `ci.yml` whose first job calls `security.yml`, and whose pull-request filter keeps the Claude instruction files in |
 | `node-audit` | first CI, Node projects | an `npm audit` gate with per-advisory derogations |
-| `auto-merge` | pull-request flow | unattended squash-merge on green CI, with the gates that hold instruction files, CI-session branches, risky bumps and — once the project names its tests — changes that delete or rewrite existing test lines, for a human |
+| `auto-merge` | pull-request flow | unattended squash-merge on green CI (and a green automated review where `claude-review` is installed), with the gates that hold instruction files, CI-session branches, risky bumps and — once the project names its tests — changes that delete or rewrite existing test lines, for a human |
 | `claude-review` | pull-request flow | an automated, read-only Claude review of every code pull request; with `auto-merge`, a merge waits for CI and the review |
 | `weekly-digest` | pull-request flow | one issue a week listing what waits on a human |
 | `claude-ci` | on demand | `@claude` on plain issues of a private repository, with the job token only |
@@ -95,6 +95,15 @@ Each module's convention page says where its piece comes from and what has actua
 Treat anything marked "has not run", and every part of a piece this table does not say has run, as a draft until you have watched it work once.
 
 One fresh-context security review has been run on the kit, on the Bash allowlist, `auto-merge`, `claude-ci`, the installer, the security workflow and the digest. What it confirmed is fixed: a bypass of the allowlist through shell comments, a merge gate that judged the pull request's live listing instead of the commits being merged, writes through a symlink leaving the project, and claims in the pages that were wider than the code. One point it left open, what a CI session can push, was settled afterwards by reading the action at the pinned commit. It did not read `node-audit`, `openspec`, `security-review`, `session-settings` or the smaller guards, and it predates the `TEST_HOLD_RE` gate of `auto-merge`. One review is not an audit.
+
+## Sources and credits
+
+Most of the kit is distilled from one production codebase, which stays unnamed. Pieces drawn from public sources name them on their convention page (§ Sources) and here:
+
+| Source | Licence | Read at | What the kit took |
+|---|---|---|---|
+| [anthropics/claude-code-action](https://github.com/anthropics/claude-code-action) | MIT | `f27be6b` (v1.0.252) | The action that `claude-ci` and `claude-review` pin; for `claude-review`, the base-ref checkout pattern and the behaviour read in its source (`docs/conventions/claude-review.md` § Sources). |
+| [mattpocock/skills](https://github.com/mattpocock/skills) | MIT | `5863806` (2026-11-12) | The idea of the `/retro` skill and of the retrospective task (`docs/conventions/local-gate.md` § Sources); the three brakes of an automated flow, behind `claude-review` (its page, § Sources). Ideas only, no text copied. |
 
 ## What lands in your project
 

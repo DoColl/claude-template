@@ -10,7 +10,7 @@ The workflow this module was ported from runs in production. The two sign-offs (
 
 When one maintainer (or a few) works through several sessions in parallel, a green pull request waiting for a click is delay without control: nobody reads the diff at that moment, the CI already did the reviewing. So there is no heuristic here — green means merged — and what does need a human is named and held: the files every later session will execute, the branches a CI agent wrote, the dependency bumps that can break.
 
-The price is that the CI workflow *is* the review. Whatever must hold before a change lands (tests, the security gate) has to be part of that workflow, and the limits below have to be acceptable to you.
+The price is that the CI workflow *is* the review, unless the project adds the automated review (`.github/workflows/claude-review.yml`), which must then sign off too (§ The gate judges what is merged). Whatever must hold before a change lands (tests, the security gate) has to be part of one of them, and the limits below have to be acceptable to you.
 
 ## How it works
 
