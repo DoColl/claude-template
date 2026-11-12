@@ -86,12 +86,14 @@ else
            scripts/plugin-pins.mjs scripts/plugin-pins.test.mjs \
            scripts/fetch-pinned-release.sh .gitleaks.toml .gitleaksignore \
            .github/zizmor.yml .github/zizmor.yaml scripts/auto-merge-paths.txt \
-           SECURITY_REVIEW.md SECURITY_REVIEW_2026-11.md security_review.md; do
+           SECURITY_REVIEW.md SECURITY_REVIEW_2026-11.md security_review.md \
+           docs/conventions/auto-merge-policy.md docs/conventions/new-rule.md \
+           docs/Conventions/agent-bash-guard.md; do
     if ! grep -qiE "$RE" <<< "$p"; then bad 1 "gated path NOT matched by CLAUDE_GATE_RE: $p"; fi
   done
   # Must not be gated: ordinary docs, code and scripts.
-  for p in README.md docs/foo.md docs/conventions/auto-merge-policy.md x/claudette.md \
-           docs/my-agents.md docs/agents.mdx AGENTS.md.txt docs/conventions/agent-bash-guard.md \
+  for p in README.md docs/foo.md docs/conventionsx/a.md src/docs/conventions/a.md x/claudette.md \
+           docs/my-agents.md docs/agents.mdx AGENTS.md.txt docs/adr/ADR-001.md \
            src/claude.service.ts .gitignore LICENSE src/claude/x.ts \
            .github/workflows/ci.yml .github/dependabot.yml scripts/build.sh \
            scripts/security-checks.sh.md scripts/guards.dx/a.sh src/scripts/guards.d/a.sh \

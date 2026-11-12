@@ -27,6 +27,9 @@ on:
       - 'docs/module-authoring.md'
   pull_request:
     branches: [main]
+    # `edited` too: a pull request retargeted to main is then tested against it
+    # (the kit's ci-workflow seed does the same, for the reason AM-9 gives).
+    types: [opened, synchronize, reopened, edited]
     paths:
       - '**'
       - '!docs/**'
