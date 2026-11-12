@@ -92,11 +92,13 @@ env:
   # the read-only agents run them, and they are what enforces all this), the
   # scripts the kit's guards and the security workflow call, the scanner
   # configs that decide what gitleaks and zizmor report, the record of which
-  # Claude Code plugin commits were reviewed, and the table AM-1 reads.
+  # Claude Code plugin commits were reviewed, and the table AM-1 reads; and the
+  # findings catalogue at the root (SECURITY_REVIEW*.md), which the automated
+  # review reads as its standards.
   # Single source for both jobs; AM-1 (scripts/guards.d/40-auto-merge.sh) tests
   # the pattern on a table of paths and asserts both jobs use it. This is the
   # kit's list: leave it as it is, so an update of the kit can refresh it.
-  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)(claude(\.local)?|agents)\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^\.github/zizmor\.ya?ml$|^\.gitleaks(\.toml|ignore)$|^scripts/guards\.d/|^scripts/(security-checks\.sh|fetch-pinned-release\.sh|plugin-pins(\.test)?\.mjs|reviewed-plugins\.json|auto-merge-paths\.txt)$'
+  CLAUDE_GATE_RE: '(^|/)\.claude(/|$)|(^|/)(claude(\.local)?|agents)\.md$|^\.githooks(/|$)|(^|/)\.mcp\.json$|(^|/)\.claude\.json$|(^|/)\.ripgreprc$|(^|/)\.gitmodules$|(^|/)\.husky(/|$)|^\.github/workflows/(auto-merge|claude[^/]*)\.ya?ml$|^\.github/zizmor\.ya?ml$|^\.gitleaks(\.toml|ignore)$|^scripts/guards\.d/|^scripts/(security-checks\.sh|fetch-pinned-release\.sh|plugin-pins(\.test)?\.mjs|reviewed-plugins\.json|auto-merge-paths\.txt)$|^security_review[^/]*\.md$'
   # The project's own additions to the list above, applied with it by both
   # jobs (same syntax, same matching). `^$` matches no path: nothing is added
   # as shipped. An empty or unusable pattern holds every pull request.
@@ -175,10 +177,15 @@ jobs:
       # Both sign-offs, read from the runs of this commit, whichever workflow
       # started this one (AM-6). CI: every workflow named __HARNESS_CI_WORKFLOW__,
       # each at its latest run, must be green — a second workflow borrowing the
-      # name cannot stand in for a red one. The review: when its file is on the
-      # default branch, its latest run must be green; a pending one means the
-      # review's own end will start this again. Dependabot's pull requests get
-      # no review (its run has no secret) and keep their own gate below.
+      # name cannot stand in for a red one, and a flaky run may be re-run. The
+      # review: when its file is on the default branch, EVERY run of it for this
+      # commit must be green at its first attempt — a hold stays a hold until a
+      # new commit, and re-running a review until the model says pass holds
+      # too. A pending one means the review's own end will start this again.
+      # Dependabot's pull requests get no review (its run has no secret) and
+      # keep their own gate below. A run is known by its file path, not by who
+      # opened it: see auto-merge-policy.md § Residual risks for what a run of
+      # the same file from another pull request can do.
       - name: Sign-offs (CI, and the review where there is one)
         id: signoff
         if: steps.find-pr.outputs.pr != ''
@@ -208,25 +215,28 @@ jobs:
             REVIEW=none
           fi
           RUNS=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" \
-                   --jq '{total: .total_count, runs: [.workflow_runs[] | {name, path: (.path | split("@")[0]), run_number, status, conclusion}]}')
+                   --jq '{total: .total_count, runs: [.workflow_runs[] | {name, path: (.path | split("@")[0]), run_number, run_attempt, status, conclusion}]}')
           if [ "$(jq -r '.total' <<< "$RUNS")" -gt 100 ]; then
             echo "::notice::PR #${PR}: more than 100 runs for ${HEAD_SHA:0:7} — leaving it for a hand merge."
             exit 0
           fi
           # >>> signoff_state (AM-6 extracts this block). stdin: the runs; $1: a jq
-          # filter selecting the workflow's runs. Prints ok, pending, red or none.
+          # filter selecting the workflow's runs; $2: latest (each file at its
+          # latest run, re-runs allowed) or every (every run, first attempt
+          # only). Prints ok, pending, red or none.
           signoff_state() {
-            jq -r "[.runs[] | select($1)] | group_by(.path) | map(max_by(.run_number))
+            jq -r --arg mode "$2" "[.runs[] | select($1)]
+              | if \$mode == \"latest\" then group_by(.path) | map(max_by(.run_number)) else . end
               | if length == 0 then \"none\"
-                elif all(.status == \"completed\" and .conclusion == \"success\") then \"ok\"
-                elif any(.status == \"completed\" and .conclusion != \"success\") then \"red\"
+                elif any((\$mode != \"latest\" and .run_attempt != 1) or (.status == \"completed\" and .conclusion != \"success\")) then \"red\"
+                elif all(.status == \"completed\") then \"ok\"
                 else \"pending\" end"
           }
           # <<< signoff_state
-          CI_STATE=$(signoff_state '.name == $ENV.CI_NAME' <<< "$RUNS")
+          CI_STATE=$(signoff_state '.name == $ENV.CI_NAME' latest <<< "$RUNS")
           REVIEW_STATE=skipped
           if [ "$REVIEW" = required ]; then
-            REVIEW_STATE=$(signoff_state '.path == $ENV.REVIEW_PATH' <<< "$RUNS")
+            REVIEW_STATE=$(signoff_state '.path == $ENV.REVIEW_PATH' every <<< "$RUNS")
           fi
           echo "PR #${PR} at ${HEAD_SHA:0:7}: CI ${CI_STATE}, review ${REVIEW_STATE}"
           if [ "$CI_STATE" != ok ]; then

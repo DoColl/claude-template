@@ -14,14 +14,14 @@ It is a brake, not a boundary. The diff is written by whoever wrote the pull req
 
 ## What a run reads
 
-- **The default branch's tree, never the pull request's.** The checkout is the event's base commit. Every file Claude Code executes or obeys (`CLAUDE.md`, `.claude/`, `.mcp.json`) is therefore one that was already merged. The action also restores those paths from the base branch on pull-request events; this workflow does not rely on that.
-- **The change as a diff**, fetched through the API for the event's two commits and written to `.review-input/pr.diff`. An empty diff, or one over 400 kB, is a hold. A file the pull request adds is read from the diff, not as a file.
+- **The default branch's tree, never the pull request's.** The job runs only for a pull request into the default branch (into another branch, the tree and the configuration would be that branch's, written by whoever pushed it); the checkout is the event's base commit. Every file Claude Code executes or obeys (`CLAUDE.md`, `.claude/`, `.mcp.json`) is therefore one that was already merged. The action also restores those paths from the base branch on pull-request events; this workflow does not rely on that.
+- **The change as a diff**, fetched through the API for the event's two commits and written to `.review-input/pr.diff`. An empty diff, one over 400 kB, or one that changes a binary file (the diff only says that it differs) is a hold. A file the pull request adds is read from the diff, not as a file.
 - **The standards**: `CLAUDE.md` (§ "Conventions for new code" and § "Key conventions" first) and the findings catalogue. An empty § "Conventions for new code" reviews against nothing of yours.
 - **Not** the pull request's title, description or comments: the prompt names no text a person typed.
 
 ## What a run may do
 
-- **Read, Grep and Glob only.** `--allowedTools` lists them; Bash, file edits, web access and sub-agents are denied by name. Settings deny reading `/proc`, `/sys`, `/etc`, the runner's temporary directory, Claude's own configuration and `.git/`. Whether a read outside the working directory is refused without those rules was not tested here: they are there so that the answer does not matter.
+- **Read, Grep and Glob only.** `--tools` makes them the only built-in tools available, `--allowedTools` approves them, and Bash, file edits, web access and sub-agents are denied by name as well: `--allowedTools` alone approves without restricting, so a tool the default branch's settings allow would otherwise stay usable. `--tools` was read in the help of Claude Code 2.1.322; the pinned action installs 2.1.302, where it was not checked — an unknown option fails the run, which is a hold. Settings deny reading `/proc`, `/sys`, `/etc`, the runner's temporary directory, Claude's own configuration and `.git/`. Whether a read outside the working directory is refused without those rules was not tested here: they are there so that the answer does not matter.
 - **No GitHub tool.** With an explicit prompt and no GitHub tool allowed, the action configures no MCP server (read at the pinned commit).
 - **The job token, `contents: read`.** It dies with the job. The checkout keeps it in git's configuration because the action fetches the base branch before setting up its own authentication.
 - **The Claude token.** Assume a steered session could reach anything in its process's environment; what bounds the risk is that it has no tool that writes or sends anything. Its only output is the verdict.
@@ -30,14 +30,14 @@ It is a brake, not a boundary. The diff is written by whoever wrote the pull req
 
 The session returns JSON against a fixed schema: `pass` or `hold`, a two-sentence summary, findings marked `blocking` or `minor`. A second job, with no Claude in it and `pull-requests: write`, posts the verdict as a comment inside a fenced block (its backticks replaced, so the model's text renders as text and mentions nobody) and fails the run unless the verdict is `pass`. A review job that failed, timed out or returned nothing usable is a hold.
 
-A held pull request waits for a human: read the comment, then fix and push (a new run follows) or merge by hand.
+A held pull request waits for a human: read the comment, then fix and push (a new run follows) or merge by hand. Re-running the review does not help: the unattended merge requires every run of the review for the commit to be green at its first attempt, so a hold stays a hold until a new commit.
 
 ## What is not reviewed
 
 - **Documentation-only pull requests**: the trigger skips the paths the CI workflow skips, and takes the Claude instruction files back. Keep the two lists identical.
 - **Forks**: their runs get no secret. **Dependabot**: its runs get no secret either, and its pull requests have their own gate.
 - **Pull requests a bot opens**: the action refuses to start for an actor that is not a user unless `allowed_bots` names it. As shipped, such a run fails, which holds the pull request. Name a bot there only after reading `docs/security.md` of the action at the pinned commit.
-- **Pull requests to another branch** are reviewed too: the trigger has no `branches:` filter, so that the file is byte for byte the same in every project.
+- **Pull requests into another branch**: the job is skipped (its `if:` compares the target with the default branch; the trigger has no `branches:` filter, so that the file is byte for byte the same in every project). A run that did nothing is not a pass: the unattended merge treats it as a hold.
 
 ## Merging unattended
 
@@ -65,11 +65,16 @@ A bump is a hand merge (the file is gated). At the new commit, re-read what deci
 `scripts/guards.d/45-claude-review.sh`:
 
 - **CR-1** — `claude-review.yml` is byte for byte the reviewed file, pins aside. A deliberate change updates `CLAUDE_REVIEW_DIGEST` in the guard, in the same pull request; the guard prints the new value.
-- **CR-2** — `claude-review.yml` and `claude.yml` are the only workflows that name a Claude secret or action, no workflow reads all the secrets, and `claude-review.yml` has a top-level `permissions: {}`.
-- **CR-3** — the checks can fail: a table of broken copies must all go red (the pull request's tree checked out, Bash allowed, forks let in, a third Claude workflow…), a pin bump must stay green.
+- **CR-2** — `claude-review.yml` is the only workflow that names a Claude secret or action — with `claude.yml` only when `scripts/guards.d/44-claude-ci.sh` pins it — no workflow reads all the secrets, and `claude-review.yml` has a top-level `permissions: {}`. File names are compared as they are, never expanded: a `claud[e].yml` is a third workflow.
+- **CR-3** — the checks can fail: a table of broken copies must all go red (the pull request's tree checked out, any target branch, binary files let through, Bash allowed or made available, forks let in, a third Claude workflow, one whose name globs to `claude.yml`…), a pin bump must stay green.
 
-They stop a regression, not a deliberate edit by someone who can change the guard too. That is what the human merge of workflow and guard changes is for.
+They stop a regression, not a deliberate edit by someone who can change the guard too. That is what the human merge of workflow and guard changes is for. Three limits of theirs, accepted:
+
+- CR-2 and CC-2 let the other Claude workflow in when its guard file exists; they do not check what the guard file contains. A stub would pass — and a stub is a change to `scripts/guards.d/`, which is never merged unattended.
+- "Pins aside" accepts any 40-character SHA for the same action, including a commit that exists only in a fork of it. GA-1 checks the form of a pin, not where the commit lives, and zizmor's check for that needs the network. The human merge of `claude*.yml` and of Dependabot's Action bumps is the control.
+- A run is known by its commit and its file, not by the pull request that started it: `auto-merge-policy.md` § Residual risks says what a run of the same file from another pull request can do.
 
 ## History
 
 - Installed with the kit.
+- After a fresh-context security review of the first version: the guards compared file names after shell expansion (a `claud[e].yml` passed as `claude.yml`); the findings catalogue the review reads could merge as documentation; a review re-run until pass, or a green run from another pull request on the same commit, could stand in for a hold; pull requests into another branch ran on that branch's configuration; a binary change went unread; `--allowedTools` was described as a restriction. Fixed or stated above.

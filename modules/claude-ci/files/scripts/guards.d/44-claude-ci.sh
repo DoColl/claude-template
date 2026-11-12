@@ -42,19 +42,22 @@ check() {
   local files=("$dir"/*.yml "$dir"/*.yaml)
 
   out=$(grep -LxE 'permissions: *\{\}' "${files[@]}" || true)
-  if [ -n "$out" ]; then echo "CC-1: no top-level 'permissions: {}' line in: $(echo $out)"; fi
+  if [ -n "$out" ]; then echo "CC-1: no top-level 'permissions: {}' line in: $(tr "\n" " " <<< "$out")"; fi
 
   # Case-folded: secret names are case-insensitive when referenced.
   out=$(grep -liE 'CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY|anthropics/claude-code-|toJSON\(secrets\)|secrets\.\*|secrets\[|secrets: *inherit' "${files[@]}" || true)
-  for f in $out; do
+  # One name per line, never word-split or glob-expanded: a file named
+  # claud[e].yml must not turn into claude.yml on its way here.
+  while IFS= read -r f; do
     case "$f" in
+      '') ;;
       "$dir/claude.yml") ;;
       "$dir/claude-review.yml") [ "$pinned" = yes ] || extra="$extra $f" ;;
       *) extra="$extra $f" ;;
     esac
-  done
-  if [ -n "$extra" ] || ! grep -qx "$dir/claude.yml" <<< "$out"; then
-    echo "CC-2: only claude.yml (and claude-review.yml, pinned by 45-claude-review.sh) may touch a Claude secret, the action or all the secrets, got: $(echo $out)"
+  done <<< "$out"
+  if [ -n "$extra" ] || ! grep -qxF "$dir/claude.yml" <<< "$out"; then
+    echo "CC-2: only claude.yml (and claude-review.yml, pinned by 45-claude-review.sh) may touch a Claude secret, the action or all the secrets, got: $(tr "\n" " " <<< "$out")"
   fi
 
   got=$(digest "$dir/claude.yml")
@@ -117,6 +120,7 @@ mutant red "second reader, all secrets"     zz-harness-fixture.yml 's/^name: (.*
 mutant red "second reader, in a comment"    zz-harness-fixture.yml 's/^name: (.*)$/# ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }} \1/'
 mutant red "second reader, hidden file"     zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' .x.yml
 mutant red "a second Claude workflow"       zz-harness-fixture.yml 's/^name: (.*)$/name: \1 anthropics\/claude-code-base-action/' claude-triage.yml
+mutant red "a name that globs to claude.yml" zz-harness-fixture.yml 's/^name: (.*)$/name: \1 ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}/' 'claud[e].yml'
 mutant red "the review workflow, unpinned"  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 anthropics\/claude-code-action/' claude-review.yml no
 mutant green "the review workflow, pinned"  zz-harness-fixture.yml 's/^name: (.*)$/name: \1 anthropics\/claude-code-action/' claude-review.yml yes
 mutant green "pin bump"                     claude.yml 's/(actions\/checkout@)[0-9a-f]{40} # v[0-9.]+/\1bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb # v7.0.2/'

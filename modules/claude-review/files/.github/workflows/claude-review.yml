@@ -35,7 +35,10 @@ jobs:
   review:
     # Same-repository pull requests only: a fork's run gets no secret. A
     # Dependabot pull request gets none either; it has its own merge gate.
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' }}
+    # Pull requests into the default branch only: into another branch, the
+    # checkout below and the configuration Claude Code reads would be that
+    # branch's, which whoever pushed it wrote.
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]' && github.event.pull_request.base.ref == github.event.repository.default_branch }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -56,7 +59,8 @@ jobs:
           fetch-depth: 1
 
       # The change, as data: the diff between the two commits of the event.
-      # Too large to review is a hold, not a pass.
+      # Too large to review is a hold, not a pass, and so is a binary file: the
+      # diff only says that it differs.
       - name: Fetch the diff
         env:
           GH_TOKEN: ${{ github.token }}
@@ -72,6 +76,10 @@ jobs:
             echo "::error::The diff is ${size} bytes: empty or too large to review. Held for a human."
             exit 1
           fi
+          if grep -q -e '^Binary files ' -e '^GIT binary patch$' .review-input/pr.diff; then
+            echo "::error::The pull request changes a binary file, which a review of the diff cannot read. Held for a human."
+            exit 1
+          fi
 
       - name: Review
         id: claude
@@ -84,11 +92,13 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           display_report: 'false'
           show_full_output: 'false'
-          # Read, Grep and Glob are the only tools allowed; the others are
-          # denied by name, and so is reading outside the project or under .git/.
+          # Read, Grep and Glob are the only tools available (--tools); they are
+          # also the only ones approved, the others are denied by name, and so is
+          # reading outside the project or under .git/.
           settings: '{"permissions":{"deny":["Read(//proc/**)","Read(//sys/**)","Read(//etc/**)","Read(//home/runner/work/_temp/**)","Read(~/.claude/**)","Read(~/.claude.json)","Read(.git/**)"]}}'
           claude_args: >-
             --max-turns 40
+            --tools Read,Grep,Glob
             --allowedTools Read,Grep,Glob
             --disallowedTools Bash,Edit,Write,MultiEdit,NotebookEdit,WebFetch,WebSearch,Task
             --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["pass","hold"]},"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","properties":{"severity":{"type":"string","enum":["blocking","minor"]},"file":{"type":"string"},"line":{"type":"integer"},"finding":{"type":"string"}},"required":["severity","file","finding"]}}},"required":["verdict","summary","findings"]}'

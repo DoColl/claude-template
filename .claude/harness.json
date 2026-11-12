@@ -137,7 +137,7 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "c9e9408d6fc5f2534eeb271cbb50fcb148a3bfdcff590f4d539a8bfd0b0f9df0"
+      "sha256": "6dbc6ae288f7871a699e3c84a79854bef13cfd76a33d9fa59c4356629cc16d6f"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",

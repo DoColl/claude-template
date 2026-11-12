@@ -79,7 +79,8 @@ else
            scripts/guards.d/_lib.sh scripts/guards.d/60-new.sh \
            scripts/plugin-pins.mjs scripts/plugin-pins.test.mjs \
            scripts/fetch-pinned-release.sh .gitleaks.toml .gitleaksignore \
-           .github/zizmor.yml .github/zizmor.yaml scripts/auto-merge-paths.txt; do
+           .github/zizmor.yml .github/zizmor.yaml scripts/auto-merge-paths.txt \
+           SECURITY_REVIEW.md SECURITY_REVIEW_2026-11.md security_review.md; do
     if ! grep -qiE "$RE" <<< "$p"; then bad 1 "gated path NOT matched by CLAUDE_GATE_RE: $p"; fi
   done
   # Must not be gated: ordinary docs, code and scripts.
@@ -90,7 +91,8 @@ else
            scripts/security-checks.sh.md scripts/guards.dx/a.sh src/scripts/guards.d/a.sh \
            scripts/plugin-pins.md scripts/plugin-pins-report.mjs scripts/fetch.sh \
            src/.gitleaks.toml .gitleaks.toml.md docs/zizmor.yml .github/zizmor.md \
-           scripts/auto-merge-paths.txt.md; do
+           scripts/auto-merge-paths.txt.md SECURITY.md docs/SECURITY_REVIEW.md \
+           SECURITY_REVIEW.md.txt; do
     if grep -qiE "$RE" <<< "$p"; then bad 1 "non-gated path matched by CLAUDE_GATE_RE: $p"; fi
   done
 fi
@@ -541,11 +543,11 @@ okline=$(grep -cF 'echo "ok=true" >> "$GITHUB_OUTPUT"' "$AM" || true)
 if [ "$okline" != "1" ]; then
   bad 6 "the sign-off step must write ok=true in exactly one place (found $okline)"
 fi
-if ! grep -qxF "          CI_STATE=\$(signoff_state '.name == \$ENV.CI_NAME' <<< \"\$RUNS\")" "$AM" \
-   || ! grep -qxF "            REVIEW_STATE=\$(signoff_state '.path == \$ENV.REVIEW_PATH' <<< \"\$RUNS\")" "$AM" \
+if ! grep -qxF "          CI_STATE=\$(signoff_state '.name == \$ENV.CI_NAME' latest <<< \"\$RUNS\")" "$AM" \
+   || ! grep -qxF "            REVIEW_STATE=\$(signoff_state '.path == \$ENV.REVIEW_PATH' every <<< \"\$RUNS\")" "$AM" \
    || ! grep -qxF "          export REVIEW_PATH=.github/workflows/claude-review.yml" "$AM" \
    || ! grep -qxF "            ok|skipped) echo \"ok=true\" >> \"\$GITHUB_OUTPUT\" ;;" "$AM"; then
-  bad 6 "the sign-off step must judge CI by name, the review by its file, and say ok only for ok or skipped"
+  bad 6 "the sign-off step must judge CI by name at each file's latest run, the review by its file at every run, and say ok only for ok or skipped"
 fi
 if ! grep -qxF '          if [ "$CI_STATE" != ok ]; then' "$AM"; then
   bad 6 "the sign-off step must stop unless CI is ok"
@@ -557,24 +559,29 @@ elif ! command -v jq > /dev/null 2>&1; then
   if [ -n "${CI:-}" ]; then bad 6 "jq is needed to run signoff_state"; else note "AM-6: jq not found — signoff_state not run"; fi
 else
   eval "$sblock"
-  am6() { # am6 <expected> <label> <runs as JSON lines: name|path|run_number|status|conclusion>
-    local got runs
-    runs=$(jq -Rn '{runs: [inputs | split("|") | {name: .[0], path: .[1], run_number: (.[2] | tonumber), status: .[3], conclusion: (if .[4] == "" then null else .[4] end)}]}' <<< "$3")
-    got=$(CI_NAME=CI REVIEW_PATH=.github/workflows/claude-review.yml signoff_state "$4" <<< "$runs")
+  am6() { # am6 <expected> <label> <latest|every> <runs: name|path|run_number|run_attempt|status|conclusion, one per line>
+    local got runs filter
+    runs=$(jq -Rn '{runs: [inputs | split("|") | {name: .[0], path: .[1], run_number: (.[2] | tonumber), run_attempt: (.[3] | tonumber), status: .[4], conclusion: (if .[5] == "" then null else .[5] end)}]}' <<< "$4")
+    if [ "$3" = latest ]; then filter='.name == $ENV.CI_NAME'; else filter='.path == $ENV.REVIEW_PATH'; fi
+    got=$(CI_NAME=CI REVIEW_PATH=.github/workflows/claude-review.yml signoff_state "$filter" "$3" <<< "$runs")
     [ "$got" = "$1" ] || bad 6 "signoff_state on '$2': $got, expected $1"
   }
-  ci='.name == $ENV.CI_NAME'; rv='.path == $ENV.REVIEW_PATH'
-  am6 ok      'CI green'                     'CI|.github/workflows/ci.yml|4|completed|success' "$ci"
-  am6 pending 'CI running'                   'CI|.github/workflows/ci.yml|4|in_progress|' "$ci"
-  am6 none    'no CI run'                    'Claude review|.github/workflows/claude-review.yml|2|completed|success' "$ci"
-  am6 ok      'red, then green on a re-run'  "$(printf 'CI|.github/workflows/ci.yml|3|completed|failure\nCI|.github/workflows/ci.yml|4|completed|success')" "$ci"
-  am6 red     'green, then red'              "$(printf 'CI|.github/workflows/ci.yml|3|completed|success\nCI|.github/workflows/ci.yml|4|completed|failure')" "$ci"
-  am6 red     'a borrowed name cannot cover' "$(printf 'CI|.github/workflows/ci.yml|4|completed|failure\nCI|.github/workflows/fake.yml|9|completed|success')" "$ci"
-  am6 ok      'review green'                 "$(printf 'CI|.github/workflows/ci.yml|4|completed|success\nClaude review|.github/workflows/claude-review.yml|2|completed|success')" "$rv"
-  am6 red     'review held'                  'Claude review|.github/workflows/claude-review.yml|2|completed|failure' "$rv"
-  am6 red     'review skipped'               'Claude review|.github/workflows/claude-review.yml|2|completed|skipped' "$rv"
-  am6 pending 'review running'               'Claude review|.github/workflows/claude-review.yml|2|queued|' "$rv"
-  am6 none    'review by name, other file'   'Claude review|.github/workflows/fake.yml|2|completed|success' "$rv"
+  ci=.github/workflows/ci.yml; rv=.github/workflows/claude-review.yml
+  am6 ok      'CI green'                     latest "CI|$ci|4|1|completed|success"
+  am6 pending 'CI running'                   latest "CI|$ci|4|1|in_progress|"
+  am6 none    'no CI run'                    latest "Claude review|$rv|2|1|completed|success"
+  am6 ok      'CI red, then green on a run'  latest "$(printf 'CI|%s|3|1|completed|failure\nCI|%s|4|1|completed|success' $ci $ci)"
+  am6 ok      'CI re-run attempt'            latest "CI|$ci|4|2|completed|success"
+  am6 red     'CI green, then red'           latest "$(printf 'CI|%s|3|1|completed|success\nCI|%s|4|1|completed|failure' $ci $ci)"
+  am6 red     'a borrowed name cannot cover' latest "$(printf 'CI|%s|4|1|completed|failure\nCI|.github/workflows/fake.yml|9|1|completed|success' $ci)"
+  am6 ok      'review green'                 every  "$(printf 'CI|%s|4|1|completed|success\nClaude review|%s|2|1|completed|success' $ci $rv)"
+  am6 red     'review held'                  every  "Claude review|$rv|2|1|completed|failure"
+  am6 red     'review skipped'               every  "Claude review|$rv|2|1|completed|skipped"
+  am6 pending 'review running'               every  "Claude review|$rv|2|1|queued|"
+  am6 none    'review by name, other file'   every  "Claude review|.github/workflows/fake.yml|2|1|completed|success"
+  am6 red     'a hold, then a pass'          every  "$(printf 'Claude review|%s|2|1|completed|failure\nClaude review|%s|3|1|completed|success' $rv $rv)"
+  am6 red     'a review re-run until pass'   every  "Claude review|$rv|2|2|completed|success"
+  am6 red     'a review re-run, in flight'   every  "Claude review|$rv|2|2|in_progress|"
 fi
 # The pull request is the one whose head IS the validated SHA (a `sha:` search
 # also returns stacked and sibling pull requests)…
