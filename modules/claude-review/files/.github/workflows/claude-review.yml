@@ -163,10 +163,19 @@ jobs:
             # with its backticks replaced it cannot close the fence.
             text=$(jq -r '"Verdict: \(.verdict)\n\n\(.summary)\n" + ([.findings[] | "\n- [\(.severity)] \(.file)\(if .line then ":\(.line)" else "" end): \(.finding)"] | join(""))' <<< "$VERDICT_JSON" | tr '`' "'" | head -c 60000)
           fi
-          printf 'Automated review of %s\n\n````text\n%s\n````\n' "${HEAD_SHA:0:7}" "$text" > "$RUNNER_TEMP/review.md"
-          # No pull request found: nothing to comment on, the run fails all the same.
+          printf 'Automated review of %s\n\n````text\n%s\n````\n' "$HEAD_SHA" "$text" > "$RUNNER_TEMP/review.md"
+          # No pull request found: nothing to comment on, the run fails all the
+          # same. A hold (a verdict with findings, not a failed job) labels the
+          # pull request `review-held`, which whatever reworks held pull
+          # requests can start on; a pass removes the label. The label must
+          # exist in the repository (docs/conventions/claude-review.md).
           if [[ "$PR" =~ ^[0-9]+$ ]]; then
             gh pr comment "$PR" --body-file "$RUNNER_TEMP/review.md"
+            if [ "$verdict" = "hold" ]; then
+              gh pr edit "$PR" --add-label review-held || echo "::warning::PR #${PR}: could not add the review-held label — create it in the repository."
+            elif [ "$verdict" = "pass" ]; then
+              gh pr edit "$PR" --remove-label review-held > /dev/null 2>&1 || true
+            fi
           fi
           if [ "$verdict" != "pass" ]; then
             echo "::error::Automated review: ${verdict}. The pull request waits for a human."

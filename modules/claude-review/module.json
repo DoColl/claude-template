@@ -12,6 +12,7 @@
     "For a PRIVATE repository only: read docs/conventions/claude-review.md first.",
     "Add the repository secret CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`), unless the repository already has it.",
     "Never run live by the kit's authors: open a throwaway pull request, read the run log and the comment, then one that should hold.",
-    "Fill CLAUDE.md § Conventions for new code: it is the review's checklist, and an empty one reviews against nothing of yours."
+    "Fill CLAUDE.md § Conventions for new code: it is the review's checklist, and an empty one reviews against nothing of yours.",
+    "Create the repository label review-held: a hold adds it to the pull request."
   ]
 }
