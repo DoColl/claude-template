@@ -708,7 +708,7 @@ test("parallel-sessions: the report names a stale base, the files two branches s
   assert.equal(a.status, 0, output(a));
   assert.match(a.stdout, /^parallel-sessions: feat-a\nbase: origin\/main at [0-9a-f]+ \(fetched just now\)\n/);
   assert.match(a.stdout, /this branch: 1 commit\(s\) behind origin\/main, 1 of its own, 3 file\(s\) changed/, "the file that is not committed counts");
-  assert.match(a.stdout, /MERGE origin\/main NOW: it changed 1 file\(s\) this branch also changes: base\.txt\n/);
+  assert.match(a.stdout, /\n  CATCH UP NOW: origin\/main changed 1 file\(s\) this branch also changes: base\.txt\n  how: commit, then git rebase origin\/main \(no commit of the branch is pushed\)\n/);
   assert.match(a.stdout, /the local main is 1 commit\(s\) behind origin\/main/);
   assert.match(a.stdout, /\n  feat-b — [^\n]*\n[^\n]*\n      1 file\(s\) in common with this branch: shared\.txt\n      merging the two CONFLICTS in: shared\.txt\n/);
   assert.ok(a.stdout.includes(`\n  ${hostile} — `), "a branch name is printed as it is");
@@ -727,15 +727,18 @@ test("parallel-sessions: the report names a stale base, the files two branches s
   // Seen from a branch with nothing of its own: nothing to merge for it, but feat-a has a merge to do.
   const d = report(wt("d"), "--no-fetch");
   assert.match(d.stdout, /\(as last fetched\)\n/);
-  assert.match(d.stdout, /what origin\/main changed since the fork touches none of the files this branch changes/);
+  assert.match(d.stdout, /\n  what origin\/main changed since the fork touches none of the files this branch changes\n  before a pull request, catch up all the same: git rebase origin\/main \(no commit of the branch is pushed\)\n/, "behind on other files: nothing urgent, and still no base for a pull request");
   assert.match(d.stdout, /\n  feat-a — [^\n]*\n[^\n]*\n      origin\/main changed 1 of its file\(s\) since it forked: it has a merge to do\n      no file in common with this branch\n/);
   write(wt("d"), "other.txt", "mine, not committed\n");
   assert.match(report(wt("d"), "--no-fetch").stdout, /\n  feat-b — [^\n]*\n[^\n]*\n      1 file\(s\) in common with this branch: other\.txt\n      your changes to 1 of them are not committed, and no forecast covers them: other\.txt\n/, "no commit of this branch holds the file: nothing is forecast");
   fs.rmSync(path.join(wt("d"), "other.txt"));
 
-  // --check is what the guard prints: one line when the base is stale on a file of the branch, silence otherwise.
-  assert.match(report(wt("a"), "--check").stdout, /^origin\/main, as last fetched, changed 1 file\(s\) this branch also changes \(base\.txt\): merge it before pushing/);
-  assert.equal(report(wt("d"), "--check").stdout, "", "nothing to report is silence, never \"up to date\"");
+  // --check is what the guard prints: one line when the branch is behind, the files changed on both sides first; silence otherwise.
+  assert.match(report(wt("a"), "--check").stdout, /^origin\/main, as last fetched, changed 1 file\(s\) this branch also changes \(base\.txt\): catch up before you push — git rebase origin\/main \(no commit of the branch is pushed\)\n$/);
+  assert.match(report(wt("d"), "--check").stdout, /^origin\/main, as last fetched, is 1 commit\(s\) ahead of this branch: catch up before a pull request — git rebase origin\/main \(no commit of the branch is pushed\)\n$/);
+  git(dir, "worktree", "add", "-q", wt("f"), "-b", "feat-f", "origin/main");
+  assert.match(report(wt("f"), "--no-fetch").stdout, /\n  up to date with origin\/main\n/);
+  assert.equal(report(wt("f"), "--check").stdout, "", "nothing to report is silence, never \"up to date\"");
   const g = run(wt("a"), "bash", ["scripts/security-checks.sh", "--offline"], { env });
   assert.equal(g.status, 0, `a stale base is a note, the gate stays green:\n${output(g)}`);
   assert.match(g.stdout, /note\s+PS-2: origin\/main, as last fetched, changed 1 file/);
@@ -750,9 +753,19 @@ test("parallel-sessions: the report names a stale base, the files two branches s
   // A detached HEAD reports like a branch; a neighbour on one is counted, not compared.
   git(wt("b"), "checkout", "-q", "--detach");
   assert.match(report(wt("b"), "--no-fetch").stdout, /^parallel-sessions: a detached HEAD at [0-9a-f]+\n/);
+  assert.match(report(wt("b"), "--no-fetch").stdout, /\n  before a pull request, catch up all the same: rebase on origin\/main, or merge it once commits of the branch are pushed\n/, "no branch to look up on the remote: both ways are named");
   const seen = report(wt("a"), "--no-fetch").stdout;
   assert.match(seen, /\n1 other worktree\(s\) on a detached HEAD: not compared\n/);
   assert.doesNotMatch(seen, /feat-b/);
+
+  // A branch name on the remote with no commit of its own — a branch reused after its pull request was merged —
+  // has nothing a rebase would rewrite.
+  git(wt("d"), "push", "-q", "origin", "feat-d");
+  assert.match(report(wt("d"), "--check").stdout, / — git rebase origin\/main \(no commit of the branch is pushed\)\n$/);
+
+  // Once commits of the branch are pushed, catching up is a merge: a rebase would rewrite what the remote holds.
+  git(wt("a"), "push", "-q", "origin", "feat-a");
+  assert.match(report(wt("a"), "--no-fetch").stdout, /\n  how: commit, then git merge origin\/main \(commits of the branch are pushed: a rebase would need a forced push\)\n/);
 });
 
 test("parallel-sessions: without a remote, a commit or a repository, the report says so and --check says nothing", () => {

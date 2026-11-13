@@ -4,10 +4,11 @@
 #
 #   ./scripts/parallel-sessions.sh             fetch the default branch, then report
 #   ./scripts/parallel-sessions.sh --no-fetch  report against the last fetched state
-#   ./scripts/parallel-sessions.sh --check     one line when the default branch, as last
-#                                              fetched, changed files this branch also
-#                                              changes; nothing otherwise. Never fetches.
-#                                              (guard PS-2)
+#   ./scripts/parallel-sessions.sh --check     one line when this branch is behind the
+#                                              default branch as last fetched — first of
+#                                              all when that branch changed files this
+#                                              one also changes; nothing otherwise.
+#                                              Never fetches. (guard PS-2)
 #
 # It reads refs, which every worktree of a repository shares: it sees what the
 # other branches have committed, never what a session has not committed yet.
@@ -84,24 +85,44 @@ git diff --no-renames --name-only "$fork" "$base" 2>/dev/null | sorted > "$tmp/b
 comm -12 "$tmp/mine" "$tmp/base" > "$tmp/stale"
 stale=$(count "$tmp/stale")
 
+# How to catch up. A rebase rewrites the commits of the branch, so it is for
+# commits nobody else has. "Pushed" means the remote copy of the branch holds
+# commits the default branch lacks: a branch whose earlier commits were all
+# merged has nothing a rebase would rewrite. A pushed branch takes a merge.
+me=$(git symbolic-ref -q HEAD 2>/dev/null) || me=""
+behind=$(git rev-list --count "HEAD..$base")
+pushed=0
+if [ -n "$me" ] && git rev-parse -q --verify "refs/remotes/$remote/${me#refs/heads/}" >/dev/null 2>&1; then
+  pushed=$(git rev-list --count "$base..refs/remotes/$remote/${me#refs/heads/}" 2>/dev/null) || pushed=0
+fi
+if [ -z "$me" ]; then
+  how="rebase on $base_name, or merge it once commits of the branch are pushed"
+elif [ "$pushed" -gt 0 ]; then
+  how="git merge $base_name (commits of the branch are pushed: a rebase would need a forced push)"
+else
+  how="git rebase $base_name (no commit of the branch is pushed)"
+fi
+
 if [ "$mode" = check ]; then
   if [ "$stale" -gt 0 ]; then
-    printf '%s, as last fetched, changed %s file(s) this branch also changes (%s): merge it before pushing — ./scripts/parallel-sessions.sh gives the full report\n' "$base_name" "$stale" "$(names "$tmp/stale")"
+    printf '%s, as last fetched, changed %s file(s) this branch also changes (%s): catch up before you push — %s\n' "$base_name" "$stale" "$(names "$tmp/stale")" "$how"
+  elif [ "$behind" -gt 0 ]; then
+    printf '%s, as last fetched, is %s commit(s) ahead of this branch: catch up before a pull request — %s\n' "$base_name" "$behind" "$how"
   fi
   exit 0
 fi
 
-me=$(git symbolic-ref -q HEAD 2>/dev/null) || me=""
 if [ -n "$me" ]; then label=${me#refs/heads/}; else label="a detached HEAD at $(git rev-parse --short HEAD)"; fi
-behind=$(git rev-list --count "HEAD..$base")
 ahead=$(git rev-list --count "$base..HEAD")
 printf 'parallel-sessions: %s\n' "$label"
 printf 'base: %s at %s (%s)\n\n' "$base_name" "$(git rev-parse --short "$base")" "$seen"
 printf 'this branch: %s commit(s) behind %s, %s of its own, %s file(s) changed, uncommitted ones included\n' "$behind" "$base_name" "$ahead" "$(count "$tmp/mine")"
 if [ "$stale" -gt 0 ]; then
-  printf '  MERGE %s NOW: it changed %s file(s) this branch also changes: %s\n' "$base_name" "$stale" "$(names "$tmp/stale")"
+  printf '  CATCH UP NOW: %s changed %s file(s) this branch also changes: %s\n' "$base_name" "$stale" "$(names "$tmp/stale")"
+  printf '  how: commit, then %s\n' "$how"
 elif [ "$behind" -gt 0 ]; then
   printf '  what %s changed since the fork touches none of the files this branch changes\n' "$base_name"
+  printf '  before a pull request, catch up all the same: %s\n' "$how"
 else
   printf '  up to date with %s\n' "$base_name"
 fi
