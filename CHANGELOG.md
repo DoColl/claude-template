@@ -2,6 +2,18 @@
 
 What changed in the kit, newest first. A release is a commit of `main` tagged `v<version>` (from 0.3.1 on, by `.github/workflows/release.yml`; earlier versions carry no tag); `kit.json` carries the same version, and a project's `.claude/harness.json` records the version and the commit it was installed from.
 
+Entries are no longer written into this file directly. A pull request that changes the kit adds a fragment, `changes/<slug>.md` (the slug in lower case, digits and hyphens), and leaves this file and the version alone:
+
+```markdown
+bump: minor
+
+- What changed, as the entry will read.
+
+By hand: nothing.
+```
+
+The first line is the level, `patch`, `minor` or `major`. After a blank line come the lines of the entry, then, last, a paragraph that starts with `By hand:` and says on the same line what an installed project does beyond `update`: `By hand: nothing.` when there is nothing, which may go on with a remark. No other line starts with "By hand", and a fragment has no heading. It speaks of its own change only, never of the release as a whole: it lands in one entry beside the others. `node bin/release.mjs` cuts a release, in a pull request of its own: the highest level among the fragments gives the next version, written to `kit.json` and `package.json`; the entry goes on top of this file, with the fragments' lines (the highest level first) and one "By hand" part, which holds the steps of the fragments that have one, then the remarks of the others; the fragments are removed, and `node bin/harness.mjs update .` records the version in the kit's own installation. The entries up to 0.8.0 were written directly.
+
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
 ## 0.8.0
