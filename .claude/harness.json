@@ -47,11 +47,11 @@
     },
     "docs/conventions/_template.md": {
       "module": "core",
-      "sha256": "ca0dcf35e4986459ea9bb7c599cd535d7cd1200f419866d8b5d949046b79fc37"
+      "sha256": "b6a5565d217c6bab8d0070904f7a3a0ca0cd1a26dec2a6c87595337a03190b0a"
     },
     "docs/conventions/claude-md.md": {
       "module": "core",
-      "sha256": "83aefb23ee0fa9fec4d002a46d1f05138f0734adff8842cc3e2aa7e51f7cb43d"
+      "sha256": "03fa6892b46fdd6917ae020b7ea5fb371a52b8e37f37c7fb6fa0f40434593145"
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
@@ -67,7 +67,7 @@
     },
     "scripts/guards.d/10-claude-md.sh": {
       "module": "core",
-      "sha256": "39b37c7177d56c401bf35de812e936d2763e499ec91344f82eaec1217719c011"
+      "sha256": "626b48a1553ace6f5b3f5827047c0e35cdf6689e39f8baf967fe61826b468a8d"
     },
     "scripts/guards.d/50-project.sh": {
       "module": "core",
@@ -89,6 +89,14 @@
       "module": "core",
       "sha256": "4627407a1f45787a50b900c345780cf9d84113841b3f16b206d74873dc04c790"
     },
+    ".claude/rules/dependabot.md": {
+      "module": "ci-security",
+      "sha256": "5df6b5a94ee7baa55fa04ad4835eb8a4aa7f47490636ec917be3944269787046"
+    },
+    ".claude/rules/github-actions.md": {
+      "module": "ci-security",
+      "sha256": "de7fcc1c145b3f39ba1e5bc84204a0ec2e0f952bcf0b81672ccafdcda07bd07a"
+    },
     ".github/dependabot.yml": {
       "module": "ci-security",
       "seed": true
@@ -103,11 +111,11 @@
     },
     "docs/conventions/dependabot.md": {
       "module": "ci-security",
-      "sha256": "68112f8792bcbed9a363e6fec8382bd78b2c1521d95f2f7699907bbcaa76b7f8"
+      "sha256": "94ca345ee5093ed70d703b7777885b91c618d5bb97b4a42094d0cba21b483134"
     },
     "docs/conventions/github-actions-rules.md": {
       "module": "ci-security",
-      "sha256": "1134781a9252ceaf219d8e6240acf68583fb63aa512357c5af140bf98b32b615"
+      "sha256": "8b1bed7627c618b5d84f0c35db49c14eccb4fec53004c05474b5422eff70d891"
     },
     "docs/conventions/security-workflow.md": {
       "module": "ci-security",
@@ -159,7 +167,6 @@
     }
   },
   "fragments": [
-    "ci-security:CLAUDE.md#conventions",
     "ci-security:CLAUDE.md#security-workflow",
     "ci-security:docs/conventions/README.md#conventions-index",
     "ready-on-green:docs/conventions/README.md#conventions-index",

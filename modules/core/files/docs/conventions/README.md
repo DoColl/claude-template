@@ -7,7 +7,7 @@ Decisions that outlive their context (a technology, a pattern, a trade-off) go t
 ## Adding a convention
 
 1. Copy `_template.md` to `<slug>.md` and fill it in.
-2. Add a bullet of at most five lines under "Key conventions" in `CLAUDE.md`, ending with `→ docs/conventions/<slug>.md`.
+2. Add a bullet of at most 400 bytes under "Key conventions" in `CLAUDE.md`, ending with `→ docs/conventions/<slug>.md`. A rule that only concerns some files goes to `.claude/rules/<slug>.md` with a `paths:` list instead (`claude-md.md` § Path-scoped rules).
 3. Add a row to the index below.
 4. If the rule can be checked mechanically, add the guard and name its ID in the file.
 

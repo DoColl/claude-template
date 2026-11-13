@@ -134,6 +134,7 @@ SECURITY_REVIEW.md                 the findings catalogue (yours)
 .claude/
   agents/                          implementer, verifier, doc-sync, reviewer, security-reviewer
   hooks/                           the Bash allowlist, its tests, its config (yours)
+  rules/                           rules loaded only when a session touches the files they name
   skills/project-security-review/  the project's review skill (yours)
   skills/retro/                    the retrospective that feeds the findings catalogue
   settings.json                    secret files denied, Bash sandbox (yours)

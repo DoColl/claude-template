@@ -4,6 +4,17 @@ What changed in the kit, newest first. A release is a commit of `main` tagged `v
 
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
+## 0.6.0
+
+`CLAUDE.md` costs less, and its budget measures what a session loads.
+
+- **CM-1 counts what is loaded**: `CLAUDE.md` without its block-level HTML comments (Claude Code strips them before injection), plus every `.claude/rules/**.md` that has no `paths:` list. Until now it counted the raw file. The guard prints the three numbers.
+- **Path-scoped rules**: the GitHub Actions and Dependabot rules (`ci-security`), the session-settings rule and the OpenSpec file layout are now files under `.claude/rules/` with a `paths:` list, loaded when a session touches the files they name, instead of bullets of `CLAUDE.md`. The contract has a section for them, and a test.
+- **A bullet is at most 400 bytes** (it was 700, and "five lines" in the pages). The bullets of `node-audit`, `weekly-digest`, `claude-ci` and `openspec` are shorter.
+- `.gitignore`: a second block, `claude-template:rules`, re-includes `.claude/rules/`.
+
+By hand, in a project installed before this version: `update` brings the rule files and the `.gitignore` block, but the bullets it inserted in `CLAUDE.md` stay, since the file is yours. Delete the **GitHub Actions**, **Dependabot** and **Session settings** bullets under "Key conventions" (their text is now in `.claude/rules/`), and take the shorter **OpenSpec**, **npm audit gate**, **Weekly digest** and **Claude in CI** bullets from the modules' `fragments/CLAUDE.md/conventions.frag` if you want the bytes back. Then check once, in a live session, that opening a workflow loads the rule (`docs/conventions/claude-md.md` § Limits).
+
 ## 0.5.0
 
 - New module `ready-on-green`: a workflow that marks a draft pull request ready for review once its CI run is green, and does nothing else — no checkout, no action, no merge, one permission. For a repository that opens pull requests as drafts and does not install `auto-merge`, which already lifts the draft. Its guard (RG-1..3) pins the trigger, the permission and the conditions. Installed on the kit's own repository.
@@ -26,6 +37,7 @@ By hand: nothing.
 - `core`: the `CLAUDE.md` skeleton has a working rule that closes a session with `/retro`.
 
 By hand, for an installed project — `CLAUDE.md` is a seed and does not follow the kit: add under "Working rules" the bullet "End a session that changed files with `/retro`." The skeleton keeps it that short on purpose: with every module installed it must leave the project 40% of the budget, and the skill's own description says when to run it. Two other working rules were shortened to pay for it, without changing what they ask.
+||||||| parent of 54888ba (CLAUDE.md budget counts what a session loads; file-bound rules move to .claude/rules)
 
 ## 0.3.1
 

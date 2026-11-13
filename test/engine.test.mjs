@@ -151,19 +151,51 @@ test("every fragment targets a seed file and a slot that will be there", () => {
   }
 });
 
+// "At most five lines" limits nothing when a bullet is one long line: the cap is in bytes.
+const BULLET_MAX = 400;
+
 test("CLAUDE.md bullets stay short and point to a page the module installs", () => {
+  for (const line of read(kit.modules.get("core").dir, "files/CLAUDE.md").split("\n").filter((l) => /^- \*\*[^*]+\*\*: /.test(l)))
+    assert.ok(Buffer.byteLength(line) <= BULLET_MAX, `core: the seed's bullet "${line.slice(0, 40)}…" is ${Buffer.byteLength(line)} bytes, keep it under ${BULLET_MAX}`);
   for (const [id, mod] of kit.modules) {
     const file = path.join(mod.dir, "fragments/CLAUDE.md/conventions.frag");
     if (!fs.existsSync(file)) continue;
     const available = new Set(closureOf(id).flatMap((dep) => walk(path.join(kit.modules.get(dep).dir, "files"))));
     for (const line of read(file).trim().split("\n")) {
       assert.match(line, /^- \*\*[^*]+\*\*: /, `${id}: a conventions bullet starts with "- **Name**: "`);
-      assert.ok(Buffer.byteLength(line) <= 700, `${id}: conventions bullet is ${Buffer.byteLength(line)} bytes, keep it under 700 (CLAUDE.md has a budget)`);
+      assert.ok(Buffer.byteLength(line) <= BULLET_MAX, `${id}: conventions bullet is ${Buffer.byteLength(line)} bytes, keep it under ${BULLET_MAX} (CLAUDE.md has a budget) — or scope the rule to its files in files/.claude/rules/`);
       const pointers = [...line.matchAll(/`(docs\/[A-Za-z0-9_./-]+\.md)`/g)].map((m) => m[1]);
       assert.ok(/→ `docs\//.test(line) && pointers.length, `${id}: a conventions bullet ends with → \`docs/conventions/<slug>.md\``);
       for (const p of pointers) assert.ok(available.has(p), `${id}: bullet points to ${p}, which the module does not install`);
     }
   }
+});
+
+// A rule in .claude/rules/ without a `paths:` list is loaded at launch like CLAUDE.md: shipped by a module it would
+// spend the project's budget from outside the file the budget is written in. So a module's rule is always scoped,
+// kit-owned (so that `update` refreshes it), short, and points to the page that holds the detail.
+test("a rule a module ships under .claude/rules/ is path-scoped, short and points to a page the module installs", () => {
+  let seen = 0;
+  for (const [id, mod] of kit.modules) {
+    const available = new Set(closureOf(id).flatMap((dep) => walk(path.join(kit.modules.get(dep).dir, "files"))));
+    for (const rel of walk(path.join(mod.dir, "files")).filter((r) => r.startsWith(".claude/rules/"))) {
+      seen++;
+      assert.match(rel, /^\.claude\/rules\/[a-z0-9-]+\.md$/, `${id}: ${rel} — one flat file per topic, <slug>.md`);
+      assert.ok(!isSeed(mod, rel), `${id}: ${rel} is machinery, not a seed`);
+      const text = read(mod.dir, "files", rel);
+      const fm = /^---\npaths:\n((?:  - "[^"\n]+"\n)+)---\n\n([\s\S]+)$/.exec(text);
+      assert.ok(fm, `${id}: ${rel} starts with a frontmatter holding only \`paths:\` and a list of double-quoted globs, then a blank line`);
+      for (const g of fm[1].trim().split("\n").map((l) => l.slice(5, -1))) {
+        assert.doesNotMatch(g, /^(\*\*(\/\*)?|\*|\*\*\/\*\.md)$/, `${id}: ${rel} — the glob "${g}" matches everything: that is a bullet of CLAUDE.md, with its budget`);
+        assert.doesNotMatch(g, /^\/|\.\.|\\/, `${id}: ${rel} — "${g}" is relative to the project root, with forward slashes`);
+      }
+      assert.ok(Buffer.byteLength(fm[2]) <= 1200, `${id}: ${rel} carries ${Buffer.byteLength(fm[2])} bytes of rule, keep it under 1200 — the detail goes to the convention page`);
+      const pointers = [...fm[2].matchAll(/`(docs\/[A-Za-z0-9_./-]+\.md)`/g)].map((m) => m[1]);
+      assert.ok(/→ `docs\/[^`]+`\n$/.test(fm[2]) && pointers.length, `${id}: ${rel} ends with → \`docs/conventions/<slug>.md\``);
+      for (const p of pointers) assert.ok(available.has(p), `${id}: ${rel} points to ${p}, which the module does not install`);
+    }
+  }
+  assert.ok(seen > 0, "no module ships a rule any more: drop this test or the contract section");
 });
 
 // CLAUDE.md § Before pushing grades the review by tier: a pass that does not say which tiers it belongs to
