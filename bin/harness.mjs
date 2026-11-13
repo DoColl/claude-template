@@ -32,7 +32,12 @@ Options for update:
   --modules a,b    only the files of these installed modules
   --only <path>    only this file, or this directory and what is under it
                    (repeatable; with --modules, a file must match both)
+  --set KEY=VALUE  change a placeholder value (repeatable): the files that carry
+                   it are rendered again, and the value is recorded
   --check          write nothing; exit 3 when something would change
+  --merge          a kit file edited here and changed in the kit: merge the two
+                   when they do not overlap (needs git, and the kit as a git
+                   checkout with its history); otherwise it stays a conflict
   --dry-run        show the plan, write nothing
   --force          overwrite the kit files edited in the project
 An update also removes the files the kit no longer ships, when they are still
@@ -44,6 +49,11 @@ with other content is not a conflict: it stays, recorded as a kit file edited
 here. status lists these files, show prints the kit's version of one
 (--modules and --set as for init when the project is not initialised), and
 update reports a conflict when the kit later changes one.
+
+Option for adopt:
+  --decline-fragments  record the sections that have no slot in the project's
+                   instruction files as declined: they are not proposed again
+                   (remove a key from "declined" in the manifest to undo)
 
 Without --modules or --all, init asks which modules to install when run in a
 terminal. Running init again is safe: files already in place are left alone.`;
@@ -115,6 +125,7 @@ function report(kit, plan, { dryRun, mode }) {
   const line = (label, items) => { if (items.length) { out(`\n${label} (${items.length})`); for (const i of items) out(`  ${i}`); } };
   line(`${verb}created`, s.created);
   line(`${verb}updated`, s.updated);
+  line(`${verb}merged — the project's changes and the kit's, to read before committing`, s.merged);
   line(`${verb}appended to`, s.appended);
   line(`${verb}removed — no longer shipped by the kit, untouched here`, s.removed);
   line(`fragments ${verb}inserted`, s.fragmentsInserted);
@@ -124,10 +135,11 @@ function report(kit, plan, { dryRun, mode }) {
   line("newer version in the kit — run `update` to refresh", s.outdated);
   line("CONFLICTS — left untouched, compare by hand or re-run with --force", s.conflicts.map((c) => `${c.file}  (${c.why})`));
   line("fragments NOT inserted — the slot is gone from the file, paste them by hand", s.fragmentsMissingSlot.map((f) => `${f.source} → ${f.target}`));
+  line(`fragments ${verb}declined — no slot for them, not proposed again`, s.fragmentsDeclined.map((f) => `${f.source} → ${f.target}`));
   line("no longer shipped by the kit, and edited here or yours to begin with — remove by hand if unused", s.dropped);
   line("no longer shipped by the kit — `update` removes the ones left untouched", s.pendingRemoval);
   line("not selected — still behind the kit", s.deferred);
-  if (!s.created.length && !s.updated.length && !s.appended.length && !s.fragmentsInserted.length && !s.removed.length) out(`\nnothing to write: the project is in step with the kit for ${s.deferred.length ? "this selection" : "these modules"}`);
+  if (!s.created.length && !s.updated.length && !s.appended.length && !s.fragmentsInserted.length && !s.removed.length && !s.merged.length) out(`\nnothing to write: the project is in step with the kit for ${s.deferred.length ? "this selection" : "these modules"}`);
   return s;
 }
 
@@ -143,7 +155,8 @@ async function install(kit, cmd, dir, opt) {
   const target = requireDir(dir, { create: cmd === "init" });
   const previous = readManifest(target);
   if (cmd === "add" && !previous) throw new Usage(`${target} is not initialised (no ${MANIFEST}); use init`);
-  if (opt.only || opt.check) throw new Usage(`--only and --check belong to \`update\`, not to \`${cmd}\``);
+  if (opt.only || opt.check || opt.merge) throw new Usage(`--only, --check and --merge belong to \`update\`, not to \`${cmd}\``);
+  if (opt["decline-fragments"] && cmd !== "adopt") throw new Usage("--decline-fragments belongs to `adopt`");
   const given = parseSets(opt.set);
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
   let moduleIds;
@@ -161,8 +174,12 @@ async function install(kit, cmd, dir, opt) {
     } finally { rl.close(); }
   }
   if (cmd === "adopt" && opt.force) throw new Usage("adopt keeps the project's files: it does not go with --force");
-  const plan = buildPlan({ kit, target, moduleIds, given, mode: cmd === "adopt" ? "adopt" : "install", force: Boolean(opt.force) });
+  const plan = buildPlan({ kit, target, moduleIds, given, mode: cmd === "adopt" ? "adopt" : "install", force: Boolean(opt.force), declineFragments: Boolean(opt["decline-fragments"]) });
   const s = report(kit, plan, { dryRun: opt["dry-run"], mode: "install" });
+  if (cmd === "adopt") {
+    out("\nby module            created  identical  adopted  seeds kept  conflicts");
+    for (const m of s.byModule) out(`  ${m.module.padEnd(18)} ${String(m.created).padStart(7)}  ${String(m.identical).padStart(9)}  ${String(m.adopted).padStart(7)}  ${String(m.kept).padStart(10)}  ${String(m.conflicts).padStart(9)}`);
+  }
   if (s.adopted.length) out(`\ncompare one with the kit's version: node bin/harness.mjs show <dir> <file> | diff - <file>`);
   if (!opt["dry-run"]) { applyPlan(plan); nextSteps(kit, plan); }
   return s.conflicts.length ? 2 : 0;
@@ -173,13 +190,15 @@ function update(kit, dir, opt) {
   const installed = readManifest(target);
   if (!installed) throw new Usage(`${target} is not initialised (no ${MANIFEST})`);
   if (opt.all) throw new Usage("update takes --modules or --only, not --all: without either it covers every installed module");
+  if (opt["decline-fragments"]) throw new Usage("--decline-fragments belongs to `adopt`");
+  if (opt.merge && opt.force) throw new Usage("--merge keeps the project's changes, --force drops them: choose one");
   if (opt.check && opt.force) throw new Usage("--check writes nothing: it does not go with --force");
   const modules = (opt.modules ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (opt.modules !== undefined && !modules.length) throw new Usage("--modules expects module ids");
   for (const id of modules) if (!installed.modules.includes(id)) throw new Usage(`${id} is not installed here (installed: ${installed.modules.join(", ")}); \`add\` installs a module`);
   const only = opt.only ?? [];
   const select = selector({ modules, only });
-  const plan = buildPlan({ kit, target, mode: "update", force: Boolean(opt.force), select });
+  const plan = buildPlan({ kit, target, given: parseSets(opt.set), mode: "update", force: Boolean(opt.force), select, merge: Boolean(opt.merge) });
   const known = [...plan.files.keys(), ...Object.keys(installed.files)];
   for (const p of only) if (!known.some((rel) => selector({ only: [p] })("", rel))) throw new Usage(`--only ${p}: no installed module ships such a file or directory`);
   const from = plan.previous.kit?.version;
@@ -188,7 +207,7 @@ function update(kit, dir, opt) {
   const s = report(kit, plan, { dryRun, mode: "update" });
   if (!dryRun) applyPlan(plan);
   if (opt.check) {
-    const behind = s.created.length + s.updated.length + s.appended.length + s.fragmentsInserted.length + s.removed.length + s.conflicts.length + s.dropped.length;
+    const behind = s.created.length + s.updated.length + s.merged.length + s.appended.length + s.fragmentsInserted.length + s.removed.length + s.conflicts.length + s.dropped.length;
     if (behind) out(`\nbehind the kit: ${behind} item(s)`);
     return behind ? 3 : 0;
   }
@@ -219,6 +238,7 @@ function status(kit, dir, opt) {
   out(`available: ${available.join(", ") || "(all installed)"}`);
   const line = (label, items) => { if (items.length) { out(`\n${label} (${items.length})`); for (const i of items) out(`  ${i}`); } };
   line("kit files edited in the project", d.modified);
+  line("sections declined at adoption — the project's files cover them their own way", manifest.declined ?? []);
   line("installed files that are gone", d.missing);
   line("TODO(harness) markers left to fill", todos.map((t) => `${t.file}  ×${t.count}`));
   if (!d.modified.length && !d.missing.length && !todos.length) out("\nno drift, nothing left to fill");
@@ -228,7 +248,7 @@ function status(kit, dir, opt) {
 async function main(argv) {
   const { values: opt, positionals } = parseArgs({
     args: argv, allowPositionals: true,
-    options: { modules: { type: "string" }, all: { type: "boolean" }, set: { type: "string", multiple: true }, "dry-run": { type: "boolean" }, only: { type: "string", multiple: true }, check: { type: "boolean" }, force: { type: "boolean" }, json: { type: "boolean" }, help: { type: "boolean", short: "h" } },
+    options: { modules: { type: "string" }, all: { type: "boolean" }, set: { type: "string", multiple: true }, "dry-run": { type: "boolean" }, only: { type: "string", multiple: true }, check: { type: "boolean" }, merge: { type: "boolean" }, "decline-fragments": { type: "boolean" }, force: { type: "boolean" }, json: { type: "boolean" }, help: { type: "boolean", short: "h" } },
   });
   const [cmd, dir, ...extra] = positionals;
   if (opt.help || !cmd || cmd === "help") { out(USAGE); return 0; }

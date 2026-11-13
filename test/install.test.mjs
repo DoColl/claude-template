@@ -274,6 +274,63 @@ test("adopt keeps the project's own version of a kit file and records it as edit
   assert.deepEqual(summarize(buildPlan({ kit: loadKit(root), target: dir, mode: "adopt" })).adopted, [], "a recorded file is never adopted over: that conflict stays one");
 });
 
+// A kit file the project edited and the kit then changed: the installed version is looked up in the kit's
+// history (the recorded hash names it), and the two sets of changes are merged when they do not overlap.
+test("update --merge merges a kit file edited on both sides, and leaves an overlap to a human", () => {
+  const root = kitCopy(), dir = tmp();
+  for (const rel of ["bin", "lib"]) fs.cpSync(path.join(KIT_ROOT, rel), path.join(root, rel), { recursive: true });
+  const g = (...args) => { const r = run(root, "git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args]); assert.equal(r.status, 0, output(r)); };
+  const coreFiles = path.join(root, "modules/core/files"), page = "docs/conventions/local-gate.md", lib = "scripts/guards.d/_lib.sh";
+  write(coreFiles, "docs/extra/steps.md", "one\ntwo\nthree\nfour\nfive\nsix\nseven\n");
+  g("init", "-q", "-b", "main"); g("add", "-A"); g("commit", "-q", "-m", "v1");
+  applyPlan(buildPlan({ kit: loadKit(root), target: dir, given: { PROJECT_NAME: "demo-app" } }));
+  // the project edits the top of one file and the middle of another; the kit edits the bottom of the first,
+  // the same middle line of the second, and a third file the project also edited — in a kit without history
+  write(dir, "docs/extra/steps.md", "one (project)\ntwo\nthree\nfour\nfive\nsix\nseven\n");
+  write(dir, page, read(dir, page).replace(/^# .*$/m, "# The project's title"));
+  write(dir, lib, `${read(dir, lib)}# project\n`, 0o755);
+  write(coreFiles, "docs/extra/steps.md", "one\ntwo\nthree\nfour\nfive\nsix\nseven (kit v2)\n");
+  write(coreFiles, page, read(coreFiles, page).replace(/^# .*$/m, "# The kit's new title"));
+  write(coreFiles, lib, `${read(coreFiles, lib)}# kit v2\n`, 0o755);
+  g("add", "-A"); g("commit", "-q", "-m", "v2");
+  const up = (...args) => spawnSync(process.execPath, [path.join(root, "bin/harness.mjs"), "update", dir, ...args], { encoding: "utf8", input: "" });
+
+  const plain = up("--dry-run"); assert.equal(plain.status, 2); assert.match(plain.stdout, /CONFLICTS[^\n]*\(3\)/, "without --merge, three conflicts");
+  assert.equal(up("--merge", "--force").status, 1);
+  const before = read(dir, page);
+  const r = up("--merge", "--only", "docs"); assert.equal(r.status, 2, output(r));
+  assert.match(r.stdout, /merged — [^\n]*\(1\)\n  docs\/extra\/steps\.md/);
+  assert.equal(read(dir, "docs/extra/steps.md"), "one (project)\ntwo\nthree\nfour\nfive\nsix\nseven (kit v2)\n", "both changes are in");
+  assert.match(r.stdout, /local-gate\.md  \(modified here and changed in the kit; the two changes overlap in 1 place/);
+  assert.equal(read(dir, page), before, "an overlap leaves the file as it was: no conflict marker is ever written");
+  assert.match(r.stdout, /not selected — still behind the kit[\s\S]*_lib\.sh/);
+  assert.deepEqual(drift(dir, readManifest(dir)).modified.sort(), [page, "docs/extra/steps.md", lib].sort(), "a merged file is still one the project edited");
+  assert.match(up("--merge", "--check").stdout, /left alone — edited in the project, unchanged in the kit \(1\)\n  docs\/extra\/steps\.md/, "and it is in step with the kit");
+
+  // the same kit without its history (an unpacked archive): nothing to merge from
+  fs.rmSync(path.join(root, ".git"), { recursive: true });
+  const bare = up("--merge", "--dry-run"); assert.equal(bare.status, 2);
+  assert.match(bare.stdout, /_lib\.sh  \(modified here and changed in the kit; the version installed was not found in the kit's history\)/);
+});
+
+test("adopt --decline-fragments records the sections a slotless file will not take, once", () => {
+  const dir = tmp();
+  write(dir, "CLAUDE.md", "# Written before the kit, without slots\n");
+  const first = cli("adopt", dir, "--modules", "agents", "--dry-run");
+  assert.match(first.stdout, /fragments NOT inserted[^\n]*\((\d+)\)/); assert.match(first.stdout, /by module\s+created/);
+  const n = Number(first.stdout.match(/fragments NOT inserted[^\n]*\((\d+)\)/)[1]);
+  assert.equal(cli("init", dir, "--modules", "agents", "--decline-fragments").status, 1, "adopt only");
+  const r = cli("adopt", dir, "--modules", "agents", "--decline-fragments"); assert.equal(r.status, 0, output(r));
+  assert.match(r.stdout, new RegExp(`fragments declined[^\\n]*\\(${n}\\)`));
+  assert.equal(read(dir, "CLAUDE.md"), "# Written before the kit, without slots\n");
+  const m = readManifest(dir);
+  assert.equal(m.declined.length, n); assert.ok(m.declined.every((k) => !m.fragments.includes(k)), "declined is not inserted");
+  const again = cli("update", dir, "--check"); assert.equal(again.status, 0, output(again));
+  assert.doesNotMatch(again.stdout, /fragments NOT inserted/, "they are not proposed again");
+  assert.deepEqual(readManifest(dir).declined, m.declined, "and an update keeps the record");
+  assert.match(cli("status", dir).stdout, new RegExp(`sections declined at adoption[^\\n]*\\(${n}\\)`));
+});
+
 // A file the kit stops shipping is the kit's to take back, as long as the project left it as installed.
 test("update removes what the kit no longer ships when it is untouched, and only then", () => {
   const root = kitCopy(), dir = tmp();
