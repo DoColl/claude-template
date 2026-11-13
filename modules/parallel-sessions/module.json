@@ -1,0 +1,15 @@
+{
+  "id": "parallel-sessions",
+  "title": "Parallel sessions: what each branch holds, seen before the merge",
+  "summary": "For several sessions on one repository: a read-only report of how far a branch is behind the default branch and which files it shares with the branches of the other worktrees, a skill to sync and to warn another session, and a guard that keeps session worktrees out of git.",
+  "phase": "day-1",
+  "order": 18,
+  "requires": ["core"],
+  "seed": [".worktreeinclude"],
+  "postInstall": [
+    "Run ./scripts/parallel-sessions.sh once from a worktree: it fetches the default branch, then says what moved under your branch and what the branches of the other worktrees hold.",
+    "Fill .worktreeinclude with the ignored files a new worktree needs, or leave it empty. If your sessions run the application, say in CLAUDE.md which ports and local services two sessions cannot both use: docs/conventions/parallel-sessions.md § What a worktree shares.",
+    "Nothing is added to CLAUDE.md: the skill and the note PS-2 of the gate carry the rule. To put it in front of every session, copy the line of docs/conventions/parallel-sessions.md § A line for CLAUDE.md.",
+    "Only the report and the guard have run, on the kit's own repository; the skill has never been loaded by a session: docs/conventions/parallel-sessions.md § Status."
+  ]
+}
