@@ -10,6 +10,13 @@ Each entry says what an installed project has to do beyond `update`. Seeds are n
 
 By hand: nothing. To take the module: `add . --modules eco-design`, then read the plugin and record it in `scripts/reviewed-plugins.json` before installing it.
 
+## 0.7.2
+
+- `parallel-sessions`: a branch that is behind the default branch catches up before its pull request is opened, whatever the files concerned — a rebase while no commit of the branch is pushed, a merge once one is. The skill has that step, the report says which of the two applies, and PS-2 now notes any branch that is behind the default branch as last fetched, not only one whose files changed on both sides. Still a note, never a failure.
+- The report's alarm reads `CATCH UP NOW` where it read `MERGE … NOW`.
+
+By hand: nothing.
+
 ## 0.7.1
 
 - `ready-on-green`: the job holds `contents: write` beside `pull-requests: write`. Its first live run found the pull request and was refused the call with the one permission. A wider token on a `workflow_run` job: the guard RG-2 still refuses any call but `gh pr list`, `gh pr view` and `gh pr ready`.

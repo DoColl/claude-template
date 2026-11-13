@@ -92,7 +92,7 @@
     },
     ".claude/skills/parallel-sessions/SKILL.md": {
       "module": "parallel-sessions",
-      "sha256": "65505fd47cb94f062547899612b0a75f594c977cd7c6f1c9d80e703217d16908"
+      "sha256": "a51bf3a48dd77c4ebc3acba0fb9a3d6b27c2af5ea62999715095f99eb6146166"
     },
     ".worktreeinclude": {
       "module": "parallel-sessions",
@@ -100,15 +100,15 @@
     },
     "docs/conventions/parallel-sessions.md": {
       "module": "parallel-sessions",
-      "sha256": "8e51d8d93cfa896cf27a2328ac6c6eb99c6381be7c31127e90c9fee1db28ad04"
+      "sha256": "df7c9dfd002182c1145b9ee51089a3374ccd51aea7a3728696bc8505058813e8"
     },
     "scripts/guards.d/18-parallel-sessions.sh": {
       "module": "parallel-sessions",
-      "sha256": "6ca58d25e829cd76ff1eb403be23b81475c04593c745578290c1e4c7bb570ac1"
+      "sha256": "f0649fe222d08ddbd39e0b1444ac023cd0f200fdad4c27dbe3c2809311e1c4a1"
     },
     "scripts/parallel-sessions.sh": {
       "module": "parallel-sessions",
-      "sha256": "2618fdb27eb7bd364ca02307dc1bf9da179096b05fe8bfb3dea2d39855e9ea03"
+      "sha256": "b56ba8e6e2e69191f018b058e62279440a3df47add037e92e6fad585572c501a"
     },
     ".claude/rules/dependabot.md": {
       "module": "ci-security",
