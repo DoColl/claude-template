@@ -1,0 +1,14 @@
+{
+  "id": "eco-design",
+  "title": "Eco-design rules through a pinned plugin",
+  "summary": "The convention for using the green-claude plugin (sobriety rules from RGESN and GR491, with a deterministic audit) as a plugin pinned at a reviewed commit: what it changes in a session, how its findings are reported and where a dismissed one is recorded. Nothing is copied from the plugin.",
+  "phase": "on-demand",
+  "order": 48,
+  "requires": ["core", "security-review"],
+  "postInstall": [
+    "Read the green-claude repository in full at one commit, then install the plugin and record `green-claude@green-claude` in scripts/reviewed-plugins.json (docs/conventions/eco-design.md § Setting it up). Until then the module installs a rule and nothing that applies it.",
+    "The plugin's audit script needs jq on each machine that runs it.",
+    "Decide once whether the project takes the plugin's optional hooks: they are wired per person, outside the repository, and PL-1 does not see them (docs/conventions/eco-design.md § Hooks).",
+    "This convention has never been run live by the kit's authors: do the live check of the page once."
+  ]
+}
