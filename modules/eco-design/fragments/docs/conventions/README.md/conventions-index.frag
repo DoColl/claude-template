@@ -1,1 +1,1 @@
-| `eco-design.md` | The green-claude plugin at a reviewed commit: what it changes in a session, findings as candidates, recorded decisions, optional hooks | PL-1 |
+| `eco-design.md` | The green-claude audit of every pull request: what counts as new, blocking, decisions, the pin, the detector left out, the plugin in sessions | ED-1..3 |

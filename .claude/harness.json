@@ -1,14 +1,15 @@
 {
   "kit": {
     "name": "claude-template",
-    "version": "0.8.0"
+    "version": "0.9.0"
   },
   "modules": [
     "core",
     "parallel-sessions",
     "ci-security",
     "ready-on-green",
-    "weekly-digest"
+    "weekly-digest",
+    "eco-design"
   ],
   "values": {
     "PROJECT_NAME": "claude-template",
@@ -185,11 +186,37 @@
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",
       "sha256": "dad990e4e14feb4ae4b306d45de7120921d80103f8ea1dc9c357d692f71d66b6"
+    },
+    ".github/workflows/eco-design.yml": {
+      "module": "eco-design",
+      "sha256": "f0bf50f3caf9590da6270745e938781c68ed0bf9d7d8076153b234a3f26dd129"
+    },
+    "docs/conventions/eco-design.md": {
+      "module": "eco-design",
+      "sha256": "b826fdf2a3bf686855c35094c3008f420d81ac24d139fbaa134aa1668d8c6ac3"
+    },
+    "scripts/eco-design-audit.mjs": {
+      "module": "eco-design",
+      "sha256": "f9cced9a66d433060a33db4dbb92a5c2b5182ad6f2a1bc8d9b7df981cec29587"
+    },
+    "scripts/eco-design-audit.test.mjs": {
+      "module": "eco-design",
+      "sha256": "92afd99a6ffbce5dc97231a94819723e68209af03f11e346553da125f809830f"
+    },
+    "scripts/eco-design.config.json": {
+      "module": "eco-design",
+      "seed": true
+    },
+    "scripts/guards.d/48-eco-design.sh": {
+      "module": "eco-design",
+      "sha256": "87c70df1844980c458c69d5afe968a3dbb40be18e3eeeb41966fd8ae69b4d5f4"
     }
   },
   "fragments": [
     "ci-security:CLAUDE.md#security-workflow",
     "ci-security:docs/conventions/README.md#conventions-index",
+    "eco-design:CLAUDE.md#conventions",
+    "eco-design:docs/conventions/README.md#conventions-index",
     "parallel-sessions:docs/conventions/README.md#conventions-index",
     "ready-on-green:docs/conventions/README.md#conventions-index",
     "weekly-digest:CLAUDE.md#conventions",

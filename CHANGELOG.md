@@ -4,6 +4,15 @@ What changed in the kit, newest first. A release is a commit of `main` tagged `v
 
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
+## 0.9.0
+
+- `eco-design` audits every pull request in CI. `eco-design.yml` fetches green-claude at the commit pinned in a new seed, `scripts/eco-design.config.json`, and `scripts/eco-design-audit.mjs` runs its audit on the files the pull request changes, as they were and as they are: a finding the pull request adds becomes an annotation and a row of the job summary, one the file already had does not. A manual run lists every finding of the branch. Advisory until the project sets `fail_on`; red when the audit could not run. The guard ED-1..3 pins the configuration, runs the script's tests and keeps the workflow at `contents: read` with no secret.
+- green-claude's detector of broken local links builds a shell command from the links of the audited file. The audit runs from a copy without it, or any awk detector that can run a command, and names the rule left out.
+- The module no longer requires `security-review`: the plugin in sessions is a separate decision, and its page says not to wire the plugin's hooks as they stand.
+- The kit's own repository installs it.
+
+By hand, for a project that installed `eco-design` at 0.8.0: `update` brings the workflow, the script and its test, the guard, the page and the new configuration seed. Replace the **Eco-design** bullet of `CLAUDE.md` and the `eco-design.md` row of `docs/conventions/README.md` with the module's fragments (`fragments/CLAUDE.md/conventions.frag`, `fragments/docs/conventions/README.md/conventions-index.frag`), then do the live check of `docs/conventions/eco-design.md` on the first pull request.
+
 ## 0.8.0
 
 - New module `eco-design`, on demand: the convention for using the `green-claude` plugin (eco-design rules drawn from RGESN and GR491, with a deterministic audit) at a commit the project has read, through the plugin pins of `security-review` (PL-1). It states what the plugin changes in a session, puts its rules below `CLAUDE.md`, security and the request, treats an audit hit as a candidate to confirm in context, and makes `.green-claude/decisions.md` a reviewed derogation list. One bullet in `CLAUDE.md`, one convention page. Nothing is copied from the plugin, and nothing in it has run live.
