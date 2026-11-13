@@ -84,6 +84,10 @@ else
            scripts/security-checks.sh scripts/guards.d/50-project.sh \
            scripts/guards.d/_lib.sh scripts/guards.d/60-new.sh \
            scripts/plugin-pins.mjs scripts/plugin-pins.test.mjs \
+           scripts/weekly-digest.mjs scripts/weekly-digest.test.mjs \
+           scripts/weekly-digest.config.mjs scripts/audit-gate.mjs \
+           scripts/audit-gate.test.mjs scripts/audit-allowlist.json \
+           scripts/parallel-sessions.sh Scripts/Audit-Allowlist.JSON \
            scripts/fetch-pinned-release.sh .gitleaks.toml .gitleaksignore \
            .github/zizmor.yml .github/zizmor.yaml scripts/auto-merge-paths.txt \
            SECURITY_REVIEW.md SECURITY_REVIEW_2026-11.md security_review.md \
@@ -98,6 +102,9 @@ else
            .github/workflows/ci.yml .github/dependabot.yml scripts/build.sh \
            scripts/security-checks.sh.md scripts/guards.dx/a.sh src/scripts/guards.d/a.sh \
            scripts/plugin-pins.md scripts/plugin-pins-report.mjs scripts/fetch.sh \
+           scripts/weekly-digest-notes.md scripts/weekly-digest.mjs.md \
+           scripts/audit-gate.md scripts/audit-allowlist.json.example \
+           scripts/parallel-sessions.md src/scripts/audit-gate.mjs \
            src/.gitleaks.toml .gitleaks.toml.md docs/zizmor.yml .github/zizmor.md \
            scripts/auto-merge-paths.txt.md SECURITY.md docs/SECURITY_REVIEW.md \
            SECURITY_REVIEW.md.txt; do
