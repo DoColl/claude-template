@@ -4,7 +4,14 @@ What changed in the kit, newest first. A release is a commit of `main` tagged `v
 
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
-## 0.3.1
+## 0.4.0
+
+- `core`: the `/retro` skill gets a closing form, run by the session at its end, and a new first destination — what concerns a kit-owned file or the installer becomes a drafted issue for the kit's repository, written in general terms and posted only on the user's yes. The skill is no longer `disable-model-invocation`.
+- `core`: new placeholder `KIT_REPOSITORY` (owner/name), whose default is the `repository` of `kit.json`. A fork names its own there, or a project with `update . --set KIT_REPOSITORY=<owner>/<name>`.
+- `core`: the `CLAUDE.md` skeleton has a working rule that closes a session with `/retro`.
+
+By hand, for an installed project — `CLAUDE.md` is a seed and does not follow the kit: add under "Working rules" the bullet "End a session that changed files with `/retro`." The skeleton keeps it that short on purpose: with every module installed it must leave the project 40% of the budget, and the skill's own description says when to run it. Two other working rules were shortened to pay for it, without changing what they ask.
+
 
 No module changed.
 

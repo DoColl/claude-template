@@ -70,7 +70,7 @@ node /path/to/claude-template/bin/harness.mjs show . scripts/security-checks.sh 
 
 | Module | Adopt | What it installs |
 |---|---|---|
-| `core` | day 1 | `CLAUDE.md` skeleton with its byte budget, `docs/` (conventions, ADR, runbooks), the findings catalogue and the `/retro` skill that feeds it, the gate `scripts/security-checks.sh` and its `guards.d/` |
+| `core` | day 1 | `CLAUDE.md` skeleton with its byte budget, `docs/` (conventions, ADR, runbooks), the findings catalogue and the `/retro` skill that feeds it at the end of a session and drafts an issue for the kit when the fault is in a kit file, the gate `scripts/security-checks.sh` and its `guards.d/` |
 | `git-hooks` | day 1 | `pre-commit` (gitleaks on staged changes) and `pre-push` (the gate, offline) |
 | `session-settings` | day 1, opt-in | a `.claude/settings.json` that denies reading `.env` files and `secrets/`, turns on the Bash sandbox without dropping a prompt, and a guard against the settings that widen every session |
 | `agents` | day 1 | `implementer`, `verifier`, `doc-sync` and `reviewer` agents, and the tested Bash allowlist that confines the read-only ones |
@@ -101,7 +101,7 @@ Each module's convention page says where its piece comes from and what has actua
 | `npm audit` gate | Ported from a production workflow. This generic variant has not run on GitHub yet. |
 | `ci-workflow` | Run once live, in a throwaway private repository, with a test job added: the documentation skip, the re-inclusion of `CLAUDE.md` and a run on `edited` after a retarget were watched. |
 | `auto-merge` | The original runs in production. This generic variant ran once live, with `claude-review`, in a throwaway private repository: it merged docs-only and code pull requests (the latter only after CI and the review), a retargeted one, and held an instruction file, a Dependabot bump of the Claude action and every held review. No `TEST_HOLD_RE` hold and no enforced ruleset were exercised. On the kit's own repository it is uninstalled, its ruleset not being enforced. |
-| `/retro` skill | Written for the kit. Never run live. |
+| `/retro` skill | Written for the kit. Never run live, in its closing form (end of a session, an issue drafted for the kit) either. |
 | `claude-review` | Run once live, in a throwaway private repository: the chain CI → review → merge fired, conforming changes passed and breaking ones held, with correct findings. A review re-run that passes was not exercised; the first-attempt rule is tested on tables only. |
 | `weekly-digest` | Unit-tested. Never run live, in the project it comes from either. |
 | `claude-rework` | Run once live, in a throwaway private repository: a hold led to a rework pull request into the held branch, merged by a human, then a pass and an unattended merge. The run found two defects, both fixed since (a missing permission; a second attempt on a re-run review). The `needs-human` hand-over and the held-path refusals were not exercised. |
@@ -188,7 +188,7 @@ node --test test/*.test.mjs     # unit tests, static rules on every module, end-
 
 `CLAUDE.md` at the root of this repository holds the rules for changing the kit; `docs/module-authoring.md` the contract for modules.
 
-A release is a version in `kit.json` and `package.json`, its entry at the top of `CHANGELOG.md` (a test holds the three together), `node bin/harness.mjs update .` for the root manifest, and nothing after the merge: `.github/workflows/release.yml` puts the tag `v<version>` on the commit of `main` that changes `kit.json`, and never moves an existing tag. That workflow is the kit's own, not a module; it has not run yet.
+A release is a version in `kit.json` and `package.json`, its entry at the top of `CHANGELOG.md` (a test holds the three together), `node bin/harness.mjs update .` for the root manifest, and nothing after the merge: `.github/workflows/release.yml` puts the tag `v<version>` on the commit of `main` that changes `kit.json`, and never moves an existing tag. That workflow is the kit's own, not a module; it ran once, on the merge that added it, and tagged that commit.
 
 The kit installs part of itself at its root — `core`, `ci-security` and `weekly-digest` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
 

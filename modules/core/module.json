@@ -1,14 +1,15 @@
 {
   "id": "core",
   "title": "Instruction file, docs skeleton and the local gate",
-  "summary": "CLAUDE.md under a byte budget, docs/ (conventions, ADR, runbooks), the findings catalogue with a /retro skill that feeds it, and scripts/security-checks.sh running every guard in scripts/guards.d/.",
+  "summary": "CLAUDE.md under a byte budget, docs/ (conventions, ADR, runbooks), the findings catalogue with a /retro skill that feeds it at the end of a session, and scripts/security-checks.sh running every guard in scripts/guards.d/.",
   "phase": "day-1",
   "order": 10,
   "required": true,
   "placeholders": {
     "PROJECT_NAME": { "prompt": "Project name", "default": "@dirname", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,60}" },
     "CLAUDE_MD_BUDGET": { "prompt": "CLAUDE.md size budget, in bytes", "default": "25000", "pattern": "[1-9][0-9]{3,5}" },
-    "DEFAULT_BRANCH": { "prompt": "Default branch", "default": "main", "pattern": "[A-Za-z0-9][A-Za-z0-9._/-]{0,60}" }
+    "DEFAULT_BRANCH": { "prompt": "Default branch", "default": "main", "pattern": "[A-Za-z0-9][A-Za-z0-9._/-]{0,60}" },
+    "KIT_REPOSITORY": { "prompt": "Repository of the kit (owner/name), where what a session finds in a kit file is reported", "default": "@kit-repository", "pattern": "[A-Za-z0-9][A-Za-z0-9_.-]{0,60}/[A-Za-z0-9_.-]{1,100}" }
   },
   "seed": [
     "CLAUDE.md",
