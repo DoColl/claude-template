@@ -6,7 +6,7 @@ Files: `.github/workflows/ready-on-green.yml`, `scripts/guards.d/41-ready-on-gre
 
 ## Status
 
-**Never run live.** The steps are the ones `auto-merge.yml` uses to lift a draft, which ran live with that workflow; this workflow, on its own, has not. Its guard (RG-1..3) is exercised by the kit's tests on the shipped file. Treat its first run as its test: open a draft pull request and watch.
+**Run once live, and it failed; the fix has not run yet.** On the first draft pull request after the workflow reached a default branch, the job took the green run and skipped the cancelled one, found the pull request and its head — and GitHub refused the call: `markPullRequestReadyForReview` is not accessible to a job token that holds `pull-requests: write` alone. `auto-merge.yml`, which lifts drafts, holds `contents: write` as well; the job now holds both. That it is the missing permission is inferred from that comparison, not yet seen: the next draft pull request is the test.
 
 ## Why
 
@@ -24,11 +24,11 @@ A session opens its pull requests as drafts, so that nothing takes one for merge
 
 ### Why `workflow_run`
 
-GitHub reads a `workflow_run` workflow from the default branch, whatever the pull request contains: a pull request cannot change what runs here. The price is a token with write permissions on an event anyone who can open a pull request causes. The workflow therefore checks nothing out, runs no action, takes one value from the event — the head commit, checked to be 40 hexadecimal characters — and holds one permission, `pull-requests: write`. zizmor reports the trigger (`dangerous-triggers`); the finding is silenced on that line, for these reasons.
+GitHub reads a `workflow_run` workflow from the default branch, whatever the pull request contains: a pull request cannot change what runs here. The price is a token with write permissions on an event anyone who can open a pull request causes. The workflow therefore checks nothing out, runs no action, takes one value from the event — the head commit, checked to be 40 hexadecimal characters — and holds the two permissions the call needs, `pull-requests: write` and `contents: write`. zizmor reports the trigger (`dangerous-triggers`); the finding is silenced on that line, for these reasons.
 
 ## Limits
 
-- `pull-requests: write` also allows editing, closing and commenting on pull requests. The workflow does none of it, and RG-2 fails if a call other than `gh pr list`, `gh pr view` and `gh pr ready` appears — a guard on the text of the file, which a pull request that edits both the file and the guard defeats. Review of the workflow is what covers that.
+- `contents: write` lets a job token push commits, tags and branches wherever no ruleset forbids it, and `pull-requests: write` also allows editing, closing and commenting on pull requests. Lifting a draft needs both; nothing here uses the rest. The workflow does none of it, and RG-2 fails if a call other than `gh pr list`, `gh pr view` and `gh pr ready` appears — a guard on the text of the file, which a pull request that edits both the file and the guard defeats. Review of the workflow is what covers that.
 - A draft lifted by the job token starts no other workflow: GitHub does not run workflows for events its own token causes.
 - If the call fails, the run shows a warning and the pull request stays a draft.
 
@@ -37,9 +37,10 @@ GitHub reads a `workflow_run` workflow from the default branch, whatever the pul
 `scripts/guards.d/41-ready-on-green.sh`:
 
 - **RG-1** — the only trigger is `workflow_run`.
-- **RG-2** — no checkout, no action, no merge, review, comment or push; `permissions: {}` at the top and one permission in the job, `pull-requests: write`.
+- **RG-2** — no checkout, no action, no merge, review, comment or push; `permissions: {}` at the top and two permissions in the job, `pull-requests: write` and `contents: write`.
 - **RG-3** — every job takes green `pull_request` runs of this repository only and refuses the branches a CI Claude session wrote; each `gh pr ready` follows a comparison of the head with the validated commit.
 
 ## History
 
 - Written for the kit from the draft-lifting steps of `auto-merge.yml`, for repositories that do not install that module.
+- First live run: the call was refused with `pull-requests: write` alone. `contents: write` added, RG-2 changed with it.

@@ -131,15 +131,15 @@
     },
     ".github/workflows/ready-on-green.yml": {
       "module": "ready-on-green",
-      "sha256": "90bdf097f204ddd1fb7edba52dc581dd111ba686dac848431666fc29b0048b2c"
+      "sha256": "9c827782c919dafa56cbcaeec525f82ac47df11d181199733ff1d54c17690f3b"
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "f0a853d301c243ba871e2a8fb2e56e01af14d0b9b40d69b0b6fbcb64c1cac9ec"
+      "sha256": "0e61302a8ec43f3aa34442e5086f8ac2f0a5e3020957bd4b57caf7dad5fc0eec"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",
-      "sha256": "93f0f5308958658d7c3cfbdc988f27751833b9cca35410b54d7469061ea0535e"
+      "sha256": "86e44232dd95f03cf9134c04c839dfb85bb7a243dc2215e1efae786545fdfe43"
     },
     ".github/workflows/weekly-digest.yml": {
       "module": "weekly-digest",

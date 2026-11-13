@@ -6,8 +6,7 @@ Each entry says what an installed project has to do beyond `update`. Seeds are n
 
 ## 0.6.1
 
-Installer only; no module changed.
-
+- `ready-on-green`: the job holds `contents: write` beside `pull-requests: write`. Its first live run found the pull request and was refused the call with the one permission. A wider token on a `workflow_run` job: the guard RG-2 still refuses any call but `gh pr list`, `gh pr view` and `gh pr ready`.
 - `update` no longer lists as a step an entry whose "By hand" part starts with "By hand: nothing." and goes on with a remark. Seen on the first live update across 0.5.0.
 
 By hand: nothing.

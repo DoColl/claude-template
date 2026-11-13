@@ -5,7 +5,10 @@
 #   RG-1  its only trigger is workflow_run. A pull_request trigger would run
 #         the file as the pull request writes it, with the same token.
 #   RG-2  it never checks the repository out, never merges, approves,
-#         comments or pushes, and holds one permission: pull-requests: write.
+#         comments or pushes, and holds the two permissions lifting a draft
+#         needs with the job token: pull-requests: write and contents: write.
+#         contents: write would let a step push: the same check refuses any
+#         call but `gh pr list`, `gh pr view` and `gh pr ready`.
 #   RG-3  every job refuses a run that is not a green pull_request run of
 #         this repository, and a branch a CI Claude session wrote; the draft
 #         is lifted only after the head is read again and compared.
@@ -27,10 +30,10 @@ bad=""
 grep -nE '^\s*-?\s*uses:' "$W" >/dev/null && bad="$bad an action (uses:);"
 grep -nE 'gh pr (merge|review|comment|close|edit)|/merge|git push|gh api' "$W" | grep -vE '^\s*[0-9]+:\s*#' >/dev/null && bad="$bad a call other than \`gh pr list\`, \`gh pr view\` and \`gh pr ready\`;"
 perms=$(grep -E '^\s+(actions|attestations|checks|contents|deployments|discussions|id-token|issues|models|packages|pages|pull-requests|repository-projects|security-events|statuses): ' "$W" | sed -E 's/ *#.*//; s/^ +//' | sort | tr '\n' ' ')
-[ "$perms" = "pull-requests: write " ] || bad="$bad permissions other than pull-requests: write (${perms:-none});"
+[ "$perms" = "contents: write pull-requests: write " ] || bad="$bad permissions other than pull-requests: write and contents: write (${perms:-none});"
 grep -qxF 'permissions: {}' "$W" || bad="$bad no \`permissions: {}\` at workflow level;"
 if [ -z "$bad" ]; then
-  ok "RG-2: no checkout, no action, no merge; one permission, pull-requests: write"
+  ok "RG-2: no checkout, no action, no merge; two permissions, pull-requests: write and contents: write"
 else
   fail "RG-2: $W holds$bad"
 fi

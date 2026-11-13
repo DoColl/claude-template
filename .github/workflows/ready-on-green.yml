@@ -16,7 +16,7 @@ on:
   # request cannot change what runs here. The trigger has elevated
   # permissions for that same reason, which is why the job below refuses
   # forks, takes no input from the pull request but its head commit, and
-  # holds one permission.
+  # holds the two permissions the one call needs.
   workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: ["CI"]
     types: [completed]
@@ -46,7 +46,11 @@ jobs:
       group: ready-on-green-${{ github.event.workflow_run.head_sha }}
       cancel-in-progress: false
     permissions:
-      pull-requests: write # mark ready; nothing else is written
+      # Both are needed to lift a draft with the job token: with
+      # pull-requests: write alone GitHub refuses the call ("Resource not
+      # accessible by integration"), as the first live run showed.
+      pull-requests: write # mark ready
+      contents: write # required by the same call; nothing is pushed
     steps:
       - name: Find PR for head_sha
         id: find-pr
