@@ -10,6 +10,6 @@
     "The workflow fetches green-claude at the commit in scripts/eco-design.config.json and runs it on every pull request: the kit's authors read it at that commit; read it yourself, or put a commit you have read there (docs/conventions/eco-design.md § Bumping the pin).",
     "Advisory until fail_on is set in scripts/eco-design.config.json; a failing check holds a merge only once Eco-design audit is a required check of the default branch's ruleset.",
     "Run the workflow once by hand on the default branch: it lists the findings already there, which pull requests are not charged with.",
-    "The workflow has never run live: do the live check of docs/conventions/eco-design.md on its first pull request."
+    "The workflow has run once live, on the kit's own repository: do the live check of docs/conventions/eco-design.md on your first pull request."
   ]
 }

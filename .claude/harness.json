@@ -193,7 +193,7 @@
     },
     "docs/conventions/eco-design.md": {
       "module": "eco-design",
-      "sha256": "b826fdf2a3bf686855c35094c3008f420d81ac24d139fbaa134aa1668d8c6ac3"
+      "sha256": "315a02d4381e2a4902296244352619120c81951b4efa6d6dc6ae5a3c37989ecb"
     },
     "scripts/eco-design-audit.mjs": {
       "module": "eco-design",

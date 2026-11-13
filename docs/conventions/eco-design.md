@@ -5,7 +5,8 @@
 ## Status
 
 - `scripts/eco-design-audit.mjs` is unit-tested (ED-2), against a stand-in written in the output format of green-claude's audit: which files are audited, what a change is charged with, the detectors left out, the report and the exit code.
-- The workflow has **never run live**. Its first run will be the first time green-claude's audit runs for the kit's authors: they read it, they did not execute it.
+- The workflow **ran live** on the kit's own repository, on the pull request that added it. Its first run stopped in the script, on the shape of the real rule catalogues; fixed, and the tests' stand-in now has that shape. Its second run fetched green-claude at the pinned commit, audited the 8 changed files of covered kinds, reported 12 new findings — 10 as annotations, all 12 in the log — named ECO-HEB-06 as not audited, and stayed green with `fail_on: none`. None of the 12 held in context (a nested iteration over a few small catalogues, a command-line tool's own output, small files read whole, an `exit` inside a string taken for dead code): candidates, as this page says. The log and the annotations were read; the job summary was not read back.
+- Not exercised: the manual inventory, a blocking `fail_on` on a real finding, a decision that silences one, a required check holding a merge, a pull request from a fork.
 - The reading, at the commit named under Sources: the audit script, its helpers, every detector and inspector, the skill file, the hook scripts, the plugin manifests and the licence files, in full. The rule catalogues were read as data: their patterns go to `grep`, their text to the report.
 
 ## Why
@@ -114,4 +115,4 @@ Nothing checks that a finding was read, or who wrote a line of `.green-claude/de
 ## History
 
 - 0.8.0 — the convention for the plugin in sessions, pinned as a plugin.
-- 0.9.0 — the audit runs in CI on every pull request; the plugin is no longer needed for it; the detector that runs a command is left out.
+- 0.9.0 — the audit runs in CI on every pull request; the plugin is no longer needed for it; the detector that runs a command is left out. First live run on the kit's own pull request.
