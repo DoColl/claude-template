@@ -14,7 +14,7 @@ node <kit>/bin/harness.mjs status .
 node <kit>/bin/harness.mjs update . --check        # writes nothing; exit 3 when behind
 ```
 
-Read `<kit>/CHANGELOG.md` from the version `status` names to the kit's: each entry has a "By hand" part that `update` does not do.
+`update` ends its report, `--check` included, with the "BY HAND" steps of the versions it crosses, taken from `<kit>/CHANGELOG.md`: what no update does. Read the entries themselves for the rest of what changed.
 
 ## 2. Choose the scope with the user
 

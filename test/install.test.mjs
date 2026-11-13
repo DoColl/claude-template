@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { entries as changelogEntries, byHandBetween } from "../lib/changelog.mjs";
 import { loadKit, listModules, KIT_ROOT } from "../lib/kit.mjs";
 import { buildPlan, applyPlan, summarize, readManifest, drift, walk, MANIFEST } from "../lib/install.mjs";
 
@@ -384,6 +385,43 @@ test("the manifest names the commit of the kit's checkout, and versions agree ac
   assert.equal(JSON.parse(read(KIT_ROOT, "package.json")).version, kit.version);
   assert.match(read(KIT_ROOT, "CHANGELOG.md"), new RegExp(`^## ${kit.version.replaceAll(".", "\\.")}( |$)`, "m"), "the current version has its entry in CHANGELOG.md");
   assert.equal(read(KIT_ROOT, "CHANGELOG.md").match(/^## (\d+\.\d+\.\d+)/m)[1], kit.version, "and it is the first one");
+  for (const block of read(KIT_ROOT, "CHANGELOG.md").split(/^(?=## \d)/m).slice(1)) assert.equal((block.match(/^By hand\b/gm) ?? []).length, 1, `CHANGELOG.md: one "By hand" part per entry — a second one is an entry that lost its heading:\n${block.slice(0, 80)}`);
+  for (const e of changelogEntries(KIT_ROOT)) assert.notEqual(e.byHand, null, `CHANGELOG.md § ${e.version} has no "By hand" part ("By hand: nothing." when there is none)`);
+});
+
+// Seeds never follow the kit: what a version asks to report by hand is in the changelog, and `update` shows it.
+test("update lists the By hand steps of the versions it crosses, until the manifest names the new one", () => {
+  const root = kitCopy(), dir = tmp();
+  for (const rel of ["bin", "lib"]) fs.cpSync(path.join(KIT_ROOT, rel), path.join(root, rel), { recursive: true });
+  const version = (v) => fs.writeFileSync(path.join(root, "kit.json"), JSON.stringify({ name: "claude-template", version: v, repository: "example/kit" }));
+  version("1.0.0");
+  applyPlan(buildPlan({ kit: loadKit(root), target: dir, given: { PROJECT_NAME: "demo-app" } }));
+  version("1.2.0");
+  write(root, "CHANGELOG.md", "# Changelog\n\n## 1.3.0\n\nNot there yet.\n\nBy hand: a step of the future.\n\n## 1.2.0\n\n- A thing.\n\nBy hand, for an installed project: add the new line\nto the skeleton.\n\n## 1.1.0\n\nBy hand: nothing.\n\n## 1.0.0\n\nBy hand: an old step.\n");
+  write(path.join(root, "modules/core/files"), "docs/conventions/new-page.md", "# New\n");
+  const up = (...args) => spawnSync(process.execPath, [path.join(root, "bin/harness.mjs"), "update", dir, ...args], { encoding: "utf8", input: "" });
+  const check = up("--check"); assert.equal(check.status, 3, output(check));
+  assert.match(check.stdout, /BY HAND[^\n]*\(1 version\(s\) crossed[^\n]*\n  1\.2\.0  By hand, for an installed project: add the new line\n +to the skeleton\./);
+  assert.doesNotMatch(check.stdout, /old step|of the future|1\.1\.0/, "only the versions after the recorded one, up to the kit's, and only those with a step");
+  assert.match(check.stdout, /behind the kit: 1 item/, "a step is not counted as behind");
+  assert.match(up().stdout, /BY HAND/, "shown by the update that crosses the version");
+  const after = up("--check"); assert.equal(after.status, 0); assert.doesNotMatch(after.stdout, /BY HAND/, "and not once the manifest names it");
+  assert.deepEqual(byHandBetween(kitCopy(), "1.0.0", "9.9.9"), [], "a kit without a changelog has no step to show");
+});
+
+// `status . | head`: the reader closes, the command is not at fault.
+test("a reader that closes early stops the report, not the command", async () => {
+  const dir = tmp(); install(dir, []);
+  const closed = (...args) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [CLI, ...args], { stdio: ["ignore", "pipe", "pipe"] });
+    let err = ""; child.stderr.on("data", (d) => { err += d; });
+    child.stdout.destroy();
+    child.on("close", (code) => resolve({ code, err }));
+  });
+  const st = await closed("status", dir); assert.equal(st.code, 0, st.err); assert.equal(st.err, "", "no stack trace");
+  fs.rmSync(path.join(dir, "scripts/security-checks.sh"));
+  const up = await closed("update", dir); assert.equal(up.code, 0, up.err); assert.equal(up.err, "");
+  assert.ok(fs.existsSync(path.join(dir, "scripts/security-checks.sh")), "the files are written all the same");
 });
 
 test("the CLI refuses bad input and --dry-run writes nothing", () => {
