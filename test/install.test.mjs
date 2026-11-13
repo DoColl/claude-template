@@ -32,6 +32,31 @@ function gate(dir, ...args) {
 }
 const output = (r) => `${r.stdout}\n${r.stderr}`;
 
+// What a session loads of CLAUDE.md: the file without its block-level HTML comments. Same narrow definition as CM-1
+// (a comment opening at column 0, outside a code fence, whose closing --> ends its line), written a second time here
+// on purpose: the test below compares the two.
+function loadedBytes(text) {
+  let hidden = 0, pending = 0, inComment = false, fence = "";
+  for (const line of text.split("\n").slice(0, text.endsWith("\n") ? -1 : undefined)) {
+    const len = Buffer.byteLength(line) + 1;
+    if (inComment) {
+      const i = line.indexOf("-->");
+      if (i < 0) { pending += len; continue; }
+      if (!line.slice(i + 3).trim()) hidden += pending + len;
+      inComment = false; pending = 0; continue;
+    }
+    const f = /^ {0,3}(```|~~~)/.exec(line)?.[1][0] ?? "";
+    if (fence) { if (f === fence) fence = ""; continue; }
+    if (f) { fence = f; continue; }
+    if (line.startsWith("<!--")) {
+      const i = line.indexOf("-->");
+      if (i < 0) { inComment = true; pending = len; continue; }
+      if (!line.slice(i + 3).trim()) hidden += len;
+    }
+  }
+  return Buffer.byteLength(text) - hidden;
+}
+
 for (const id of ALL) {
   test(`${id}: installs with what it requires, leaves no placeholder, passes its own gate`, () => {
     const dir = tmp();
@@ -50,8 +75,12 @@ test("all modules together: one gate, every fragment placed, CLAUDE.md well unde
   const r = gate(dir);
   assert.equal(r.status, 0, output(r));
   const budget = Number(/harness:budget (\d+)/.exec(read(dir, "CLAUDE.md"))[1]);
-  const size = fs.statSync(path.join(dir, "CLAUDE.md")).size;
-  assert.ok(size <= budget * 0.6, `CLAUDE.md is ${size} bytes with every module: leave the project at least 40% of its ${budget}-byte budget`);
+  const size = loadedBytes(read(dir, "CLAUDE.md"));
+  assert.match(r.stdout, new RegExp(`CM-1: CLAUDE\\.md loads ${size} bytes into a session`), "the guard and this test count the same bytes");
+  assert.ok(size <= budget * 0.6, `CLAUDE.md loads ${size} bytes with every module: leave the project at least 40% of its ${budget}-byte budget`);
+  const rules = fs.readdirSync(path.join(dir, ".claude/rules"));
+  assert.ok(rules.length >= 4, "the path-scoped rules are installed");
+  assert.equal(run(dir, "git", ["check-ignore", "-q", `.claude/rules/${rules[0]}`]).status, 1, "a rule file is not ignored by git: it is shared, like an agent");
   const passes = /\n\n((?:(?:1\. | {3})[^\n]*\n)+)\nInstruction files are executed/.exec(read(dir, "CLAUDE.md"))?.[1].split("\n").filter((l) => l.startsWith("1. "));
   assert.ok(passes?.length >= 5, "the review passes of every module and the built-in ones form one numbered list, with nothing at the left margin between them");
   for (const p of passes) assert.match(p, /^1\. \*\*[^*]+\*\* \(tiers? [23]/, p);
@@ -507,7 +536,26 @@ test("CM-1 and CM-2: the budget and the pointers of CLAUDE.md are enforced", () 
   install(dir, []);
   const original = read(dir, "CLAUDE.md");
   write(dir, "CLAUDE.md", `${original}\n${"x".repeat(26000)}\n`);
-  let r = gate(dir); assert.equal(r.status, 1); assert.match(r.stderr, /CM-1: CLAUDE\.md is \d+ bytes, over its budget of 25000/);
+  let r = gate(dir); assert.equal(r.status, 1); assert.match(r.stderr, /CM-1: CLAUDE\.md loads \d+ bytes into a session \([^)]*\), over its budget of 25000/);
+  // A block-level comment costs no context, so no budget; the same text inline, indented, in a code fence or left open does.
+  const pad = "x".repeat(26000);
+  for (const [hiddenForm, why] of [[`<!-- ${pad} -->`, "one line"], [`<!--\n${pad}\n-->`, "several lines"]]) {
+    write(dir, "CLAUDE.md", `${original}\n${hiddenForm}\n`);
+    assert.equal(gate(dir).status, 0, `a block-level comment (${why}) is not counted`);
+  }
+  for (const [counted, why] of [[`text <!-- ${pad} -->`, "inline"], [`   <!-- ${pad} -->`, "indented"], [`<!-- ${pad} --> text`, "followed by text"], [`<!-- ${pad}`, "never closed"], ["```\n<!-- " + pad + " -->\n```", "in a code fence"], ["~~~\n```\n<!-- " + pad + " -->\n~~~", "in a fence that holds another fence marker"]]) {
+    write(dir, "CLAUDE.md", `${original}\n${counted}\n`);
+    r = gate(dir); assert.equal(r.status, 1, `a comment ${why} is counted`); assert.match(r.stderr, /CM-1: CLAUDE\.md loads/);
+  }
+  // A rule file without `paths:` is loaded at launch: it counts. Scoped, it does not.
+  write(dir, "CLAUDE.md", original);
+  write(dir, ".claude/rules/big.md", `# Big\n\n${pad}\n`);
+  r = gate(dir); assert.equal(r.status, 1, "an unscoped rule counts against the budget"); assert.match(r.stderr, /26\d\d\d in unscoped \.claude\/rules/);
+  write(dir, ".claude/rules/big.md", `---\ndescription: x\n---\n\n${pad}\n`);
+  assert.equal(gate(dir).status, 1, "a frontmatter without paths: is still unscoped");
+  write(dir, ".claude/rules/big.md", `---\npaths:\n  - "src/**"\n---\n\n${pad}\n`);
+  assert.equal(gate(dir).status, 0, "a path-scoped rule is loaded on demand: not counted");
+  fs.rmSync(path.join(dir, ".claude/rules"), { recursive: true });
   write(dir, "CLAUDE.md", original.replace(/<!-- harness:budget \d+ -->\n/, ""));
   r = gate(dir); assert.equal(r.status, 1); assert.match(r.stderr, /CM-1: CLAUDE\.md has no 'harness:budget/);
   write(dir, "CLAUDE.md", `${original}\n- **Ghost**: a rule. → \`docs/conventions/ghost.md\`\n`);

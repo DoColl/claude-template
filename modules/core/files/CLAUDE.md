@@ -5,8 +5,10 @@
   Operative rules only. This file is loaded into every session and into every
   sub-agent that does not opt out, so it stays under the byte budget declared
   above (guard CM-1 fails the gate past it). Detail, history and reasons go to
-  docs/conventions/<slug>.md; a rule here is at most five lines and ends with a
-  pointer to that file. Block-level HTML comments such as this one are not sent
+  docs/conventions/<slug>.md; a rule here is at most 400 bytes and ends with a
+  pointer to that file. A rule that only matters for some files goes to
+  .claude/rules/<slug>.md with a `paths:` list instead: it loads when a session
+  touches them and costs nothing here. Block-level HTML comments such as this one are not sent
   to the model: they are notes for whoever edits the file.
 -->
 
@@ -32,7 +34,7 @@ Guidance for Claude Code in the __HARNESS_PROJECT_NAME__ repository. This file h
 <!-- harness:slot delegation -->
 ## Key conventions
 
-<!-- One bullet per rule — **Name**: the rule, at most five lines. → `docs/conventions/<slug>.md` -->
+<!-- One bullet per rule — **Name**: the rule, at most 400 bytes. → `docs/conventions/<slug>.md` -->
 <!-- TODO(harness): the project's own conventions (data model invariants, API error format, naming, what must never be logged). -->
 - **CLAUDE.md stays a budgeted index**: operative rules only, under the byte budget on its `harness:budget` line (CM-1); every `docs/` path it names must exist (CM-2). A new rule is a short bullet here plus its detail file. → `docs/conventions/claude-md.md`
 - **A rule that matters is a check**: every fixed bug or review finding gets an ID, a line in `SECURITY_REVIEW.md` and a guard in `scripts/guards.d/`; one gate runs them, before a push and in CI where a workflow calls it. → `docs/conventions/local-gate.md`
@@ -81,7 +83,7 @@ Doc and code stay in sync at every commit on the default branch: when a change a
 - New module or endpoint → `ARCHITECTURE.md` (and the generated API description, if any)
 - Schema or migration → the data-model section of the specification
 - New environment variable → `.env.example` and the README
-- New convention or constraint → a short bullet under "Key conventions" plus `docs/conventions/<slug>.md` and its row in `docs/conventions/README.md`
+- New convention or constraint → a short bullet under "Key conventions" (or, when it only concerns some files, `.claude/rules/<slug>.md` with a `paths:` list) plus `docs/conventions/<slug>.md` and its row in `docs/conventions/README.md`
 - CI or deployment change → the README's deployment section
 - Operational procedure → `docs/runbook/`
 - Architectural decision → a new ADR in `docs/adr/`

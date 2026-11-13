@@ -1,6 +1,6 @@
 # <Topic>
 
-**Rule (CLAUDE.md § Key conventions):** the rule as `CLAUDE.md` states it, in one or two sentences.
+**Rule (CLAUDE.md § Key conventions):** the rule as `CLAUDE.md` states it, in one or two sentences. For a rule scoped to some files, name its `.claude/rules/<slug>.md` and the paths that load it instead.
 
 ## Why
 
