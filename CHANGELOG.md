@@ -4,6 +4,12 @@ What changed in the kit, newest first. A release is a commit of `main` tagged `v
 
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
+## 0.8.0
+
+- New module `eco-design`, on demand: the convention for using the `green-claude` plugin (eco-design rules drawn from RGESN and GR491, with a deterministic audit) at a commit the project has read, through the plugin pins of `security-review` (PL-1). It states what the plugin changes in a session, puts its rules below `CLAUDE.md`, security and the request, treats an audit hit as a candidate to confirm in context, and makes `.green-claude/decisions.md` a reviewed derogation list. One bullet in `CLAUDE.md`, one convention page. Nothing is copied from the plugin, and nothing in it has run live.
+
+By hand: nothing. To take the module: `add . --modules eco-design`, then read the plugin and record it in `scripts/reviewed-plugins.json` before installing it.
+
 ## 0.7.1
 
 - `ready-on-green`: the job holds `contents: write` beside `pull-requests: write`. Its first live run found the pull request and was refused the call with the one permission. A wider token on a `workflow_run` job: the guard RG-2 still refuses any call but `gh pr list`, `gh pr view` and `gh pr ready`.
