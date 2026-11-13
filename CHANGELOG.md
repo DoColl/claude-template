@@ -37,7 +37,6 @@ By hand: nothing.
 - `core`: the `CLAUDE.md` skeleton has a working rule that closes a session with `/retro`.
 
 By hand, for an installed project — `CLAUDE.md` is a seed and does not follow the kit: add under "Working rules" the bullet "End a session that changed files with `/retro`." The skeleton keeps it that short on purpose: with every module installed it must leave the project 40% of the budget, and the skill's own description says when to run it. Two other working rules were shortened to pay for it, without changing what they ask.
-||||||| parent of 54888ba (CLAUDE.md budget counts what a session loads; file-bound rules move to .claude/rules)
 
 ## 0.3.1
 
