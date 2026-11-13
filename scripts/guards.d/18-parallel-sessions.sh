@@ -6,11 +6,12 @@
 #         checkout of the same repository: staged from the main checkout by a
 #         `git add -A`, it is recorded as a repository inside the repository,
 #         at whatever commit a session left it.
-#   PS-2  a note, never a failure: the default branch, as last fetched, changed
-#         files this branch also changes — merge it before pushing. It says
-#         nothing when it has nothing to report, because the last fetch may be
-#         old and silence must not read as "up to date"; and nothing on a
-#         runner, where the pull request page says the same.
+#   PS-2  a note, never a failure: this branch is behind the default branch as
+#         last fetched — catch up before a pull request — and, first of all,
+#         that branch changed files this one also changes — catch up before
+#         pushing. It says nothing when it has nothing to report, because the
+#         last fetch may be old and silence must not read as "up to date"; and
+#         nothing on a runner, where the pull request page says the same.
 . "$(dirname "$0")/_lib.sh"
 
 if ! in_git; then
