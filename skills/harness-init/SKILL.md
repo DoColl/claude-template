@@ -55,6 +55,7 @@ The installer prints "Next steps" and counts the `TODO(harness)` markers; `statu
 - `.claude/hooks/agent-bash-guard.config.json` (agents module) — the exact verification commands: tests, build, type-check. Nothing that writes, installs or reaches the network.
 - `.claude/skills/project-security-review/SKILL.md` (security-review module) — the same sensitive areas, and the invariants.
 - `.claude/settings.json` (session-settings module) — a `Read(…)` deny rule for each place the codebase shows secrets are kept; drop the `.env` example carve-outs the project does not use. Never add an allow rule here on your own.
+- `.worktreeinclude` (parallel-sessions module) — the ignored files a fresh worktree needs to build and run, as the codebase shows them (a local environment file, a local configuration). Nothing that must differ between two sessions; leave it empty when there is none.
 
 **Stay inside the gaps.** This session fills `TODO(harness)` markers. It does not write an ADR, a convention page, a runbook, a guard or a finding unless the user asks for one: those record decisions and incidents the project has not had yet, and each one written now is a file someone must review.
 

@@ -1,10 +1,11 @@
 {
   "kit": {
     "name": "claude-template",
-    "version": "0.6.1"
+    "version": "0.7.1"
   },
   "modules": [
     "core",
+    "parallel-sessions",
     "ci-security",
     "ready-on-green",
     "weekly-digest"
@@ -89,6 +90,26 @@
       "module": "core",
       "sha256": "4627407a1f45787a50b900c345780cf9d84113841b3f16b206d74873dc04c790"
     },
+    ".claude/skills/parallel-sessions/SKILL.md": {
+      "module": "parallel-sessions",
+      "sha256": "65505fd47cb94f062547899612b0a75f594c977cd7c6f1c9d80e703217d16908"
+    },
+    ".worktreeinclude": {
+      "module": "parallel-sessions",
+      "seed": true
+    },
+    "docs/conventions/parallel-sessions.md": {
+      "module": "parallel-sessions",
+      "sha256": "8e51d8d93cfa896cf27a2328ac6c6eb99c6381be7c31127e90c9fee1db28ad04"
+    },
+    "scripts/guards.d/18-parallel-sessions.sh": {
+      "module": "parallel-sessions",
+      "sha256": "6ca58d25e829cd76ff1eb403be23b81475c04593c745578290c1e4c7bb570ac1"
+    },
+    "scripts/parallel-sessions.sh": {
+      "module": "parallel-sessions",
+      "sha256": "2618fdb27eb7bd364ca02307dc1bf9da179096b05fe8bfb3dea2d39855e9ea03"
+    },
     ".claude/rules/dependabot.md": {
       "module": "ci-security",
       "sha256": "5df6b5a94ee7baa55fa04ad4835eb8a4aa7f47490636ec917be3944269787046"
@@ -169,6 +190,7 @@
   "fragments": [
     "ci-security:CLAUDE.md#security-workflow",
     "ci-security:docs/conventions/README.md#conventions-index",
+    "parallel-sessions:docs/conventions/README.md#conventions-index",
     "ready-on-green:docs/conventions/README.md#conventions-index",
     "weekly-digest:CLAUDE.md#conventions",
     "weekly-digest:docs/conventions/README.md#conventions-index"

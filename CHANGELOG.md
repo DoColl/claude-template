@@ -4,13 +4,21 @@ What changed in the kit, newest first. A release is a commit of `main` tagged `v
 
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
-## 0.6.1
+## 0.7.1
 
 - `ready-on-green`: the job holds `contents: write` beside `pull-requests: write`. Its first live run found the pull request and was refused the call with the one permission. A wider token on a `workflow_run` job: the guard RG-2 still refuses any call but `gh pr list`, `gh pr view` and `gh pr ready`.
 - Statuses: `auto-merge` with `TEST_HOLD_RE` set by `--set`, the `harness-update` skill and the closing form of `/retro` have each run once live; their pages and `README.md` say what was seen.
 - `update` no longer lists as a step an entry whose "By hand" part starts with "By hand: nothing." and goes on with a remark. Seen on the first live update across 0.5.0.
 
 By hand: nothing.
+
+## 0.7.0
+
+- New module `parallel-sessions`, for a repository several sessions work in at once, each in its worktree. `scripts/parallel-sessions.sh` reports how far a branch is behind the default branch, which files it shares with the branches of the other worktrees and whether merging two of them would conflict; it reads refs only, so it sees commits, never uncommitted work. A skill of the same name carries the procedure: syncing, the order of merges, telling another session. The guard keeps session worktrees out of git (PS-1) and notes a base that went stale on the branch's files (PS-2, never a failure). A commented `.worktreeinclude` seed comes with it.
+- The module adds no bullet to `CLAUDE.md`: its skill and PS-2 carry the rule, and its page holds the line for a project that wants one.
+- The kit's own repository installs it.
+
+By hand: nothing. To take the module: `add . --modules parallel-sessions`.
 
 ## 0.6.0
 

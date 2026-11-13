@@ -654,3 +654,127 @@ test("session-settings: the gate goes red when the settings file widens what eve
   assert.equal(run(dir, "git", ["add", "-f", ".claude/settings.local.json"]).status, 0);
   assert.match(run(dir, "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "" } }).stderr, /FAIL\s+SS-3:/);
 });
+
+test("parallel-sessions: PS-1 goes red when session worktrees are no longer ignored, or one is tracked", () => {
+  if (!kit.modules.has("parallel-sessions")) return;
+  const dir = tmp();
+  install(dir, ["parallel-sessions"]);
+  const r = gate(dir);
+  assert.equal(r.status, 0, output(r));
+  assert.match(r.stdout, /ok\s+PS-1: /);
+  assert.doesNotMatch(output(r), /PS-2/, "before the first commit there is nothing to compare, and nothing is said");
+  const ignore = read(dir, ".gitignore");
+  write(dir, ".gitignore", `${ignore}!.claude/worktrees/\n`);
+  assert.match(gate(dir).stderr, /FAIL\s+PS-1: \.claude\/worktrees\/ is not ignored/);
+  write(dir, ".gitignore", ignore);
+  assert.equal(gate(dir).status, 0);
+  write(dir, ".claude/worktrees/w/file", "x\n");
+  assert.equal(run(dir, "git", ["add", "-f", ".claude/worktrees/w/file"]).status, 0);
+  const tracked = gate(dir);
+  assert.equal(tracked.status, 1, output(tracked));
+  assert.match(tracked.stderr, /FAIL\s+PS-1: git tracks paths under \.claude\/worktrees\//);
+});
+
+// The report reads refs, which every worktree shares, so all it says can be staged in a scratch repository:
+// a bare "origin", a main checkout, and worktrees where Claude Code puts them. Git runs without the user's
+// configuration: a signing key or a hook path of the machine has no say in what the report prints.
+test("parallel-sessions: the report names a stale base, the files two branches share and a merge that conflicts", () => {
+  if (!kit.modules.has("parallel-sessions")) return;
+  const root = tmp(), origin = path.join(root, "origin.git"), dir = path.join(root, "proj");
+  const env = { ...ENV, CI: "", GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
+  const git = (cwd, ...args) => { const r = run(cwd, "git", ["-c", "commit.gpgsign=false", ...args], { env }); assert.equal(r.status, 0, `git ${args.join(" ")}\n${output(r)}`); return r.stdout; };
+  const report = (cwd, ...args) => run(cwd, "bash", ["scripts/parallel-sessions.sh", ...args], { env });
+  const wt = (name) => path.join(dir, ".claude/worktrees", name);
+  fs.mkdirSync(dir);
+  git(root, "init", "-q", "--bare", "-b", "main", origin);
+  install(dir, ["parallel-sessions"]);
+  git(dir, "init", "-q", "-b", "main");
+  write(dir, "base.txt", "a\nb\nc\n"); write(dir, "shared.txt", "1\n2\n3\n"); write(dir, "landed.txt", "x\n");
+  git(dir, "add", "-A"); git(dir, "commit", "-qm", "init");
+  git(dir, "remote", "add", "origin", origin); git(dir, "push", "-q", "origin", "main");
+  // A branch name may hold what a shell would run: it is printed, never evaluated.
+  const hostile = "x;touch${IFS}PWNED$(touch${IFS}PWNED2)`touch${IFS}PWNED3`";
+  for (const [name, branch] of [["a", "feat-a"], ["b", "feat-b"], ["c", "feat-c"], ["d", "feat-d"], ["e", hostile]]) git(dir, "worktree", "add", "-q", wt(name), "-b", branch);
+  write(wt("a"), "base.txt", "A\nb\nc\n"); write(wt("a"), "shared.txt", "one\n2\n3\n"); git(wt("a"), "commit", "-qam", "a");
+  write(wt("a"), "not-committed.txt", "work in progress\n");
+  write(wt("b"), "shared.txt", "uno\n2\n3\n"); write(wt("b"), "other.txt", "o\n"); git(wt("b"), "add", "-A"); git(wt("b"), "commit", "-qm", "b");
+  write(wt("c"), "landed.txt", "x\ny\n"); git(wt("c"), "commit", "-qam", "c");
+  write(wt("e"), "shared.txt", "1\n2\nthree\n"); git(wt("e"), "commit", "-qam", "e");
+  // The default branch moves: base.txt changes under feat-a, and feat-c lands as a squash. The local main stays behind.
+  write(dir, "base.txt", "a\nb\nC\n"); write(dir, "landed.txt", "x\ny\n"); git(dir, "commit", "-qam", "main moves"); git(dir, "push", "-q", "origin", "main");
+  git(dir, "reset", "-q", "--hard", "HEAD~1");
+
+  const a = report(wt("a"));
+  assert.equal(a.status, 0, output(a));
+  assert.match(a.stdout, /^parallel-sessions: feat-a\nbase: origin\/main at [0-9a-f]+ \(fetched just now\)\n/);
+  assert.match(a.stdout, /this branch: 1 commit\(s\) behind origin\/main, 1 of its own, 3 file\(s\) changed/, "the file that is not committed counts");
+  assert.match(a.stdout, /MERGE origin\/main NOW: it changed 1 file\(s\) this branch also changes: base\.txt\n/);
+  assert.match(a.stdout, /the local main is 1 commit\(s\) behind origin\/main/);
+  assert.match(a.stdout, /\n  feat-b — [^\n]*\n[^\n]*\n      1 file\(s\) in common with this branch: shared\.txt\n      merging the two CONFLICTS in: shared\.txt\n/);
+  assert.ok(a.stdout.includes(`\n  ${hostile} — `), "a branch name is printed as it is");
+  assert.match(a.stdout, /1 file\(s\) in common with this branch: shared\.txt\n      merging the two is clean as text/, "the same file, other lines");
+  const idle = a.stdout.split("nothing left to merge")[1] ?? "";
+  assert.match(idle, /\n  feat-c, 1 commit\(s\) behind/, "a branch that landed as a squash has nothing left to merge");
+  assert.match(idle, /\n  feat-d, 1 commit\(s\) behind/, "nor has a branch with no commit");
+  assert.doesNotMatch(a.stdout, /\n  main[ ,]/, "the main checkout sits on the default branch: the base, not a neighbour");
+  assert.deepEqual(fs.readdirSync(root, { recursive: true }).filter((f) => /^PWNED[23]?$/.test(path.basename(String(f)))), [], "no part of a branch name was run");
+
+  // A file changed here and not committed is in common too, but the forecast merges commits: the report says so.
+  write(wt("a"), "other.txt", "mine, not committed\n");
+  assert.match(report(wt("a"), "--no-fetch").stdout, /\n  feat-b — [^\n]*\n[^\n]*\n      2 file\(s\) in common with this branch: other\.txt, shared\.txt\n      merging the two CONFLICTS in: shared\.txt\n      your changes to 1 of them are not committed, and no forecast covers them: other\.txt\n/);
+  fs.rmSync(path.join(wt("a"), "other.txt"));
+
+  // Seen from a branch with nothing of its own: nothing to merge for it, but feat-a has a merge to do.
+  const d = report(wt("d"), "--no-fetch");
+  assert.match(d.stdout, /\(as last fetched\)\n/);
+  assert.match(d.stdout, /what origin\/main changed since the fork touches none of the files this branch changes/);
+  assert.match(d.stdout, /\n  feat-a — [^\n]*\n[^\n]*\n      origin\/main changed 1 of its file\(s\) since it forked: it has a merge to do\n      no file in common with this branch\n/);
+  write(wt("d"), "other.txt", "mine, not committed\n");
+  assert.match(report(wt("d"), "--no-fetch").stdout, /\n  feat-b — [^\n]*\n[^\n]*\n      1 file\(s\) in common with this branch: other\.txt\n      your changes to 1 of them are not committed, and no forecast covers them: other\.txt\n/, "no commit of this branch holds the file: nothing is forecast");
+  fs.rmSync(path.join(wt("d"), "other.txt"));
+
+  // --check is what the guard prints: one line when the base is stale on a file of the branch, silence otherwise.
+  assert.match(report(wt("a"), "--check").stdout, /^origin\/main, as last fetched, changed 1 file\(s\) this branch also changes \(base\.txt\): merge it before pushing/);
+  assert.equal(report(wt("d"), "--check").stdout, "", "nothing to report is silence, never \"up to date\"");
+  const g = run(wt("a"), "bash", ["scripts/security-checks.sh", "--offline"], { env });
+  assert.equal(g.status, 0, `a stale base is a note, the gate stays green:\n${output(g)}`);
+  assert.match(g.stdout, /note\s+PS-2: origin\/main, as last fetched, changed 1 file/);
+  assert.doesNotMatch(output(run(wt("a"), "bash", ["scripts/guards.d/18-parallel-sessions.sh"], { env: { ...env, CI: "true" } })), /PS-2/, "silent on a runner");
+
+  // It only reads: the trial merges leave no object behind, and without a fetch no ref moves.
+  const state = () => `${git(wt("a"), "count-objects", "-v").replace(/^(?!count|in-pack).*\n?/gm, "")}${git(wt("a"), "for-each-ref")}${git(wt("b"), "status", "--porcelain")}`;
+  const before = state();
+  assert.equal(report(wt("a"), "--no-fetch").status, 0);
+  assert.equal(state(), before);
+
+  // A detached HEAD reports like a branch; a neighbour on one is counted, not compared.
+  git(wt("b"), "checkout", "-q", "--detach");
+  assert.match(report(wt("b"), "--no-fetch").stdout, /^parallel-sessions: a detached HEAD at [0-9a-f]+\n/);
+  const seen = report(wt("a"), "--no-fetch").stdout;
+  assert.match(seen, /\n1 other worktree\(s\) on a detached HEAD: not compared\n/);
+  assert.doesNotMatch(seen, /feat-b/);
+});
+
+test("parallel-sessions: without a remote, a commit or a repository, the report says so and --check says nothing", () => {
+  if (!kit.modules.has("parallel-sessions")) return;
+  const dir = tmp(), nowhere = tmp();
+  const env = { ...ENV, CI: "", GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid", GIT_CEILING_DIRECTORIES: path.dirname(nowhere) };
+  const script = path.join(dir, "scripts/parallel-sessions.sh");
+  const report = (cwd, ...args) => run(cwd, "bash", [script, ...args], { env });
+  install(dir, ["parallel-sessions"]);
+  assert.equal(run(dir, "git", ["init", "-q", "-b", "main"], { env }).status, 0);
+  let r = report(dir);
+  assert.equal(r.status, 0); assert.match(r.stdout, /^parallel-sessions: no commit yet, nothing to compare\n$/);
+  assert.equal(output(report(dir, "--check")), "\n", "--check has nothing to say, on either stream");
+  for (const args of [["add", "-A"], ["-c", "commit.gpgsign=false", "commit", "-qm", "one"]]) assert.equal(run(dir, "git", args, { env }).status, 0);
+  r = report(dir);
+  assert.equal(r.status, 0, output(r));
+  assert.match(r.stdout, /\nbase: main at [0-9a-f]+ \(the local branch: there is no origin\/main\)\n\nthis branch: 0 commit\(s\) behind main/);
+  assert.match(r.stdout, /\nno other worktree on a branch of its own\n/);
+  r = report(nowhere);
+  assert.equal(r.status, 1); assert.match(r.stderr, /not inside a git working tree/);
+  r = report(nowhere, "--check");
+  assert.equal(r.status, 0); assert.equal(output(r), "\n");
+  r = report(dir, "--fetch-harder");
+  assert.equal(r.status, 2); assert.match(r.stderr, /^usage: /);
+});

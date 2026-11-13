@@ -73,6 +73,7 @@ node /path/to/claude-template/bin/harness.mjs show . scripts/security-checks.sh 
 | `core` | day 1 | `CLAUDE.md` skeleton with its byte budget, `docs/` (conventions, ADR, runbooks), the findings catalogue and the `/retro` skill that feeds it at the end of a session and drafts an issue for the kit when the fault is in a kit file, the gate `scripts/security-checks.sh` and its `guards.d/` |
 | `git-hooks` | day 1 | `pre-commit` (gitleaks on staged changes) and `pre-push` (the gate, offline) |
 | `session-settings` | day 1, opt-in | a `.claude/settings.json` that denies reading `.env` files and `secrets/`, turns on the Bash sandbox without dropping a prompt, and a guard against the settings that widen every session |
+| `parallel-sessions` | day 1, opt-in, when several sessions share the repository | a read-only report of how far a branch is behind the default branch and which files it shares with the branches of the other worktrees, a skill to sync and to warn another session, a commented `.worktreeinclude`, and a guard that keeps session worktrees out of git |
 | `agents` | day 1 | `implementer`, `verifier`, `doc-sync` and `reviewer` agents, and the tested Bash allowlist that confines the read-only ones |
 | `security-review` | day 1 | `security-reviewer` agent (fresh context, read-only), the project review skill, and a check that Claude Code plugins stay at the commit that was reviewed |
 | `ci-security` | first CI | `security.yml` in two tiers, GitHub Actions rules with zizmor at zero, pinned scanners, a Dependabot skeleton |
@@ -97,6 +98,7 @@ Each module's convention page says where its piece comes from and what has actua
 | The installer | Tested: `test/` installs every module alone and all together into scratch projects and runs their gate. |
 | Bash allowlist of the agents | The decision logic comes from production. This kit's variant reads the verification commands from a config file and carries a fix the review below produced; it is covered by its test table, and must be checked live once in your project (`docs/conventions/agent-bash-guard.md` § Live check). |
 | `session-settings` | Written from Claude Code's documentation. The guard is tested; the settings file has never been read by a live session here. Its page has a live check. |
+| `parallel-sessions` | Written for the kit. The report and the guard are tested in scratch repositories with several worktrees, and have run on the kit's own repository. The skill has never been loaded by a session; what its page says of Claude Code comes from the documentation and was not observed. |
 | Agents, review skill, plugin pins | Adapted from production; the wording is new where project specifics were removed. |
 | `security.yml`, zizmor rules | Ported from production workflows. This generic variant has run on the kit's own repository: the enforcing tier (gitleaks, then the gate with zizmor) called from CI on pull requests and on a push, and one standalone run of both tiers, Semgrep, Trivy and the SBOM included, on a documentation push. The weekly schedule and the manual dispatch have not fired yet. |
 | `npm audit` gate | Ported from a production workflow. This generic variant has not run on GitHub yet. |
@@ -112,7 +114,7 @@ Each module's convention page says where its piece comes from and what has actua
 
 Treat anything marked "has not run", and every part of a piece this table does not say has run, as a draft until you have watched it work once.
 
-One fresh-context security review has been run on the kit, on the Bash allowlist, `auto-merge`, `claude-ci`, the installer, the security workflow and the digest. What it confirmed is fixed: a bypass of the allowlist through shell comments, a merge gate that judged the pull request's live listing instead of the commits being merged, writes through a symlink leaving the project, and claims in the pages that were wider than the code. One point it left open, what a CI session can push, was settled afterwards by reading the action at the pinned commit. It did not read `node-audit`, `openspec`, `security-review`, `session-settings` or the smaller guards, and it predates the `TEST_HOLD_RE` gate of `auto-merge`. One review is not an audit.
+One fresh-context security review has been run on the kit, on the Bash allowlist, `auto-merge`, `claude-ci`, the installer, the security workflow and the digest. What it confirmed is fixed: a bypass of the allowlist through shell comments, a merge gate that judged the pull request's live listing instead of the commits being merged, writes through a symlink leaving the project, and claims in the pages that were wider than the code. One point it left open, what a CI session can push, was settled afterwards by reading the action at the pinned commit. It did not read `node-audit`, `openspec`, `parallel-sessions`, `security-review`, `session-settings` or the smaller guards, and it predates the `TEST_HOLD_RE` gate of `auto-merge`. One review is not an audit.
 
 ## Sources and credits
 
@@ -123,6 +125,10 @@ Most of the kit is distilled from one production codebase, which stays unnamed. 
 | [anthropics/claude-code-action](https://github.com/anthropics/claude-code-action) | MIT | `f27be6b` (v1.0.252) | The action that `claude-ci` and `claude-review` pin; for `claude-review`, the base-ref checkout pattern and the behaviour read in its source (`docs/conventions/claude-review.md` § Sources). |
 | [mattpocock/skills](https://github.com/mattpocock/skills) | MIT | `5863806` (2026-11-12) | The idea of the `/retro` skill and of the retrospective task (`docs/conventions/local-gate.md` § Sources); the three brakes of an automated flow, behind `claude-review`, and the rework task, behind `claude-rework` (their pages, § Sources). Ideas only, no text copied. |
 | [Claude Code documentation](https://code.claude.com/docs/en/routines) | — | 2026-11-12 | Why `claude-rework` does not run as a scheduled task: where such a task starts and what identity it pushes with (`docs/conventions/claude-rework.md` § Sources). |
+| [Claude Code documentation](https://code.claude.com/docs/en/worktrees) | — | 2026-11-13 | For `parallel-sessions`: what a worktree shares with the main checkout, the base a new worktree starts from, `.worktreeinclude`, how a message from another session is treated (`docs/conventions/parallel-sessions.md` § Sources). No text copied. |
+| [arXiv:2607.04697](https://arxiv.org/abs/2607.04697), Xu, Subramanian and Karthik | — | 2026-11-13 (abstract) | The rates of conflict between pull requests written by agents, quoted on the `parallel-sessions` page. |
+| ["When Agents Collide"](https://codex.danielvaughan.com/2026/07/28/agent-pr-merge-conflicts-concurrent-coding-agents-codex-cli-worktree-isolation-coordination-defence/), D. Vaughan | none stated | 2026-11-13 | For `parallel-sessions`: forecasting a conflict between two agents' branches with `git merge-tree`, one set of files per agent, making what an agent holds visible to the others. Ideas only. |
+| [obra/superpowers](https://github.com/obra/superpowers) | MIT | `22f0b46` (2026-11-13) | For `parallel-sessions`: the run of the project's checks in a fresh worktree before any change, and the check that the worktree directory is ignored, which PS-1 makes a guard. Ideas only, no text copied. |
 
 ## What lands in your project
 
@@ -131,12 +137,14 @@ With every module installed:
 ```
 CLAUDE.md                          the budgeted instruction file (yours)
 SECURITY_REVIEW.md                 the findings catalogue (yours)
+.worktreeinclude                   the ignored files a new worktree needs (yours)
 .claude/
   agents/                          implementer, verifier, doc-sync, reviewer, security-reviewer
   hooks/                           the Bash allowlist, its tests, its config (yours)
   rules/                           rules loaded only when a session touches the files they name
   skills/project-security-review/  the project's review skill (yours)
   skills/retro/                    the retrospective that feeds the findings catalogue
+  skills/parallel-sessions/        syncing with the default branch and with the other sessions
   settings.json                    secret files denied, Bash sandbox (yours)
   harness.json                     what the installer did
 .githooks/                         pre-commit, pre-push
@@ -148,6 +156,7 @@ docs/
   adr/, runbook/                   templates and indexes
 scripts/
   security-checks.sh               the gate
+  parallel-sessions.sh             what moved under a branch, what the other worktrees hold
   guards.d/                        one guard per family of checks; 50-project.sh is yours
 ```
 
