@@ -81,6 +81,7 @@ node /path/to/claude-template/bin/harness.mjs show . scripts/security-checks.sh 
 | `auto-merge` | pull-request flow | unattended squash-merge on green CI (and a green automated review where `claude-review` is installed), with the gates that hold instruction files, CI-session branches, risky bumps and — once the project names its tests — changes that delete or rewrite existing test lines, for a human |
 | `claude-review` | pull-request flow | an automated, read-only Claude review of every code pull request, started once its CI is green; with `auto-merge`, a merge waits for CI and the review |
 | `claude-rework` | pull-request flow | when the review holds a pull request, a read-and-edit-only Claude session proposes a fix of its blocking findings as a pull request into the held one, pushed by a job without Claude; two attempts, then `needs-human` |
+| `ready-on-green` | pull-request flow, without `auto-merge` | a draft pull request is marked ready for review once its CI run is green; nothing is merged |
 | `weekly-digest` | pull-request flow | one issue a week listing what waits on a human |
 | `claude-ci` | on demand | `@claude` on plain issues of a private repository, with the job token only |
 | `openspec` | on demand | the OpenSpec convention (specs for current behaviour, changes for work in flight) and its validation guard |
@@ -104,6 +105,7 @@ Each module's convention page says where its piece comes from and what has actua
 | `/retro` skill | Written for the kit. Never run live, in its closing form (end of a session, an issue drafted for the kit) either. |
 | `claude-review` | Run once live, in a throwaway private repository: the chain CI → review → merge fired, conforming changes passed and breaking ones held, with correct findings. A review re-run that passes was not exercised; the first-attempt rule is tested on tables only. |
 | `weekly-digest` | Unit-tested. Never run live, in the project it comes from either. |
+| `ready-on-green` | Never run live. Its steps are the ones `auto-merge` uses to lift a draft, which ran live with that workflow. Its guard was tried by hand in a scratch project: five ways of widening the workflow, each one red. |
 | `claude-rework` | Run once live, in a throwaway private repository: a hold led to a rework pull request into the held branch, merged by a human, then a pass and an unattended merge. The run found two defects, both fixed since (a missing permission; a second attempt on a re-run review). The `needs-human` hand-over and the held-path refusals were not exercised. |
 | `claude-ci` | Not exercised end to end; only its push hook was replayed locally, against the push wrapper of the pinned action. For private repositories only. |
 | `openspec` guard | Its validation command was run against OpenSpec CLI 1.10.0 in one installed project (an empty project, a scaffolded change, a valid change, a spec alone), and the guard itself in a scratch project (a change with no delta stays red until it declares `skip_specs: true`). Not run in CI: the kit installs no CLI there. |
@@ -138,7 +140,7 @@ SECURITY_REVIEW.md                 the findings catalogue (yours)
   harness.json                     what the installer did
 .githooks/                         pre-commit, pre-push
 .github/
-  workflows/                       ci.yml (yours), security.yml, auto-merge.yml, weekly-digest.yml, claude.yml, claude-review.yml
+  workflows/                       ci.yml (yours), security.yml, auto-merge.yml, ready-on-green.yml, weekly-digest.yml, claude.yml, claude-review.yml
   dependabot.yml, zizmor.yml
 docs/
   conventions/                     one page per rule: the detail behind CLAUDE.md
@@ -190,7 +192,7 @@ node --test test/*.test.mjs     # unit tests, static rules on every module, end-
 
 A release is a version in `kit.json` and `package.json`, its entry at the top of `CHANGELOG.md` (a test holds the three together), `node bin/harness.mjs update .` for the root manifest, and nothing after the merge: `.github/workflows/release.yml` puts the tag `v<version>` on the commit of `main` that changes `kit.json`, and never moves an existing tag. That workflow is the kit's own, not a module; it ran once, on the merge that added it, and tagged that commit.
 
-The kit installs part of itself at its root — `core`, `ci-security` and `weekly-digest` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
+The kit installs part of itself at its root — `core`, `ci-security`, `weekly-digest` and `ready-on-green` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
 
 ## License and security
 

@@ -1,0 +1,16 @@
+{
+  "id": "ready-on-green",
+  "title": "Lift draft on green CI",
+  "summary": "Marks a draft pull request ready for review once its CI run is green, and does nothing else: no merge, no checkout. For a repository that opens pull requests as drafts and does not install auto-merge, which already lifts the draft.",
+  "phase": "pr-flow",
+  "order": 41,
+  "requires": ["core"],
+  "placeholders": {
+    "CI_WORKFLOW": { "prompt": "Name of the CI workflow that must be green before a merge (its `name:`)", "default": "CI", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}" }
+  },
+  "postInstall": [
+    "The CI workflow (the name given at install, \"CI\" by default) must exist under that exact `name:` and run on pull_request. A pull request CI does not run on — documentation only, where CI skips it — keeps its draft: lift it by hand.",
+    "Do not install this module with auto-merge, which lifts the draft itself. From now on a draft means \"CI has not signed off\", not \"the author is not done\": say so to whoever opens pull requests here.",
+    "The workflow acts once it is on the default branch. Open a draft pull request then and watch the draft lifted when CI turns green."
+  ]
+}

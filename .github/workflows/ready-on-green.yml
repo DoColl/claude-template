@@ -1,0 +1,104 @@
+name: Ready on green
+
+# Lifts the draft of a pull request once the CI workflow is green on its head
+# commit, so that a pull request opened as a draft — by a session, or by a
+# person who waits for CI — shows as mergeable without a click. It never
+# merges, approves, comments or pushes: docs/conventions/ready-on-green.md.
+#
+# The steps are the ones auto-merge.yml uses to lift a draft, without its
+# gate and its merge. A repository that installs auto-merge needs none of
+# this.
+#
+# No checkout: nothing a pull request writes is run here. The job reads the
+# pull request through the API and makes one call.
+on:
+  # A workflow_run workflow is always read from the default branch: a pull
+  # request cannot change what runs here. The trigger has elevated
+  # permissions for that same reason, which is why the job below refuses
+  # forks, takes no input from the pull request but its head commit, and
+  # holds one permission.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
+    workflows: ["CI"]
+    types: [completed]
+
+permissions: {}
+
+env:
+  # This workflow does not check the repository out, so gh cannot find the
+  # repository from a git remote.
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  ready:
+    name: Mark the validated pull request ready
+    # Only green CI runs started by a pull request of this same repository.
+    # A claude/issue-* or claude/rework-* head is a branch a CI Claude session
+    # wrote: it keeps its draft until a person has read it.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      !startsWith(github.event.workflow_run.head_branch, 'claude/issue-') &&
+      !startsWith(github.event.workflow_run.head_branch, 'claude/rework-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    concurrency:
+      group: ready-on-green-${{ github.event.workflow_run.head_sha }}
+      cancel-in-progress: false
+    permissions:
+      pull-requests: write # mark ready; nothing else is written
+    steps:
+      - name: Find PR for head_sha
+        id: find-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::No commit could be read from the triggering run — nothing was done."
+            exit 1
+          fi
+          # `sha:` matches any open PR that CONTAINS the commit (a stacked PR,
+          # a sibling): keep only the one whose head IS the validated SHA, and
+          # only into the default branch. Two such pull requests are one too
+          # many to choose from.
+          FOUND=$(gh pr list --search "sha:$HEAD_SHA" --state open --base "$DEFAULT_BRANCH" --json number,headRefOid,headRefName,isDraft \
+                 --jq '[.[] | select(.headRefOid == $ENV.HEAD_SHA) | [.number, .headRefName, .isDraft] | @tsv]')
+          COUNT=$(jq 'length' <<< "$FOUND")
+          if [ "$COUNT" = "0" ]; then
+            echo "No open PR into ${DEFAULT_BRANCH} found for SHA $HEAD_SHA — skipping"
+            exit 0
+          fi
+          if [ "$COUNT" != "1" ]; then
+            echo "::notice::${COUNT} open pull requests into ${DEFAULT_BRANCH} have head ${HEAD_SHA:0:7} — left as they are."
+            exit 0
+          fi
+          IFS=$'\t' read -r PR HEAD_REF DRAFT <<< "$(jq -r '.[0]' <<< "$FOUND")"
+          if [[ "$HEAD_REF" == claude/issue-* || "$HEAD_REF" == claude/rework-* ]]; then
+            echo "::notice::PR #${PR} comes from ${HEAD_REF}, a branch a CI Claude session wrote — its draft is lifted by hand."
+            exit 0
+          fi
+          if [ "$DRAFT" != "true" ]; then
+            echo "PR #${PR} is not a draft — nothing to do"
+            exit 0
+          fi
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
+
+      # Only while the head is still the one CI validated: a commit pushed
+      # since has its own run, which decides for it.
+      - name: Mark ready (validated head only, never merges)
+        if: steps.find-pr.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.find-pr.outputs.pr }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          HEAD=$(gh pr view "$PR" --json headRefOid --jq .headRefOid)
+          if [ "$HEAD" != "$HEAD_SHA" ]; then
+            echo "::notice::PR #${PR}: head moved since the validated SHA — left as is, its own run decides."
+            exit 0
+          fi
+          gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."

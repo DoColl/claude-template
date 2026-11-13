@@ -1,11 +1,12 @@
 {
   "kit": {
     "name": "claude-template",
-    "version": "0.4.1"
+    "version": "0.5.0"
   },
   "modules": [
     "core",
     "ci-security",
+    "ready-on-green",
     "weekly-digest"
   ],
   "values": {
@@ -120,6 +121,18 @@
       "module": "ci-security",
       "sha256": "02082c990ef2e299bc2e0a9384da2bd17d51ca3c6a00c3e75e6482cc3a2148a4"
     },
+    ".github/workflows/ready-on-green.yml": {
+      "module": "ready-on-green",
+      "sha256": "90bdf097f204ddd1fb7edba52dc581dd111ba686dac848431666fc29b0048b2c"
+    },
+    "docs/conventions/ready-on-green.md": {
+      "module": "ready-on-green",
+      "sha256": "f0a853d301c243ba871e2a8fb2e56e01af14d0b9b40d69b0b6fbcb64c1cac9ec"
+    },
+    "scripts/guards.d/41-ready-on-green.sh": {
+      "module": "ready-on-green",
+      "sha256": "93f0f5308958658d7c3cfbdc988f27751833b9cca35410b54d7469061ea0535e"
+    },
     ".github/workflows/weekly-digest.yml": {
       "module": "weekly-digest",
       "sha256": "b6d7268fdf0f6fbbfece6e47df1c93e1296bfc874365f879fd539df6fa084db4"
@@ -149,6 +162,7 @@
     "ci-security:CLAUDE.md#conventions",
     "ci-security:CLAUDE.md#security-workflow",
     "ci-security:docs/conventions/README.md#conventions-index",
+    "ready-on-green:docs/conventions/README.md#conventions-index",
     "weekly-digest:CLAUDE.md#conventions",
     "weekly-digest:docs/conventions/README.md#conventions-index"
   ]
