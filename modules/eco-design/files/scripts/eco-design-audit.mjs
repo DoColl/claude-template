@@ -94,6 +94,10 @@ function readConfig(path) {
 }
 
 // ─── the audit ──────────────────────────────────────────────────────────
+// `categories` is an object keyed by family in green-claude's catalogues; its
+// audit reads it with jq's `.categories[]`, which takes an array as well.
+const familiesOf = (j) => { const c = j.categories ?? []; return Array.isArray(c) ? c : Object.values(c); };
+
 function ruleFiles(skill) {
   const langs = join(skill, "rules", "langages");
   const extra = existsSync(langs) ? readdirSync(langs).filter((f) => f.endsWith(".json")).sort().map((f) => join(langs, f)) : [];
@@ -117,12 +121,12 @@ function prepare(dir, work) {
     if (ACTS_ON_THE_MACHINE.test(code)) { unlinkSync(file); dropped.push(name); }
   }
   const catalogues = ruleFiles(skill);
-  const rules = catalogues.flatMap((j) => (j.categories ?? []).flatMap((c) => c.rules ?? []));
+  const rules = catalogues.flatMap((j) => familiesOf(j).flatMap((c) => c.rules ?? []));
   const notAudited = rules.filter((r) => r.detector && dropped.includes(`detect-${String(r.detector).replaceAll("_", "-")}.awk`)).map((r) => r.id);
   const exts = new Set();
   for (const j of catalogues) {
     for (const e of j.metadata?.extensions ?? []) exts.add(String(e).toLowerCase());
-    for (const c of j.categories ?? []) for (const r of c.rules ?? []) for (const e of r.extensions ?? []) exts.add(String(e).toLowerCase());
+    for (const c of familiesOf(j)) for (const r of c.rules ?? []) for (const e of r.extensions ?? []) exts.add(String(e).toLowerCase());
   }
   // As the upstream hooks do: prose and catalogues are audited on request only.
   exts.delete("md"); exts.delete("json");

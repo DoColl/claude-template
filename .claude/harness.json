@@ -197,11 +197,11 @@
     },
     "scripts/eco-design-audit.mjs": {
       "module": "eco-design",
-      "sha256": "f9cced9a66d433060a33db4dbb92a5c2b5182ad6f2a1bc8d9b7df981cec29587"
+      "sha256": "5177d18122b6d237ddebda85d627b050f81fc46615c19bd097de3717ce4fc023"
     },
     "scripts/eco-design-audit.test.mjs": {
       "module": "eco-design",
-      "sha256": "92afd99a6ffbce5dc97231a94819723e68209af03f11e346553da125f809830f"
+      "sha256": "78546552c0ffa70e6b3e1ac67c0f3516ffdd5977dc14a88131242a039d77d096"
     },
     "scripts/eco-design.config.json": {
       "module": "eco-design",

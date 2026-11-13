@@ -61,12 +61,15 @@ function fakeSkill(root) {
   write(s, "scripts/audit-common.sh", "# routing helpers\n");
   write(s, "scripts/detect-safe.awk", '# counts\n{ if ($0 ~ /x/) printf "%d:%s\\n", NR, $0 }\n');
   write(s, "scripts/detect-runs.awk", '# checks that a path exists\n{ cmd = "test -e " $0; cmd | getline r; close(cmd) }\n');
-  write(s, "rules/ecoconception.json", JSON.stringify({ categories: [{ name: "1. Test", rules: [
+  // The shape of green-claude's catalogues at the pinned commit: `categories`
+  // is an object keyed by family. The language file uses an array, which its
+  // audit (jq `.categories[]`) reads too.
+  write(s, "rules/ecoconception.json", JSON.stringify({ metadata: { name: "test" }, categories: { test: { name: "1. Test", description: "", rules: [
     { id: "ECO-T-01", impact: "High", extensions: ["py", "html"] },
     { id: "ECO-T-03", impact: "Medium", detector: "runs", extensions: ["html"] },
     { id: "ECO-T-04", impact: "Low", detector: "safe", extensions: ["html"] },
-  ] }] }));
-  write(s, "rules/langages/python.json", JSON.stringify({ metadata: { extensions: ["py"] }, categories: [] }));
+  ] } } }));
+  write(s, "rules/langages/python.json", JSON.stringify({ metadata: { extensions: ["py"] }, categories: [{ name: "Python", rules: [{ id: "ECO-PY-T", impact: "Low", patterns: ["x"] }] }] }));
   return s;
 }
 
