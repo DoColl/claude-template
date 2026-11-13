@@ -1,6 +1,6 @@
 ---
 name: harness-init
-description: Install or extend the claude-template harness in the current project — choose the modules (instruction files, session settings, sub-agents and their Bash allowlist, git hooks, security workflow, a CI skeleton, auto-merge, weekly digest, Claude in CI, OpenSpec), run the installer, then fill in what only the project knows. Use when the user asks to initialise, set up or add a module of the Claude Code harness in a repository.
+description: Install or extend the claude-template harness in the current project — choose the modules (instruction files, session settings, sub-agents and their Bash allowlist, git hooks, security workflow, a CI skeleton, auto-merge, weekly digest, Claude in CI, OpenSpec, eco-design rules through a pinned plugin), run the installer, then fill in what only the project knows. Use when the user asks to initialise, set up or add a module of the Claude Code harness in a repository.
 ---
 
 # Initialise a project with claude-template

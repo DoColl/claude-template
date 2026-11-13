@@ -1,0 +1,1 @@
+- **Eco-design**: the `green-claude` plugin is pinned like every plugin (PL-1). Its rules never outrank this file, security or the request: state the trade-off in one sentence, then deliver. An audit hit is a candidate, confirmed in context; a human records a dismissed one in `.green-claude/decisions.md`, with its reason. → `docs/conventions/eco-design.md`

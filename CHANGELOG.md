@@ -4,6 +4,12 @@ What changed in the kit, newest first. A release is a commit of `main` tagged `v
 
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
+## 0.8.0
+
+- New module `eco-design`, on demand: the convention for using the `green-claude` plugin (eco-design rules drawn from RGESN and GR491, with a deterministic audit) at a commit the project has read, through the plugin pins of `security-review` (PL-1). It states what the plugin changes in a session, puts its rules below `CLAUDE.md`, security and the request, treats an audit hit as a candidate to confirm in context, and makes `.green-claude/decisions.md` a reviewed derogation list. One bullet in `CLAUDE.md`, one convention page. Nothing is copied from the plugin, and nothing in it has run live.
+
+By hand: nothing. To take the module: `add . --modules eco-design`, then read the plugin and record it in `scripts/reviewed-plugins.json` before installing it.
+
 ## 0.7.2
 
 - `parallel-sessions`: a branch that is behind the default branch catches up before its pull request is opened, whatever the files concerned — a rebase while no commit of the branch is pushed, a merge once one is. The skill has that step, the report says which of the two applies, and PS-2 now notes any branch that is behind the default branch as last fetched, not only one whose files changed on both sides. Still a note, never a failure.
