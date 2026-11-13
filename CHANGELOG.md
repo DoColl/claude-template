@@ -1,8 +1,17 @@
 # Changelog
 
-What changed in the kit, newest first. A release is a commit of `main` tagged `v<version>`; `kit.json` carries the same version, and a project's `.claude/harness.json` records the version and the commit it was installed from.
+What changed in the kit, newest first. A release is a commit of `main` tagged `v<version>` (from 0.3.1 on, by `.github/workflows/release.yml`; earlier versions carry no tag); `kit.json` carries the same version, and a project's `.claude/harness.json` records the version and the commit it was installed from.
 
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
+
+## 0.3.1
+
+No module changed.
+
+- Two skills beside `harness-init`, to copy into `~/.claude/skills/`: `harness-adopt` (bring a repository that already has its own harness under the kit, module by module, deciding each file) and `harness-update` (check, update a selection, merge, leave the real conflicts to the user).
+- The kit's own repository tags `v<version>` by a workflow when `kit.json` changes on `main`.
+
+By hand: nothing.
 
 ## 0.3.0
 
