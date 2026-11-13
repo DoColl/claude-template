@@ -42,6 +42,8 @@ node <kit>/bin/harness.mjs init . --modules <ids> [--set KEY=VALUE]... --dry-run
 
 Then run it without `--dry-run`. On an initialised project, use `add . --modules <ids>`.
 
+When the dry run lists many conflicts because the project already has its own hooks, guards or workflows at those paths, propose `adopt . --modules <ids>` instead: it keeps each of them and records it as a kit file edited in the project. `show . <file> --modules <ids> | diff - <file>` compares one with the kit's version. Which version stays is the user's decision, file by file; never `--force` over a project's file to make the list shorter.
+
 - **Conflicts** (exit code 2): a file exists with other content and was left untouched. Show the user each one and let them decide; `--force` overwrites kit files, never the project's own seeds such as `CLAUDE.md`.
 - **Fragments not inserted**: the project's `CLAUDE.md` has no slot for them (it was written before the kit). Show the fragment files the installer names and propose where to paste them.
 
@@ -71,7 +73,7 @@ Tell the user which gaps you left and why, in one list. Do not fill a gap with a
 The installer's output is already tested in the kit; what is new is what this session wrote. One light pass, then one review:
 
 1. **Verify, once.** `git add -A` (staging is not committing), then `./scripts/security-checks.sh --offline`: it must pass. Several guards read what git tracks; run before the first `git add`, they report notes instead of checking. Re-read your own edits to the seeds once. No sub-agent for this, and no second pass after a clean first one.
-2. **Say what was not edited.** `node <kit>/bin/harness.mjs update . --dry-run` must print `nothing to write`, with no `left alone`, `would be updated` or `CONFLICTS` list: every kit file is then what the kit ships. Note the kit's commit (`git -C <kit> rev-parse HEAD`). Both go in the pull request description.
+2. **Say what was not edited.** `node <kit>/bin/harness.mjs update . --dry-run` must print `nothing to write`, with no `left alone`, `would be updated` or `CONFLICTS` list: every kit file is then what the kit ships. Note the kit's commit: `.claude/harness.json` records it under `kit.commit` (a `-dirty` suffix means the checkout had uncommitted changes — install from a clean one). Both go in the pull request description.
 3. **Review, once, at the end.** Follow "Before pushing" of the installed `CLAUDE.md` for the files this session wrote — the seeds as filled and the project's own files — not for the kit files, which were reviewed in the kit (`docs/conventions/security-review.md` § Scope, when that module is installed). Filled seeds are tier 1 when they are prose and tier 2 when they change what runs or what a session may do (the verification commands, a workflow job). Run that tier's passes one time, when everything is filled; give a reviewing agent the kit commit and the result of step 2 in its brief. Do not run the chain after each file, and do not re-run it after fixing a finding: re-run the gate.
 
 ## 7. Hand over

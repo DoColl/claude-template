@@ -194,6 +194,141 @@ test("update refreshes the kit files left untouched and leaves edited ones alone
   assert.equal(gate(dir).status, 0);
 });
 
+// A project takes the kit's changes piece by piece: one module, one file or one directory. What the selection
+// leaves out stays recorded as installed, so the next update — or --check — still lists it.
+test("update --modules / --only refreshes the selection and leaves the rest behind, still listed", () => {
+  const root = tmp("harness-kitcopy-"), dir = tmp();
+  for (const rel of ["kit.json", "modules/core", "modules/git-hooks"]) fs.cpSync(path.join(KIT_ROOT, rel), path.join(root, rel), { recursive: true });
+  applyPlan(buildPlan({ kit: loadKit(root), target: dir, moduleIds: ["git-hooks"], given: { PROJECT_NAME: "demo-app" } }));
+  const before = readManifest(dir);
+  const core = path.join(root, "modules/core/files"), hooks = path.join(root, "modules/git-hooks/files");
+  for (const rel of ["scripts/guards.d/_lib.sh", "scripts/security-checks.sh"]) write(core, rel, `${read(core, rel)}# kit v2\n`, 0o755);
+  write(core, "docs/conventions/new-page.md", "# New in v2\n");
+  write(hooks, ".githooks/pre-push", `${read(hooks, ".githooks/pre-push")}# kit v2\n`, 0o755);
+  fs.writeFileSync(path.join(root, "kit.json"), JSON.stringify({ name: "claude-template", version: "9.9.9" }));
+  const up = (...args) => spawnSync(process.execPath, [path.join(root, "bin/harness.mjs"), "update", dir, ...args], { encoding: "utf8", input: "" });
+  for (const rel of ["bin", "lib"]) fs.cpSync(path.join(KIT_ROOT, rel), path.join(root, rel), { recursive: true });
+
+  const check = up("--check"); assert.equal(check.status, 3, output(check)); assert.match(check.stdout, /behind the kit: 4 item/);
+  assert.deepEqual(readManifest(dir), before, "--check writes nothing");
+  assert.equal(up("--modules", "agents").status, 1, "a module that is not installed");
+  assert.equal(up("--only", "no/such/file").status, 1);
+  assert.equal(up("--all").status, 1);
+
+  const one = up("--modules", "git-hooks"); assert.equal(one.status, 0, output(one));
+  assert.match(read(dir, ".githooks/pre-push"), /# kit v2\n$/);
+  assert.doesNotMatch(read(dir, "scripts/guards.d/_lib.sh"), /# kit v2/, "core was not selected");
+  assert.ok(!fs.existsSync(path.join(dir, "docs/conventions/new-page.md")));
+  assert.match(one.stdout, /not selected — still behind the kit \(3\)/);
+  assert.equal(readManifest(dir).kit.version, before.kit.version, "the manifest names the new kit only once every file follows it");
+  assert.equal(up("--check", "--modules", "git-hooks").status, 0, "the selection is in step");
+  assert.equal(up("--check").status, 3, "the project is not");
+
+  const file = up("--only", "./scripts/guards.d/"); assert.equal(file.status, 0, output(file));
+  assert.match(read(dir, "scripts/guards.d/_lib.sh"), /# kit v2\n$/);
+  assert.doesNotMatch(read(dir, "scripts/security-checks.sh"), /# kit v2/, "a sibling of the directory is not under it");
+  assert.equal(readManifest(dir).kit.version, before.kit.version);
+
+  const rest = up(); assert.equal(rest.status, 0, output(rest));
+  assert.equal(readManifest(dir).kit.version, "9.9.9");
+  assert.equal(up("--check").status, 0);
+  assert.equal(gate(dir).status, 0);
+});
+
+// A repository that grew its own hooks, guards and workflows before the kit: `init` leaves each of them as an
+// unrecorded conflict, on every run. `adopt` records them as what they are — kit files edited in the project.
+test("adopt keeps the project's own version of a kit file and records it as edited here", () => {
+  const root = kitCopy(), dir = tmp(), v1 = loadKit(root);
+  for (const rel of ["bin", "lib"]) fs.cpSync(path.join(KIT_ROOT, rel), path.join(root, rel), { recursive: true });
+  const ref = tmp(); applyPlan(buildPlan({ kit: v1, target: ref, given: { PROJECT_NAME: "demo-app" } }));
+  const own = "#!/usr/bin/env bash\n# the project's own gate\nexit 0\n";
+  write(dir, "scripts/security-checks.sh", own, 0o755);
+  write(dir, "scripts/guards.d/_lib.sh", read(ref, "scripts/guards.d/_lib.sh"));
+  write(dir, "CLAUDE.md", "# Written before the kit\n");
+  const h = (...args) => spawnSync(process.execPath, [path.join(root, "bin/harness.mjs"), ...args], { encoding: "utf8", input: "" });
+
+  const init = h("init", dir, "--modules", "core", "--set", "PROJECT_NAME=demo-app", "--dry-run");
+  assert.equal(init.status, 2, "init calls it a conflict"); assert.match(init.stdout, /CONFLICTS[\s\S]*scripts\/security-checks\.sh/);
+  assert.equal(h("adopt", dir, "--modules", "core", "--force").status, 1);
+  const shown = h("show", dir, "scripts/security-checks.sh", "--modules", "core", "--set", "PROJECT_NAME=demo-app");
+  assert.equal(shown.status, 0, output(shown)); assert.equal(shown.stdout, read(ref, "scripts/security-checks.sh"), "show prints the kit's version");
+  assert.equal(h("show", dir, "no/such/file", "--modules", "core").status, 1);
+
+  const r = h("adopt", dir, "--modules", "core", "--set", "PROJECT_NAME=demo-app");
+  assert.equal(r.status, 0, output(r));
+  assert.match(r.stdout, /adopted — [^\n]*\(1\)\n  scripts\/security-checks\.sh  \[core\]  \+\d+ \/ -\d+/);
+  assert.equal(read(dir, "scripts/security-checks.sh"), own, "the project's file is not touched");
+  assert.equal(read(dir, "CLAUDE.md"), "# Written before the kit\n", "nor its seed");
+  const m = readManifest(dir);
+  assert.equal(m.files["scripts/security-checks.sh"].sha256, readManifest(ref).files["scripts/security-checks.sh"].sha256, "recorded with the hash of the kit's version");
+  assert.deepEqual(drift(dir, m).modified, ["scripts/security-checks.sh"], "status lists it as edited here");
+  assert.equal(h("update", dir, "--check").status, 0, "and the project is not behind the kit");
+  assert.equal(h("adopt", dir, "--modules", "core").status, 0, "adopting again changes nothing");
+  assert.deepEqual(readManifest(dir), m);
+
+  // the kit changes that file: a human decides, as for any kit file edited in a project
+  const coreFiles = path.join(root, "modules/core/files");
+  write(coreFiles, "scripts/security-checks.sh", `${read(coreFiles, "scripts/security-checks.sh")}# kit v2\n`, 0o755);
+  const s = summarize(buildPlan({ kit: loadKit(root), target: dir, mode: "update" }));
+  assert.deepEqual(s.conflicts, [{ file: "scripts/security-checks.sh", why: "modified here and changed in the kit" }]);
+  assert.deepEqual(summarize(buildPlan({ kit: loadKit(root), target: dir, mode: "adopt" })).adopted, [], "a recorded file is never adopted over: that conflict stays one");
+});
+
+// A file the kit stops shipping is the kit's to take back, as long as the project left it as installed.
+test("update removes what the kit no longer ships when it is untouched, and only then", () => {
+  const root = kitCopy(), dir = tmp();
+  const coreFiles = path.join(root, "modules/core/files");
+  write(coreFiles, "docs/extra/gone.md", "# Leaves in v2\n");
+  write(coreFiles, "docs/extra/edited.md", "# Leaves in v2 too\n");
+  write(coreFiles, "docs/extra/late.md", "# Leaves in v2 as well\n");
+  applyPlan(buildPlan({ kit: loadKit(root), target: dir, given: { PROJECT_NAME: "demo-app" } }));
+  write(dir, "docs/extra/edited.md", "# Leaves in v2 too\nProject note.\n");
+  write(dir, "docs/extra/mine.md", "# The project's own\n");
+  fs.rmSync(path.join(coreFiles, "docs/extra"), { recursive: true });
+  const v2 = loadKit(root);
+
+  const asAdd = buildPlan({ kit: v2, target: dir });
+  assert.deepEqual(summarize(asAdd).removed, [], "init and add never delete");
+  applyPlan(asAdd);
+  assert.ok(readManifest(dir).files["docs/extra/gone.md"], "and keep the record, so that an update still can");
+
+  const partial = buildPlan({ kit: v2, target: dir, mode: "update", select: (m, rel) => rel === "docs/extra/gone.md" });
+  assert.deepEqual(summarize(partial).removed, ["docs/extra/gone.md"]);
+  applyPlan(partial);
+  assert.ok(!fs.existsSync(path.join(dir, "docs/extra/gone.md")));
+  assert.ok(fs.existsSync(path.join(dir, "docs/extra/late.md")), "outside the selection");
+
+  const plan = buildPlan({ kit: v2, target: dir, mode: "update" });
+  const s = summarize(plan);
+  assert.deepEqual(s.removed, ["docs/extra/late.md"]);
+  assert.deepEqual(s.dropped, ["docs/extra/edited.md"], "edited here: a human decides");
+  applyPlan(plan);
+  assert.deepEqual(fs.readdirSync(path.join(dir, "docs/extra")).sort(), ["edited.md", "mine.md"], "the project's files and its edits stay");
+  assert.deepEqual(Object.keys(readManifest(dir).files).filter((f) => f.startsWith("docs/extra/")), []);
+  const again = summarize(buildPlan({ kit: v2, target: dir, mode: "update" }));
+  assert.deepEqual([again.removed, again.dropped], [[], []]);
+
+  // the path comes from the manifest, which the project can write: nothing outside it is removed
+  const outside = path.join(tmp(), "victim.txt"); fs.writeFileSync(outside, "x");
+  const m = readManifest(dir);
+  m.files[path.relative(dir, outside)] = { module: "core", sha256: "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881" };
+  fs.writeFileSync(path.join(dir, MANIFEST), JSON.stringify(m, null, 2));
+  assert.throws(() => buildPlan({ kit: v2, target: dir, mode: "update" }), /outside the project/);
+  assert.ok(fs.existsSync(outside));
+});
+
+test("the manifest names the commit of the kit's checkout, and versions agree across the kit", () => {
+  const dir = tmp();
+  install(dir, []);
+  const head = run(KIT_ROOT, "git", ["rev-parse", "HEAD"]).stdout.trim();
+  if (head) assert.ok(readManifest(dir).kit.commit.startsWith(head), "the commit installed from");
+  assert.equal(readManifest(KIT_ROOT)?.kit.commit, undefined, "the kit's own root records no commit: it cannot name itself");
+  assert.equal(loadKit(kitCopy()).commit, undefined, "a copy that is not a checkout has none, whatever repository sits above it");
+  assert.equal(JSON.parse(read(KIT_ROOT, "package.json")).version, kit.version);
+  assert.match(read(KIT_ROOT, "CHANGELOG.md"), new RegExp(`^## ${kit.version.replaceAll(".", "\\.")}( |$)`, "m"), "the current version has its entry in CHANGELOG.md");
+  assert.equal(read(KIT_ROOT, "CHANGELOG.md").match(/^## (\d+\.\d+\.\d+)/m)[1], kit.version, "and it is the first one");
+});
+
 test("the CLI refuses bad input and --dry-run writes nothing", () => {
   const list = cli("list", "--json");
   assert.equal(list.status, 0); assert.deepEqual(JSON.parse(list.stdout).modules.map((m) => m.id), ALL);
