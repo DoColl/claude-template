@@ -1,6 +1,6 @@
 # OpenSpec workflow
 
-**Rule (CLAUDE.md § Key conventions):** `openspec/specs/<area>/<capability>/spec.md` is the current behaviour; `openspec/changes/<id>/` is work in flight. A change goes explore → propose → apply → sync → archive, and **a change is closed only once its deltas are in the specs and it is archived**. The command and skill files OpenSpec generates are never hand-edited.
+**Rule (CLAUDE.md § Key conventions; the file layout is in `.claude/rules/openspec.md`, loaded when a session touches `openspec/` or the generated commands and skills):** `openspec/specs/<area>/<capability>/spec.md` is the current behaviour; `openspec/changes/<id>/` is work in flight. A change goes explore → propose → apply → sync → archive, and **a change is closed only once its deltas are in the specs and it is archived**. The command and skill files OpenSpec generates are never hand-edited.
 
 ## Status
 

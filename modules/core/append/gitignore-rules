@@ -1,0 +1,2 @@
+# Path-scoped rules are shared instruction files, like agents and skills.
+!.claude/rules/

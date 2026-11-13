@@ -1,6 +1,6 @@
 # Session settings
 
-**Rule (CLAUDE.md § Key conventions):** `.claude/settings.json` denies reading secret files and turns the Bash sandbox on; it never sets `bypassPermissions`, never allows all of Bash, never approves every project MCP server and never disables hooks. Personal rules go in `.claude/settings.local.json`, which stays untracked.
+**Rule (`.claude/rules/session-settings.md`, loaded when a session reads or edits `.claude/settings.json` or `.claude/settings.local.json`):** `.claude/settings.json` denies reading secret files and turns the Bash sandbox on; it never sets `bypassPermissions`, never allows all of Bash, never approves every project MCP server and never disables hooks. Personal rules go in `.claude/settings.local.json`, which stays untracked.
 
 ## Status
 

@@ -74,13 +74,34 @@ Slots provided by `core`:
 | File | Slot | Kind | For |
 |---|---|---|---|
 | `CLAUDE.md` | `delegation` | slot | the "Delegation" section (agents) |
-| `CLAUDE.md` | `conventions` | rows | one bullet per rule: `- **Name**: rule, at most five lines. → \`docs/conventions/<slug>.md\`` |
+| `CLAUDE.md` | `conventions` | rows | one bullet per rule: `- **Name**: rule, at most 400 bytes. → \`docs/conventions/<slug>.md\`` |
 | `CLAUDE.md` | `security-workflow` | slot | paragraphs or `###` sections at the top of "Security workflow" |
 | `CLAUDE.md` | `before-pushing` | rows | review passes that run before the built-in ones, each written `1. **<pass>** (tier 3)` or `(tiers 2, 3)` — the tiers of "Before pushing" it applies to |
 | `CLAUDE.md` | `doc-maintenance` | rows | `- <change> → <doc>` lines |
 | `docs/conventions/README.md` | `conventions-index` | rows | `| \`file.md\` | topic | source |` |
 
-`CLAUDE.md` has a byte budget: a module's `conventions` bullet is at most five lines and points to a convention page the module ships under `files/docs/conventions/`.
+`CLAUDE.md` has a byte budget: a module's `conventions` bullet is at most 400 bytes and points to a convention page the module ships under `files/docs/conventions/`. With every module installed, what a session loads of `CLAUDE.md` stays under 60% of the default budget: the rest is the project's.
+
+## Path-scoped rules
+
+A rule that is about the content of files at known paths does not go in `CLAUDE.md`: the module ships `files/.claude/rules/<slug>.md`, which Claude Code loads only once a session reads, writes or edits a matching file.
+
+```markdown
+---
+paths:
+  - ".github/workflows/**"
+---
+
+# Topic
+
+The rule. → `docs/conventions/<slug>.md`
+```
+
+- The frontmatter holds `paths:` and nothing else, as a list of double-quoted globs relative to the project root. Without `paths:` the file would load at launch and spend the project's budget; a glob that matches everything is refused for the same reason.
+- At most 1200 bytes of rule, ending with the pointer to a convention page the module installs. That page names the rule file and the paths that load it.
+- Kit-owned, never a seed: `update` refreshes it.
+- Not for a rule about behaviour (what to run, what never to merge): nothing a session opens would load it in time. That is a `conventions` bullet.
+- The rule reaches a session after the first write of a new file, not before. Use it for what a guard also checks.
 
 ## Guards
 

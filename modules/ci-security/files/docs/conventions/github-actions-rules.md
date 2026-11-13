@@ -1,6 +1,6 @@
 # GitHub Actions rules (zizmor at zero)
 
-**Rule (CLAUDE.md § Key conventions):** zizmor reports nothing on `.github/workflows/`, at any severity (GA-2), and every `uses:` is pinned to a full commit SHA (GA-1). `permissions: {}` at workflow level with minimal per-job blocks; `persist-credentials: false` on every checkout unless the job pushes; no `${{ … }}` inside `run:`; every `upload-artifact` declares `retention-days`. An unfixable finding goes to `.github/zizmor.yml` with its justification.
+**Rule (`.claude/rules/github-actions.md`, loaded when a session reads or edits a file under `.github/workflows/` or `.github/actions/`, or `.github/zizmor.yml`):** zizmor reports nothing on `.github/workflows/`, at any severity (GA-2), and every `uses:` is pinned to a full commit SHA (GA-1). `permissions: {}` at workflow level with minimal per-job blocks; `persist-credentials: false` on every checkout unless the job pushes; no `${{ … }}` inside `run:`; every `upload-artifact` declares `retention-days`. An unfixable finding goes to `.github/zizmor.yml` with its justification.
 
 ## Why
 

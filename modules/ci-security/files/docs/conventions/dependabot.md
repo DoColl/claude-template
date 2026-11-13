@@ -1,6 +1,6 @@
 # Dependabot
 
-**Rule (CLAUDE.md § Key conventions):** patch and minor updates stay in separate groups, behind a `cooldown`; `ignore` holds the deliberate pins only, each with its reason. Dependabot does not see lockfile overrides, vendored code, patches or the scanner pins of `security.yml`: the periodic audit stays the net.
+**Rule (`.claude/rules/dependabot.md`, loaded when a session reads or edits `.github/dependabot.yml`):** patch and minor updates stay in separate groups, behind a `cooldown`; `ignore` holds the deliberate pins only, each with its reason. Dependabot does not see lockfile overrides, vendored code, patches or the scanner pins of `security.yml`: the periodic audit stays the net.
 
 ## Why
 

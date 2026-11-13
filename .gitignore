@@ -13,3 +13,8 @@ node_modules/
 !.claude/skills/
 CLAUDE.local.md
 # <<< claude-template
+
+# >>> claude-template:rules
+# Path-scoped rules are shared instruction files, like agents and skills.
+!.claude/rules/
+# <<< claude-template:rules
