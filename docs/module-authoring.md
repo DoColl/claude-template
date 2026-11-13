@@ -39,7 +39,7 @@ modules/<id>/
 
 Every file under `files/` is copied to the same relative path, with its mode (keep scripts executable).
 
-- **Kit-owned** (the default): machinery — hooks, guards, workflows, the convention page that documents them. Recorded with a hash, so `update` refreshes a file the project has not edited and reports one it has.
+- **Kit-owned** (the default): machinery — hooks, guards, workflows, the convention page that documents them. Recorded with a hash, so `update` refreshes a file the project has not edited and reports one it has. A kit-owned script or workflow never asks the project to edit it: no `TODO(harness)` in it (a test). What the project decides there is a placeholder, which `update --set` changes, or lives in a seed the file reads.
 - **Seed** (listed in `seed`, exact path or `dir/**`): a skeleton the project fills in — `CLAUDE.md`, an index, a config. Created once, never overwritten, not even with `--force`.
 
 Two modules never ship the same path.

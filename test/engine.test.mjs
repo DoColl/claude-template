@@ -101,6 +101,16 @@ test("every placeholder a module uses is declared by it or by a module it requir
   }
 });
 
+// A kit-owned file the project has to edit is a conflict at every update. What the project decides is a
+// placeholder value (recorded, rendered again by `update --set`) or lives in a seed. A convention page may
+// name the marker in its prose.
+test("no kit-owned file asks the project to edit it: TODO(harness) markers are in seeds only", () => {
+  for (const [id, mod] of kit.modules) for (const rel of walk(path.join(mod.dir, "files"))) {
+    const seed = (mod.seed ?? []).some((g) => g === rel || (g.endsWith("/**") && rel.startsWith(g.slice(0, -2))));
+    if (!seed && !rel.endsWith(".md")) assert.doesNotMatch(read(mod.dir, `files/${rel}`), /TODO\(harness\)/, `${id}: ${rel} is kit-owned and carries a TODO(harness)`);
+  }
+});
+
 test("a placeholder declared by several modules has one spec", () => {
   const seen = new Map();
   for (const [id, mod] of kit.modules) for (const [key, spec] of Object.entries(mod.placeholders ?? {})) {

@@ -49,6 +49,8 @@ node /path/to/claude-template/bin/harness.mjs update .                      # re
 node /path/to/claude-template/bin/harness.mjs update . --check              # write nothing; exit 3 when the project is behind the kit
 node /path/to/claude-template/bin/harness.mjs update . --modules agents     # one module at a time
 node /path/to/claude-template/bin/harness.mjs update . --only scripts/guards.d   # or one file, or one directory
+node /path/to/claude-template/bin/harness.mjs update . --merge              # merge a kit file you edited with the kit's new version
+node /path/to/claude-template/bin/harness.mjs update . --set TEST_HOLD_RE='(^|/)tests?/'   # change a setting of the installation
 ```
 
 Running `init` again is safe: files already in place are left alone.
@@ -60,7 +62,7 @@ node /path/to/claude-template/bin/harness.mjs adopt . --modules git-hooks,ci-sec
 node /path/to/claude-template/bin/harness.mjs show . scripts/security-checks.sh --modules core | diff - scripts/security-checks.sh
 ```
 
-`adopt` writes what `init` would, except that a kit file the project already has with other content stays as it is and is recorded as a kit file edited in the project. The report sorts them by distance from the kit's version; `status` and the advisory guard HD-1 keep listing them, and `update` reports a conflict when the kit later changes one. Sections for an instruction file that has no slot are named, to paste by hand. Adopting does not make the project's version pass the kit's guards: run the gate and decide file by file which version stays.
+`adopt` writes what `init` would, except that a kit file the project already has with other content stays as it is and is recorded as a kit file edited in the project. The report sorts them by distance from the kit's version; `status` and the advisory guard HD-1 keep listing them, and `update` reports a conflict when the kit later changes one. The report counts, module by module, what is created, identical, adopted and kept. Sections for an instruction file that has no slot are named, to paste by hand; `--decline-fragments` records them as declined instead, when the project's file already covers them. Adopting does not make the project's version pass the kit's guards: run the gate and decide file by file which version stays.
 
 ## Modules
 
@@ -155,6 +157,8 @@ Files marked "yours" are created once and never touched again. The others are th
 - **Placeholders.** A few values (project name, default branch, the name of your CI workflow) are asked at install time and checked against a strict pattern before anything is written.
 - **Gaps.** What the kit cannot know is a `TODO(harness)` comment. `status` and an advisory guard count them.
 - **Updates.** `update` takes everything the installed modules ship, or a selection: `--modules` for some of them, `--only` for a file or a directory. What a selection leaves out stays recorded as it was installed, and the next `update` or `update --check` lists it again. A file the kit no longer ships is removed when it is still as installed, and reported when the project edited it. The manifest records the kit's version and, from a git checkout, its commit; `CHANGELOG.md` says what each version changed and what is left to do by hand.
+- **Settings.** A value the project decides inside a kit file — the patterns of `auto-merge.yml` — is a placeholder: `update --set KEY=VALUE` records it and renders the file again, so the file stays the kit's. No kit-owned script or workflow asks to be edited.
+- **Merges.** A kit file the project did edit, and that the kit then changed, is a conflict; `update --merge` merges the two when they do not overlap. It finds the version that was installed in the kit's git history, by the hash the manifest recorded, so the kit must be a checkout with its history. An overlap is left to a human and nothing is written to the file.
 - **Conflicts.** A file that already exists with other content is left alone and reported; the exit code is 2.
 
 `docs/module-authoring.md` is the full contract, for writing a module of your own.

@@ -107,11 +107,14 @@ env:
   # The project's own additions to the list above, applied with it by both
   # jobs (same syntax, same matching). `^$` matches no path: nothing is added
   # as shipped. An empty or unusable pattern holds every pull request.
-  # TODO(harness): add whatever else your tooling executes (another agent's
-  # instruction file, a page of install commands that sessions follow, another
-  # hooks directory, a script one of your own guards runs), with a `hold` row
-  # per path in scripts/auto-merge-paths.txt, then delete this note.
-  PROJECT_GATE_RE: '^$'
+  # Whatever else your tooling executes goes here (another agent's instruction
+  # file, a page of install commands that sessions follow, another hooks
+  # directory, a script one of your own guards runs), with a `hold` row per
+  # path in scripts/auto-merge-paths.txt. The value is a setting of the
+  # installation, not an edit of this file: the kit's `update <dir> --set
+  # PROJECT_GATE_RE=<pattern>` writes it here and remembers it, so this file
+  # stays the kit's and keeps following it.
+  PROJECT_GATE_RE: '__HARNESS_PROJECT_GATE_RE__'
   # Tests an unattended merge must not weaken (ERE on paths, matched like the
   # two patterns above). Green means merged, and green is whatever the tests
   # say: a pull request that deletes or renames a file matching this pattern,
@@ -120,10 +123,11 @@ env:
   # matches no path: nothing is held as shipped. An unusable pattern holds
   # every pull request that changes an existing file. A tripwire, not a proof:
   # docs/conventions/auto-merge-policy.md § Tests that get weaker.
-  # TODO(harness): the paths of your tests and of their fixtures and
-  # snapshots (`(^|/)tests?/|\.(test|spec)\.[a-z]+$`), with `test` rows in
-  # scripts/auto-merge-paths.txt, then delete this note.
-  TEST_HOLD_RE: '^$'
+  # Name the paths of your tests and of their fixtures and snapshots
+  # (`(^|/)tests?/|\.(test|spec)\.[a-z]+$`), with `test` rows in
+  # scripts/auto-merge-paths.txt. Set like PROJECT_GATE_RE: `update <dir>
+  # --set TEST_HOLD_RE=<pattern>`.
+  TEST_HOLD_RE: '__HARNESS_TEST_HOLD_RE__'
   # Where a Dependabot major is held even when it is an indirect dependency's
   # security update (ERE on the changed paths; `.github/` is always held).
   # `.` matches every path: as shipped, every Dependabot major waits for a hand
@@ -131,8 +135,8 @@ env:
   # does not build or test (a mobile app, a production image), or to `^$` when
   # CI exercises everything, to let such a fix through unattended elsewhere.
   # An empty or unusable pattern holds everything.
-  # TODO(harness): decide where a major may go through, then delete this line.
-  MAJOR_HOLD_RE: '.'
+  # Set like PROJECT_GATE_RE: `update <dir> --set MAJOR_HOLD_RE=<pattern>`.
+  MAJOR_HOLD_RE: '__HARNESS_MAJOR_HOLD_RE__'
 
 jobs:
   promote-from-ci:
@@ -623,8 +627,9 @@ jobs:
       # Nothing is dispatched after the merge (see the header). If a deploy or
       # a test run must follow it, the dispatch goes here, before the branch
       # cleanup, with what docs/conventions/auto-merge-policy.md § After the
-      # merge lists.
-      # TODO(harness): decide whether this project needs a dispatch, then delete this line.
+      # merge lists. That is an edit of this file: from then on `update` no
+      # longer refreshes it by itself, and `update --merge` carries the edit
+      # over a new version of the kit.
 
       # Delete the head ref ourselves (see the header). `!cancelled()` keeps it
       # running when a step added between the merge and here failed, since the
