@@ -165,7 +165,7 @@ Files marked "yours" are created once and never touched again. The others are th
 
 ## From a Claude Code session
 
-Copy `skills/harness-init/` into `~/.claude/skills/`, set `CLAUDE_TEMPLATE_DIR` to your checkout, and ask Claude to initialise the project with the harness. The skill runs the installer, asks which modules you want and helps fill the gaps from the codebase.
+Copy `skills/harness-init/` into `~/.claude/skills/`, set `CLAUDE_TEMPLATE_DIR` to your checkout, and ask Claude to initialise the project with the harness. The skill runs the installer, asks which modules you want and helps fill the gaps from the codebase. Two more skills cover the rest of a project's life: `skills/harness-adopt/` for a repository that already has its own harness at the kit's paths, and `skills/harness-update/` to bring an installed project up to the kit's current version, wholly or by selection. The three were written for the kit; none has been run live.
 
 ## Why files and not a plugin
 
@@ -188,7 +188,7 @@ node --test test/*.test.mjs     # unit tests, static rules on every module, end-
 
 `CLAUDE.md` at the root of this repository holds the rules for changing the kit; `docs/module-authoring.md` the contract for modules.
 
-A release is a version in `kit.json` and `package.json`, its entry at the top of `CHANGELOG.md` (a test holds the three together), `node bin/harness.mjs update .` for the root manifest, and the tag `v<version>` on the merged commit.
+A release is a version in `kit.json` and `package.json`, its entry at the top of `CHANGELOG.md` (a test holds the three together), `node bin/harness.mjs update .` for the root manifest, and nothing after the merge: `.github/workflows/release.yml` puts the tag `v<version>` on the commit of `main` that changes `kit.json`, and never moves an existing tag. That workflow is the kit's own, not a module; it has not run yet.
 
 The kit installs part of itself at its root — `core`, `ci-security` and `weekly-digest` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
 

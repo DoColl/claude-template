@@ -1,0 +1,50 @@
+name: Release tag
+
+# Puts the tag v<version> on the commit of main that changes kit.json, so that
+# a release needs no hand step after the merge: the version is decided in the
+# pull request (kit.json, package.json and CHANGELOG.md, held together by a
+# test) and reviewed there.
+#
+# No checkout and no action: kit.json is read through the API at the pushed
+# commit, and the tag is one API call. An existing tag is never moved — the
+# job ends there. Only a push to main starts it, and only a merged pull
+# request reaches main.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'kit.json'
+
+permissions: {}
+
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag the version of kit.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # create the tag ref; nothing else is written
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Create v<version> on this commit, once
+        run: |
+          set -euo pipefail
+          version=$(gh api "repos/$GH_REPO/contents/kit.json?ref=$SHA" --jq '.content' | base64 -d | jq -r '.version')
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::kit.json at $SHA carries no semver version"
+            exit 1
+          fi
+          tag="v$version"
+          if gh api "repos/$GH_REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "$tag already exists: left where it is"
+            exit 0
+          fi
+          gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$SHA" >/dev/null
+          echo "$tag → $SHA"
