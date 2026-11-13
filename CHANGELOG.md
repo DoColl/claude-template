@@ -16,6 +16,14 @@ The first line is the level, `patch`, `minor` or `major`. After a blank line com
 
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
+## 0.8.1
+
+- How the kit itself is released; no module changes with it. A pull request no longer writes the version or its `CHANGELOG.md` entry: it adds a fragment, `changes/<slug>.md`, with its level (`patch`, `minor` or `major`), the lines of its entry and its "By hand" part, so that pull requests written in parallel stop conflicting on the same lines. The format is at the top of `CHANGELOG.md`.
+- `node bin/release.mjs` cuts a release, in a pull request of its own: the highest level among the fragments gives the next version, written to `kit.json` and `package.json`; the entry goes on top of `CHANGELOG.md` with one "By hand" part; the fragments are removed and `update .` records the version in the kit's own installation. `--dry-run` writes nothing. `.github/workflows/release.yml` still tags the merge.
+- The tests check every fragment, and the kit's CI fails a pull request that changes `modules/`, `lib/` or `bin/` without adding one. A change to `CHANGELOG.md` or `changes/` now starts that CI.
+
+By hand: nothing.
+
 ## 0.8.0
 
 - New module `eco-design`, on demand: the convention for using the `green-claude` plugin (eco-design rules drawn from RGESN and GR491, with a deterministic audit) at a commit the project has read, through the plugin pins of `security-review` (PL-1). It states what the plugin changes in a session, puts its rules below `CLAUDE.md`, security and the request, treats an audit hit as a candidate to confirm in context, and makes `.green-claude/decisions.md` a reviewed derogation list. One bullet in `CLAUDE.md`, one convention page. Nothing is copied from the plugin, and nothing in it has run live.
