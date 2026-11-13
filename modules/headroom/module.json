@@ -1,0 +1,26 @@
+{
+  "id": "headroom",
+  "title": "Headroom context compression, kept per machine",
+  "summary": "How to run the Headroom compression proxy on one machine without committing it: a pinned install, a launch script with a clean environment and its egress switches, and a guard that keeps proxy routing, Headroom wiring and its local state out of git.",
+  "phase": "on-demand",
+  "order": 48,
+  "requires": [
+    "core"
+  ],
+  "append": [
+    {
+      "file": ".gitignore",
+      "from": "append/gitignore",
+      "marker": "claude-template:headroom"
+    }
+  ],
+  "postInstall": [
+    "For a person, to relay — the session that installs or updates the kit does none of these steps, which act on someone's own machine, not on the project.",
+    "Nothing runs Headroom for you: each person who wants it installs it on their own machine (docs/conventions/headroom.md § Install), at the pinned version, never in CI.",
+    "Before relying on it, read § What the proxy sees and keeps: every prompt, file and credential of the session crosses it. Check that this fits your provider's terms and your plan.",
+    "Start the proxy only with the launch script of the page (§ The launch script), saved outside the repository, then give ANTHROPIC_BASE_URL to the one claude process you start yourself (§ Start a session).",
+    "Do not run `headroom wrap`, `headroom init`, `headroom mcp install`, `headroom learn` or the headroom-marketplace plugins: they write user-wide settings, register a server for every agent, or send transcripts to a model (§ Left out).",
+    "HR-1 refuses any committed gateway URL and any proxy variable in a workflow, whatever the job: read § Not for every project before keeping this module in a project that has one.",
+    "This piece has never run live: do the live check (§ Live check) once before trusting it."
+  ]
+}

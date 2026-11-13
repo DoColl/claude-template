@@ -1,0 +1,4 @@
+# Headroom: what its commands leave in a project, at any depth. HR-2 also refuses
+# these files if they are force-added, and checks that this block is still here.
+.headroom/
+**/.claude/.headroom_wrap_*
