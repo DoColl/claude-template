@@ -397,12 +397,12 @@ test("update lists the By hand steps of the versions it crosses, until the manif
   version("1.0.0");
   applyPlan(buildPlan({ kit: loadKit(root), target: dir, given: { PROJECT_NAME: "demo-app" } }));
   version("1.2.0");
-  write(root, "CHANGELOG.md", "# Changelog\n\n## 1.3.0\n\nNot there yet.\n\nBy hand: a step of the future.\n\n## 1.2.0\n\n- A thing.\n\nBy hand, for an installed project: add the new line\nto the skeleton.\n\n## 1.1.0\n\nBy hand: nothing.\n\n## 1.0.0\n\nBy hand: an old step.\n");
+  write(root, "CHANGELOG.md", "# Changelog\n\n## 1.3.0\n\nNot there yet.\n\nBy hand: a step of the future.\n\n## 1.2.0\n\n- A thing.\n\nBy hand, for an installed project: add the new line\nto the skeleton.\n\n## 1.1.0\n\nBy hand: nothing. To take the new module: add it.\n\n## 1.0.0\n\nBy hand: an old step.\n");
   write(path.join(root, "modules/core/files"), "docs/conventions/new-page.md", "# New\n");
   const up = (...args) => spawnSync(process.execPath, [path.join(root, "bin/harness.mjs"), "update", dir, ...args], { encoding: "utf8", input: "" });
   const check = up("--check"); assert.equal(check.status, 3, output(check));
   assert.match(check.stdout, /BY HAND[^\n]*\(1 version\(s\) crossed[^\n]*\n  1\.2\.0  By hand, for an installed project: add the new line\n +to the skeleton\./);
-  assert.doesNotMatch(check.stdout, /old step|of the future|1\.1\.0/, "only the versions after the recorded one, up to the kit's, and only those with a step");
+  assert.doesNotMatch(check.stdout, /old step|of the future|1\.1\.0/, "only the versions after the recorded one, up to the kit's, and only those with a step — a remark after \"nothing.\" is not one");
   assert.match(check.stdout, /behind the kit: 1 item/, "a step is not counted as behind");
   assert.match(up().stdout, /BY HAND/, "shown by the update that crosses the version");
   const after = up("--check"); assert.equal(after.status, 0); assert.doesNotMatch(after.stdout, /BY HAND/, "and not once the manifest names it");
