@@ -1,0 +1,7 @@
+# Ignored files that Claude Code copies into each new worktree it creates.
+# .gitignore syntax. A file is copied only when it matches a pattern here AND
+# is ignored by git: a tracked file never is. Details and limits:
+# docs/conventions/parallel-sessions.md
+#
+# Nothing to copy here: the kit keeps no ignored configuration, and its tests
+# need only git, bash and Node.
