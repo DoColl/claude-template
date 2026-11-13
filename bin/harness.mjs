@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // harness — install claude-template modules into a project. No dependency
 // beyond Node (>= 20). Exit codes: 0 done, 1 error, 2 done but conflicts were
-// left untouched.
+// left untouched, 3 `update --check` found the project behind the kit.
 import { parseArgs } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { loadKit, listModules, resolveSelection, PHASES } from "../lib/kit.mjs";
-import { buildPlan, applyPlan, summarize, readManifest, resolveValues, pendingWork, drift, MANIFEST } from "../lib/install.mjs";
+import { buildPlan, applyPlan, summarize, readManifest, resolveValues, pendingWork, drift, selector, MANIFEST } from "../lib/install.mjs";
 
 const USAGE = `claude-template — a modular Claude Code harness for a project
 
@@ -15,7 +15,7 @@ const USAGE = `claude-template — a modular Claude Code harness for a project
   node bin/harness.mjs init <dir> [options]       install modules into <dir>
   node bin/harness.mjs add <dir> --modules a,b    add modules to an initialised project
   node bin/harness.mjs status <dir>               what is installed, what drifted, what is left to write
-  node bin/harness.mjs update <dir> [--dry-run]   refresh the kit-owned files left untouched
+  node bin/harness.mjs update <dir> [options]     refresh the kit-owned files left untouched
 
 Options for init / add:
   --modules a,b    module ids (what they require is added; "core" always is)
@@ -24,6 +24,17 @@ Options for init / add:
   --dry-run        show the plan, write nothing
   --force          overwrite kit files that differ in the project (never the
                    project-owned seeds such as CLAUDE.md)
+
+Options for update:
+  --modules a,b    only the files of these installed modules
+  --only <path>    only this file, or this directory and what is under it
+                   (repeatable; with --modules, a file must match both)
+  --check          write nothing; exit 3 when something would change
+  --dry-run        show the plan, write nothing
+  --force          overwrite the kit files edited in the project
+An update also removes the files the kit no longer ships, when they are still
+as installed. A partial update leaves the rest recorded as it was: the next
+update, or --check, still lists it.
 
 Without --modules or --all, init asks which modules to install when run in a
 terminal. Running init again is safe: files already in place are left alone.`;
@@ -90,20 +101,23 @@ async function askValues(kit, selected, given, previous, target, rl) {
 function report(kit, plan, { dryRun, mode }) {
   const s = summarize(plan);
   const verb = dryRun ? "would be " : "";
-  out(`${kit.name} ${kit.version} → ${plan.target}${dryRun ? "  (dry run, nothing written)" : ""}`);
+  out(`${kit.name} ${kit.version}${kit.commit ? ` (${kit.commit.slice(0, 7)}${kit.commit.endsWith("-dirty") ? ", uncommitted changes" : ""})` : ""} → ${plan.target}${dryRun ? "  (dry run, nothing written)" : ""}`);
   out(`modules: ${plan.selected.join(", ")}${plan.added.length && plan.previous ? `  (new: ${plan.added.join(", ")})` : ""}`);
   const line = (label, items) => { if (items.length) { out(`\n${label} (${items.length})`); for (const i of items) out(`  ${i}`); } };
   line(`${verb}created`, s.created);
   line(`${verb}updated`, s.updated);
   line(`${verb}appended to`, s.appended);
+  line(`${verb}removed — no longer shipped by the kit, untouched here`, s.removed);
   line(`fragments ${verb}inserted`, s.fragmentsInserted);
   line("kept — project-owned files already present", s.kept);
   if (mode === "update") line("left alone — edited in the project, unchanged in the kit", s.local);
   line("newer version in the kit — run `update` to refresh", s.outdated);
   line("CONFLICTS — left untouched, compare by hand or re-run with --force", s.conflicts.map((c) => `${c.file}  (${c.why})`));
   line("fragments NOT inserted — the slot is gone from the file, paste them by hand", s.fragmentsMissingSlot.map((f) => `${f.source} → ${f.target}`));
-  line("recorded earlier but no longer shipped by the installed modules — remove by hand if unused", s.dropped);
-  if (!s.created.length && !s.updated.length && !s.appended.length && !s.fragmentsInserted.length) out("\nnothing to write: the project is in step with the kit for these modules");
+  line("no longer shipped by the kit, and edited here or yours to begin with — remove by hand if unused", s.dropped);
+  line("no longer shipped by the kit — `update` removes the ones left untouched", s.pendingRemoval);
+  line("not selected — still behind the kit", s.deferred);
+  if (!s.created.length && !s.updated.length && !s.appended.length && !s.fragmentsInserted.length && !s.removed.length) out(`\nnothing to write: the project is in step with the kit for ${s.deferred.length ? "this selection" : "these modules"}`);
   return s;
 }
 
@@ -119,6 +133,7 @@ async function install(kit, cmd, dir, opt) {
   const target = requireDir(dir, { create: cmd === "init" });
   const previous = readManifest(target);
   if (cmd === "add" && !previous) throw new Usage(`${target} is not initialised (no ${MANIFEST}); use init`);
+  if (opt.only || opt.check) throw new Usage(`--only and --check belong to \`update\`, not to \`${cmd}\``);
   const given = parseSets(opt.set);
   const interactive = process.stdin.isTTY && process.stdout.isTTY;
   let moduleIds;
@@ -143,12 +158,28 @@ async function install(kit, cmd, dir, opt) {
 
 function update(kit, dir, opt) {
   const target = requireDir(dir);
-  if (!readManifest(target)) throw new Usage(`${target} is not initialised (no ${MANIFEST})`);
-  const plan = buildPlan({ kit, target, mode: "update", force: Boolean(opt.force) });
+  const installed = readManifest(target);
+  if (!installed) throw new Usage(`${target} is not initialised (no ${MANIFEST})`);
+  if (opt.all) throw new Usage("update takes --modules or --only, not --all: without either it covers every installed module");
+  if (opt.check && opt.force) throw new Usage("--check writes nothing: it does not go with --force");
+  const modules = (opt.modules ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (opt.modules !== undefined && !modules.length) throw new Usage("--modules expects module ids");
+  for (const id of modules) if (!installed.modules.includes(id)) throw new Usage(`${id} is not installed here (installed: ${installed.modules.join(", ")}); \`add\` installs a module`);
+  const only = opt.only ?? [];
+  const select = selector({ modules, only });
+  const plan = buildPlan({ kit, target, mode: "update", force: Boolean(opt.force), select });
+  const known = [...plan.files.keys(), ...Object.keys(installed.files)];
+  for (const p of only) if (!known.some((rel) => selector({ only: [p] })("", rel))) throw new Usage(`--only ${p}: no installed module ships such a file or directory`);
   const from = plan.previous.kit?.version;
   if (from && from !== kit.version) out(`kit ${from} → ${kit.version}`);
-  const s = report(kit, plan, { dryRun: opt["dry-run"], mode: "update" });
-  if (!opt["dry-run"]) applyPlan(plan);
+  const dryRun = Boolean(opt["dry-run"] || opt.check);
+  const s = report(kit, plan, { dryRun, mode: "update" });
+  if (!dryRun) applyPlan(plan);
+  if (opt.check) {
+    const behind = s.created.length + s.updated.length + s.appended.length + s.fragmentsInserted.length + s.removed.length + s.conflicts.length + s.dropped.length;
+    if (behind) out(`\nbehind the kit: ${behind} item(s)`);
+    return behind ? 3 : 0;
+  }
   return s.conflicts.length ? 2 : 0;
 }
 
@@ -161,7 +192,7 @@ function status(kit, dir, opt) {
   const available = listModules(kit).map((m) => m.id).filter((id) => !manifest.modules.includes(id));
   if (opt.json) { out(JSON.stringify({ kit: manifest.kit, current: kit.version, modules: manifest.modules, available, values: manifest.values, ...d, todos }, null, 2)); return 0; }
   out(`${target}`);
-  out(`installed from ${manifest.kit?.name ?? "?"} ${manifest.kit?.version ?? "?"}${manifest.kit?.version !== kit.version ? `  (this kit is ${kit.version}: \`update\` refreshes untouched files)` : ""}`);
+  out(`installed from ${manifest.kit?.name ?? "?"} ${manifest.kit?.version ?? "?"}${typeof manifest.kit?.commit === "string" ? ` (${manifest.kit.commit.slice(0, 7)})` : ""}${manifest.kit?.version !== kit.version ? `  (this kit is ${kit.version}: \`update\` refreshes untouched files)` : ""}`);
   out(`modules:   ${manifest.modules.join(", ")}`);
   out(`available: ${available.join(", ") || "(all installed)"}`);
   const line = (label, items) => { if (items.length) { out(`\n${label} (${items.length})`); for (const i of items) out(`  ${i}`); } };
@@ -175,7 +206,7 @@ function status(kit, dir, opt) {
 async function main(argv) {
   const { values: opt, positionals } = parseArgs({
     args: argv, allowPositionals: true,
-    options: { modules: { type: "string" }, all: { type: "boolean" }, set: { type: "string", multiple: true }, "dry-run": { type: "boolean" }, force: { type: "boolean" }, json: { type: "boolean" }, help: { type: "boolean", short: "h" } },
+    options: { modules: { type: "string" }, all: { type: "boolean" }, set: { type: "string", multiple: true }, "dry-run": { type: "boolean" }, only: { type: "string", multiple: true }, check: { type: "boolean" }, force: { type: "boolean" }, json: { type: "boolean" }, help: { type: "boolean", short: "h" } },
   });
   const [cmd, dir, ...extra] = positionals;
   if (opt.help || !cmd || cmd === "help") { out(USAGE); return 0; }

@@ -46,6 +46,9 @@ Later, as the project grows:
 node /path/to/claude-template/bin/harness.mjs add . --modules ci-security   # another module
 node /path/to/claude-template/bin/harness.mjs status .                      # installed modules, edited files, gaps left
 node /path/to/claude-template/bin/harness.mjs update .                      # refresh the kit files you have not edited
+node /path/to/claude-template/bin/harness.mjs update . --check              # write nothing; exit 3 when the project is behind the kit
+node /path/to/claude-template/bin/harness.mjs update . --modules agents     # one module at a time
+node /path/to/claude-template/bin/harness.mjs update . --only scripts/guards.d   # or one file, or one directory
 ```
 
 Running `init` again is safe: files already in place are left alone.
@@ -142,6 +145,7 @@ Files marked "yours" are created once and never touched again. The others are th
 - **Slots.** Seeds carry comment lines such as `<!-- harness:slot delegation -->`. A module inserts its section there, once, and the line stays so that a module added later finds it. Claude Code does not send block-level HTML comments in `CLAUDE.md` to the model, so they cost nothing in context.
 - **Placeholders.** A few values (project name, default branch, the name of your CI workflow) are asked at install time and checked against a strict pattern before anything is written.
 - **Gaps.** What the kit cannot know is a `TODO(harness)` comment. `status` and an advisory guard count them.
+- **Updates.** `update` takes everything the installed modules ship, or a selection: `--modules` for some of them, `--only` for a file or a directory. What a selection leaves out stays recorded as it was installed, and the next `update` or `update --check` lists it again. A file the kit no longer ships is removed when it is still as installed, and reported when the project edited it. The manifest records the kit's version and, from a git checkout, its commit; `CHANGELOG.md` says what each version changed and what is left to do by hand.
 - **Conflicts.** A file that already exists with other content is left alone and reported; the exit code is 2.
 
 `docs/module-authoring.md` is the full contract, for writing a module of your own.
@@ -170,6 +174,8 @@ node --test test/*.test.mjs     # unit tests, static rules on every module, end-
 ```
 
 `CLAUDE.md` at the root of this repository holds the rules for changing the kit; `docs/module-authoring.md` the contract for modules.
+
+A release is a version in `kit.json` and `package.json`, its entry at the top of `CHANGELOG.md` (a test holds the three together), `node bin/harness.mjs update .` for the root manifest, and the tag `v<version>` on the merged commit.
 
 The kit installs part of itself at its root — `core`, `ci-security` and `weekly-digest` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
 
