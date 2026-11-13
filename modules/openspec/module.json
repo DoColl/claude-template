@@ -8,8 +8,9 @@
   "postInstall": [
     "Install the OpenSpec CLI at a pinned version (the convention was written against @fission-ai/openspec 1.10.0) and run `openspec init --tools claude` in the project: the non-interactive form.",
     "Commit what it generates — six commands under .claude/commands/opsx/ (propose, explore, apply, update, sync, archive) and six skills under .claude/skills/openspec-* — and never hand-edit those files: `openspec update` rewrites them after a CLI upgrade, `openspec update --force` at any time.",
+    "Read docs/conventions/openspec-workflow.md § What the generated files pre-approve before committing them: each one lets a session run any `openspec` subcommand without a prompt, `feedback` (a public issue, through gh) and `config` included.",
     "A change with no delta (tooling, documentation) declares `skip_specs: true` in its .openspec.yaml: without it, `openspec validate` and so OS-1 reject the change.",
     "Close a change in two steps, sync then archive: archiving alone can leave its deltas out of the specs (docs/conventions/openspec-workflow.md).",
-    "If the agents module is installed, add the validation command to .claude/hooks/agent-bash-guard.config.json so the verifier can run it."
+    "With the agents module, the verifier validates the OpenSpec files by running the gate, where OS-1 turns the CLI's telemetry off. Do not list `openspec validate` in .claude/hooks/agent-bash-guard.config.json: the bare command reports to the CLI's telemetry, and the guard accepts no prefix that would turn it off."
   ]
 }
