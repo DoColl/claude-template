@@ -33,9 +33,13 @@ The manifest is the reference of that comparison, so HD-1 says nothing about a c
 
 ### Feeding the catalogue: `/retro`
 
-The catalogue only grows if someone turns a mistake into a finding. `.claude/skills/retro/` is a skill run by hand after a session that made a mistake, needed a correction or took far longer than it should. It reads the session's evidence and what the project already has, lists the incidents, and gives each one destination, cheapest to enforce first: a check (a finding with its ID, its row and its guard), a review rule, a pointer, an access to set up, an instruction to prune, or no action with its reason. It proposes; it changes nothing until the user picks.
+The catalogue only grows if someone turns a mistake into a finding. `.claude/skills/retro/` is a skill run at the end of a session that changed files, hit a red gate or was corrected (`CLAUDE.md` § Working rules), in a closing form that works from what the session already holds and stops at five candidates; and by hand, in full, on a session the user names. It reads the session's evidence and what the project already has, lists the incidents, and gives each one destination, cheapest to enforce first: an issue for the kit when the cause is in a file the kit owns, a check (a finding with its ID, its row and its guard), a review rule, a pointer, an access to set up, an instruction to prune, or no action with its reason. It proposes; it changes nothing until the user picks.
 
-It is declared `disable-model-invocation: true`: no session starts it on its own, and its description costs no context until it is called.
+**What concerns the kit goes to the kit.** A fault in a kit-owned file is not fixed in the project: the next update would bring it back. The skill drafts an issue for the kit's repository (`DoColl/claude-template`, a value of the installation: `update . --set KIT_REPOSITORY=<owner>/<name>` for a fork), in general terms — no name, code, path or data of this project — and posts it only once the user has read it and said yes. A session that cannot reach that repository leaves the text ready to paste. An unattended session runs no retrospective and posts nothing.
+
+The rule that starts it is a sentence in `CLAUDE.md`, not a check: nothing fails when a session skips it, and its cost is paid at the end of every session that qualifies. Prune the sentence if its proposals stop being used.
+
+It was first declared `disable-model-invocation: true`, run by hand only; that line went when the closing form was added, since a session must be able to start it.
 
 Status: written for the kit, never run live. Treat its first runs as its test.
 
@@ -53,3 +57,4 @@ The gate checks itself only in the obvious way: with no guard to run, it fails r
 
 - Installed with the kit.
 - The `/retro` skill added, to turn a session's mistakes into findings.
+- `/retro` gets a closing form, run at the end of a session, and a destination for what concerns the kit: a drafted issue for the kit's repository, posted on the user's yes.

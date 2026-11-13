@@ -1,7 +1,7 @@
 {
   "kit": {
     "name": "claude-template",
-    "version": "0.3.1"
+    "version": "0.4.0"
   },
   "modules": [
     "core",
@@ -12,12 +12,13 @@
     "PROJECT_NAME": "claude-template",
     "CLAUDE_MD_BUDGET": "25000",
     "DEFAULT_BRANCH": "main",
+    "KIT_REPOSITORY": "DoColl/claude-template",
     "CI_WORKFLOW": "CI"
   },
   "files": {
     ".claude/skills/retro/SKILL.md": {
       "module": "core",
-      "sha256": "179a9d0a7e6e4bf76506e49de7f138648dc03d7d7e86c69153a76bdf6d07112c"
+      "sha256": "c36217d429071085ebbfabec11ec8e029a28453795d1f2bcd7b6dc3d4c47816b"
     },
     ".gitleaks.toml": {
       "module": "core",
@@ -53,7 +54,7 @@
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
-      "sha256": "1eadaf1570be81fecefff094e524bd86abe60e861ba3da9dd38f0adadb86bb72"
+      "sha256": "00aa450a5b66e5357fc42bb3e3c4fbe695e1af69cafc4149218c3f4b8e3f6574"
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",

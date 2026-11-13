@@ -90,10 +90,10 @@ Doc and code stay in sync at every commit on the default branch: when a change a
 
 ## Working rules
 
-- One git worktree per task. Never switch branches, reset or reinstall dependencies in a checkout another session may be using.
+- One git worktree per task, removed once its branch is merged. Never switch branches, reset or reinstall dependencies in a checkout another session may be using.
 - `git fetch` and branch from the remote default branch: a clean `git status` does not mean up to date.
-- After editing `CLAUDE.md`, an agent or a hook, restart the open sessions — a running session may keep the instruction files it started with.
-- Remove a worktree once its branch is merged.
+- After editing `CLAUDE.md`, an agent or a hook, restart the open sessions: they may keep the old files.
+- End a session that changed files with `/retro`.
 
 ## Out of scope
 
