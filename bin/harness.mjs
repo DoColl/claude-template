@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { loadKit, listModules, resolveSelection, PHASES } from "../lib/kit.mjs";
+import { byHandBetween } from "../lib/changelog.mjs";
 import { buildPlan, applyPlan, summarize, readManifest, resolveValues, pendingWork, drift, selector, kitVersion, MANIFEST } from "../lib/install.mjs";
 
 const USAGE = `claude-template — a modular Claude Code harness for a project
@@ -58,7 +59,13 @@ Option for adopt:
 Without --modules or --all, init asks which modules to install when run in a
 terminal. Running init again is safe: files already in place are left alone.`;
 
-const out = (s = "") => process.stdout.write(`${s}\n`);
+// A reader that closes early (`… | head`) is not an error: the report stops,
+// the work goes on and the exit code is the one the command earned. The error
+// event comes after the write that caused it, and a command writes its files
+// in the same turn as its report, so nothing is left half done.
+let readerGone = false;
+process.stdout.on("error", (e) => { if (e.code !== "EPIPE") throw e; readerGone = true; });
+const out = (s = "") => { if (!readerGone) process.stdout.write(`${s}\n`); };
 class Usage extends Error {}
 
 function parseSets(list = []) {
@@ -206,6 +213,14 @@ function update(kit, dir, opt) {
   const dryRun = Boolean(opt["dry-run"] || opt.check);
   const s = report(kit, plan, { dryRun, mode: "update" });
   if (!dryRun) applyPlan(plan);
+  // What no update does: the steps the changelog gives for the versions
+  // crossed. Listed until the manifest names the new version; never counted
+  // as "behind", since the installer cannot tell whether they were done.
+  const steps = byHandBetween(kit.root, from, kit.version);
+  if (steps.length) {
+    out(`\nBY HAND — not done by \`update\`, from CHANGELOG.md (${steps.length} version(s) crossed; check each one)`);
+    for (const e of steps) out(`  ${e.version}  ${e.byHand.replace(/\n+/g, "\n          ")}`);
+  }
   if (opt.check) {
     const behind = s.created.length + s.updated.length + s.merged.length + s.appended.length + s.fragmentsInserted.length + s.removed.length + s.conflicts.length + s.dropped.length;
     if (behind) out(`\nbehind the kit: ${behind} item(s)`);
@@ -220,7 +235,7 @@ function show(kit, dir, file, opt) {
   if (opt.all && opt.modules) throw new Usage("--all and --modules are exclusive");
   const moduleIds = opt.all ? [...kit.modules.keys()] : (opt.modules ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   if (!readManifest(target) && !moduleIds.length) throw new Usage(`${target} is not initialised: name the modules with --modules or --all`);
-  process.stdout.write(kitVersion({ kit, target, moduleIds, given: parseSets(opt.set), rel: file }));
+  if (!readerGone) process.stdout.write(kitVersion({ kit, target, moduleIds, given: parseSets(opt.set), rel: file }));
   return 0;
 }
 
