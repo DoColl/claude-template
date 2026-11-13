@@ -42,6 +42,8 @@ node <kit>/bin/harness.mjs init . --modules <ids> [--set KEY=VALUE]... --dry-run
 
 Then run it without `--dry-run`. On an initialised project, use `add . --modules <ids>`.
 
+When the dry run lists many conflicts because the project already has its own hooks, guards or workflows at those paths, propose `adopt . --modules <ids>` instead: it keeps each of them and records it as a kit file edited in the project. `show . <file> --modules <ids> | diff - <file>` compares one with the kit's version. Which version stays is the user's decision, file by file; never `--force` over a project's file to make the list shorter.
+
 - **Conflicts** (exit code 2): a file exists with other content and was left untouched. Show the user each one and let them decide; `--force` overwrites kit files, never the project's own seeds such as `CLAUDE.md`.
 - **Fragments not inserted**: the project's `CLAUDE.md` has no slot for them (it was written before the kit). Show the fragment files the installer names and propose where to paste them.
 

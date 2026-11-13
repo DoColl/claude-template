@@ -235,6 +235,45 @@ test("update --modules / --only refreshes the selection and leaves the rest behi
   assert.equal(gate(dir).status, 0);
 });
 
+// A repository that grew its own hooks, guards and workflows before the kit: `init` leaves each of them as an
+// unrecorded conflict, on every run. `adopt` records them as what they are — kit files edited in the project.
+test("adopt keeps the project's own version of a kit file and records it as edited here", () => {
+  const root = kitCopy(), dir = tmp(), v1 = loadKit(root);
+  for (const rel of ["bin", "lib"]) fs.cpSync(path.join(KIT_ROOT, rel), path.join(root, rel), { recursive: true });
+  const ref = tmp(); applyPlan(buildPlan({ kit: v1, target: ref, given: { PROJECT_NAME: "demo-app" } }));
+  const own = "#!/usr/bin/env bash\n# the project's own gate\nexit 0\n";
+  write(dir, "scripts/security-checks.sh", own, 0o755);
+  write(dir, "scripts/guards.d/_lib.sh", read(ref, "scripts/guards.d/_lib.sh"));
+  write(dir, "CLAUDE.md", "# Written before the kit\n");
+  const h = (...args) => spawnSync(process.execPath, [path.join(root, "bin/harness.mjs"), ...args], { encoding: "utf8", input: "" });
+
+  const init = h("init", dir, "--modules", "core", "--set", "PROJECT_NAME=demo-app", "--dry-run");
+  assert.equal(init.status, 2, "init calls it a conflict"); assert.match(init.stdout, /CONFLICTS[\s\S]*scripts\/security-checks\.sh/);
+  assert.equal(h("adopt", dir, "--modules", "core", "--force").status, 1);
+  const shown = h("show", dir, "scripts/security-checks.sh", "--modules", "core", "--set", "PROJECT_NAME=demo-app");
+  assert.equal(shown.status, 0, output(shown)); assert.equal(shown.stdout, read(ref, "scripts/security-checks.sh"), "show prints the kit's version");
+  assert.equal(h("show", dir, "no/such/file", "--modules", "core").status, 1);
+
+  const r = h("adopt", dir, "--modules", "core", "--set", "PROJECT_NAME=demo-app");
+  assert.equal(r.status, 0, output(r));
+  assert.match(r.stdout, /adopted — [^\n]*\(1\)\n  scripts\/security-checks\.sh  \[core\]  \+\d+ \/ -\d+/);
+  assert.equal(read(dir, "scripts/security-checks.sh"), own, "the project's file is not touched");
+  assert.equal(read(dir, "CLAUDE.md"), "# Written before the kit\n", "nor its seed");
+  const m = readManifest(dir);
+  assert.equal(m.files["scripts/security-checks.sh"].sha256, readManifest(ref).files["scripts/security-checks.sh"].sha256, "recorded with the hash of the kit's version");
+  assert.deepEqual(drift(dir, m).modified, ["scripts/security-checks.sh"], "status lists it as edited here");
+  assert.equal(h("update", dir, "--check").status, 0, "and the project is not behind the kit");
+  assert.equal(h("adopt", dir, "--modules", "core").status, 0, "adopting again changes nothing");
+  assert.deepEqual(readManifest(dir), m);
+
+  // the kit changes that file: a human decides, as for any kit file edited in a project
+  const coreFiles = path.join(root, "modules/core/files");
+  write(coreFiles, "scripts/security-checks.sh", `${read(coreFiles, "scripts/security-checks.sh")}# kit v2\n`, 0o755);
+  const s = summarize(buildPlan({ kit: loadKit(root), target: dir, mode: "update" }));
+  assert.deepEqual(s.conflicts, [{ file: "scripts/security-checks.sh", why: "modified here and changed in the kit" }]);
+  assert.deepEqual(summarize(buildPlan({ kit: loadKit(root), target: dir, mode: "adopt" })).adopted, [], "a recorded file is never adopted over: that conflict stays one");
+});
+
 // A file the kit stops shipping is the kit's to take back, as long as the project left it as installed.
 test("update removes what the kit no longer ships when it is untouched, and only then", () => {
   const root = kitCopy(), dir = tmp();

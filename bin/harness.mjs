@@ -7,17 +7,20 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { loadKit, listModules, resolveSelection, PHASES } from "../lib/kit.mjs";
-import { buildPlan, applyPlan, summarize, readManifest, resolveValues, pendingWork, drift, selector, MANIFEST } from "../lib/install.mjs";
+import { buildPlan, applyPlan, summarize, readManifest, resolveValues, pendingWork, drift, selector, kitVersion, MANIFEST } from "../lib/install.mjs";
 
 const USAGE = `claude-template — a modular Claude Code harness for a project
 
   node bin/harness.mjs list [--json]              the modules, by adoption phase
   node bin/harness.mjs init <dir> [options]       install modules into <dir>
   node bin/harness.mjs add <dir> --modules a,b    add modules to an initialised project
+  node bin/harness.mjs adopt <dir> --modules a,b  install into a project that already has its own
+                                                  version of some kit files: they are kept and recorded
+  node bin/harness.mjs show <dir> <file>          print the kit's version of a file, to compare
   node bin/harness.mjs status <dir>               what is installed, what drifted, what is left to write
   node bin/harness.mjs update <dir> [options]     refresh the kit-owned files left untouched
 
-Options for init / add:
+Options for init / add / adopt:
   --modules a,b    module ids (what they require is added; "core" always is)
   --all            every module
   --set KEY=VALUE  a placeholder value (repeatable); defaults are used otherwise
@@ -35,6 +38,12 @@ Options for update:
 An update also removes the files the kit no longer ships, when they are still
 as installed. A partial update leaves the rest recorded as it was: the next
 update, or --check, still lists it.
+
+adopt writes what init would, except that a kit file the project already has
+with other content is not a conflict: it stays, recorded as a kit file edited
+here. status lists these files, show prints the kit's version of one
+(--modules and --set as for init when the project is not initialised), and
+update reports a conflict when the kit later changes one.
 
 Without --modules or --all, init asks which modules to install when run in a
 terminal. Running init again is safe: files already in place are left alone.`;
@@ -110,6 +119,7 @@ function report(kit, plan, { dryRun, mode }) {
   line(`${verb}removed — no longer shipped by the kit, untouched here`, s.removed);
   line(`fragments ${verb}inserted`, s.fragmentsInserted);
   line("kept — project-owned files already present", s.kept);
+  line(`${dryRun ? "would be " : ""}adopted — the project's own version stays, recorded as a kit file edited here (lines only here / only in the kit)`, s.adopted.map((a) => `${a.file}  [${a.module}]  +${a.onlyHere} / -${a.onlyKit}`));
   if (mode === "update") line("left alone — edited in the project, unchanged in the kit", s.local);
   line("newer version in the kit — run `update` to refresh", s.outdated);
   line("CONFLICTS — left untouched, compare by hand or re-run with --force", s.conflicts.map((c) => `${c.file}  (${c.why})`));
@@ -150,8 +160,10 @@ async function install(kit, cmd, dir, opt) {
       await askValues(kit, selected, given, previous?.values, target, rl);
     } finally { rl.close(); }
   }
-  const plan = buildPlan({ kit, target, moduleIds, given, force: Boolean(opt.force) });
+  if (cmd === "adopt" && opt.force) throw new Usage("adopt keeps the project's files: it does not go with --force");
+  const plan = buildPlan({ kit, target, moduleIds, given, mode: cmd === "adopt" ? "adopt" : "install", force: Boolean(opt.force) });
   const s = report(kit, plan, { dryRun: opt["dry-run"], mode: "install" });
+  if (s.adopted.length) out(`\ncompare one with the kit's version: node bin/harness.mjs show <dir> <file> | diff - <file>`);
   if (!opt["dry-run"]) { applyPlan(plan); nextSteps(kit, plan); }
   return s.conflicts.length ? 2 : 0;
 }
@@ -183,6 +195,16 @@ function update(kit, dir, opt) {
   return s.conflicts.length ? 2 : 0;
 }
 
+function show(kit, dir, file, opt) {
+  const target = requireDir(dir);
+  if (!file) throw new Usage("show expects <dir> <file>");
+  if (opt.all && opt.modules) throw new Usage("--all and --modules are exclusive");
+  const moduleIds = opt.all ? [...kit.modules.keys()] : (opt.modules ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!readManifest(target) && !moduleIds.length) throw new Usage(`${target} is not initialised: name the modules with --modules or --all`);
+  process.stdout.write(kitVersion({ kit, target, moduleIds, given: parseSets(opt.set), rel: file }));
+  return 0;
+}
+
 function status(kit, dir, opt) {
   const target = requireDir(dir);
   const manifest = readManifest(target);
@@ -210,14 +232,15 @@ async function main(argv) {
   });
   const [cmd, dir, ...extra] = positionals;
   if (opt.help || !cmd || cmd === "help") { out(USAGE); return 0; }
-  if (extra.length) throw new Usage(`unexpected argument "${extra[0]}"`);
+  if (extra.length > (cmd === "show" ? 1 : 0)) throw new Usage(`unexpected argument "${extra[cmd === "show" ? 1 : 0]}"`);
   const kit = loadKit();
   switch (cmd) {
     case "list":
       if (opt.json) out(JSON.stringify({ name: kit.name, version: kit.version, modules: listModules(kit) }, null, 2));
       else { out(`${kit.name} ${kit.version}`); printList(kit); }
       return 0;
-    case "init": case "add": return install(kit, cmd, dir, opt);
+    case "init": case "add": case "adopt": return install(kit, cmd, dir, opt);
+    case "show": return show(kit, dir, extra.shift(), opt);
     case "update": return update(kit, dir, opt);
     case "status": return status(kit, dir, opt);
     default: throw new Usage(`unknown command "${cmd}"`);

@@ -53,6 +53,15 @@ node /path/to/claude-template/bin/harness.mjs update . --only scripts/guards.d  
 
 Running `init` again is safe: files already in place are left alone.
 
+A repository that already has its own hooks, guards or workflows at the paths the kit writes takes `adopt` instead of `init`:
+
+```bash
+node /path/to/claude-template/bin/harness.mjs adopt . --modules git-hooks,ci-security --dry-run
+node /path/to/claude-template/bin/harness.mjs show . scripts/security-checks.sh --modules core | diff - scripts/security-checks.sh
+```
+
+`adopt` writes what `init` would, except that a kit file the project already has with other content stays as it is and is recorded as a kit file edited in the project. The report sorts them by distance from the kit's version; `status` and the advisory guard HD-1 keep listing them, and `update` reports a conflict when the kit later changes one. Sections for an instruction file that has no slot are named, to paste by hand. Adopting does not make the project's version pass the kit's guards: run the gate and decide file by file which version stays.
+
 ## Modules
 
 `core` is always installed. A module brings along what it requires.
