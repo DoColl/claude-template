@@ -22,5 +22,6 @@ Decisions that outlive their context (a technology, a pattern, a trade-off) go t
 | `github-actions-rules.md` | Workflow rules: zizmor at zero, SHA pins, token scope, artifact retention | GA-1, GA-2 |
 | `dependabot.md` | Dependabot: separate patch and minor groups, cooldown, deliberate pins, blind spots | ci-security |
 | `weekly-digest.md` | Weekly digest of what waits on a human: sections, thresholds, titles-only rule, `deadline` issues | WD-1 |
+| `ready-on-green.md` | A draft pull request is marked ready once CI is green: what a draft means, what the workflow never does | RG-1..3 |
 <!-- harness:rows conventions-index -->
 <!-- TODO(harness): one row per convention of your own. -->

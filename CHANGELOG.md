@@ -4,6 +4,12 @@ What changed in the kit, newest first. A release is a commit of `main` tagged `v
 
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
+## 0.5.0
+
+- New module `ready-on-green`: a workflow that marks a draft pull request ready for review once its CI run is green, and does nothing else — no checkout, no action, no merge, one permission. For a repository that opens pull requests as drafts and does not install `auto-merge`, which already lifts the draft. Its guard (RG-1..3) pins the trigger, the permission and the conditions. Installed on the kit's own repository.
+
+By hand: nothing. To take the module: `add . --modules ready-on-green`, not alongside `auto-merge`.
+
 ## 0.4.1
 
 Installer only; no module changed.
