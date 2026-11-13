@@ -11,6 +11,6 @@
   "postInstall": [
     "For a PRIVATE repository only: read docs/conventions/claude-rework.md first.",
     "Create the repository label needs-human: after two attempts the rework adds it.",
-    "Never run live by the kit's authors: hold a throwaway pull request on purpose and read the first rework's run and pull request."
+    "Run live once by the kit's authors, in a throwaway repository, and parts of it have not (docs/conventions/claude-rework.md § Status): in yours, hold a throwaway pull request on purpose and read the first rework's run and pull request."
   ]
 }

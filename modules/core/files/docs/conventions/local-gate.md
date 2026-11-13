@@ -42,7 +42,7 @@ The rule that starts it is a sentence in `CLAUDE.md`, not a check: nothing fails
 
 It was first declared `disable-model-invocation: true`, run by hand only; that line went when the closing form was added, since a session must be able to start it.
 
-Status: written for the kit, never run live. Treat its first runs as its test.
+Status: written for the kit. Its closing form ran once, at the end of a session on the kit itself, and the issues it drafted for the kit were posted after the user's yes. Not run in an installed project that cannot reach the kit's repository, and the full form has not run: treat those first runs as its test.
 
 ## Sources
 

@@ -56,7 +56,7 @@
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
-      "sha256": "ae034ec80e185ba3485b2a7751b7350e55780a88f117debdb7e31343a32311e2"
+      "sha256": "1bb1567a4582d1275beac4a658d5c9c51ae28a73e4244b6c98744585ff09d9d7"
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",
@@ -156,7 +156,7 @@
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "0e61302a8ec43f3aa34442e5086f8ac2f0a5e3020957bd4b57caf7dad5fc0eec"
+      "sha256": "945078cd580cbdfc56cfea8de5e791dc992109d11a0f4d8518f2da5080368a88"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",
@@ -168,7 +168,7 @@
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "e2436306011bfe02879a28aaede7fbb0619cf42f0b621c7f33ded5821a302ebf"
+      "sha256": "3438601e32d032f624fe535345027ddb634d1ffdb704e33563ebcdcb53906608"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
