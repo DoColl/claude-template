@@ -56,7 +56,7 @@
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
-      "sha256": "00aa450a5b66e5357fc42bb3e3c4fbe695e1af69cafc4149218c3f4b8e3f6574"
+      "sha256": "ae034ec80e185ba3485b2a7751b7350e55780a88f117debdb7e31343a32311e2"
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",
@@ -84,7 +84,7 @@
     },
     "scripts/guards.d/_lib.sh": {
       "module": "core",
-      "sha256": "bfb2a19c38efdaefa9b49394afe4701c31d9591df1fb9f2ae338881733aea676"
+      "sha256": "c1c885b91abf7a5bf657af23a81048d3c6364f61db907db3b2a82acc7911ba4c"
     },
     "scripts/security-checks.sh": {
       "module": "core",
