@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { entries as changelogEntries, byHandBetween } from "../lib/changelog.mjs";
+import { nextVersion } from "../lib/release.mjs";
 import { loadKit, listModules, KIT_ROOT } from "../lib/kit.mjs";
 import { buildPlan, applyPlan, summarize, readManifest, drift, walk, MANIFEST } from "../lib/install.mjs";
 
@@ -411,11 +412,98 @@ test("the manifest names the commit of the kit's checkout, and versions agree ac
   if (head) assert.ok(readManifest(dir).kit.commit.startsWith(head), "the commit installed from");
   assert.equal(readManifest(KIT_ROOT)?.kit.commit, undefined, "the kit's own root records no commit: it cannot name itself");
   assert.equal(loadKit(kitCopy()).commit, undefined, "a copy that is not a checkout has none, whatever repository sits above it");
-  assert.equal(JSON.parse(read(KIT_ROOT, "package.json")).version, kit.version);
-  assert.match(read(KIT_ROOT, "CHANGELOG.md"), new RegExp(`^## ${kit.version.replaceAll(".", "\\.")}( |$)`, "m"), "the current version has its entry in CHANGELOG.md");
-  assert.equal(read(KIT_ROOT, "CHANGELOG.md").match(/^## (\d+\.\d+\.\d+)/m)[1], kit.version, "and it is the first one");
-  for (const block of read(KIT_ROOT, "CHANGELOG.md").split(/^(?=## \d)/m).slice(1)) assert.equal((block.match(/^By hand\b/gm) ?? []).length, 1, `CHANGELOG.md: one "By hand" part per entry — a second one is an entry that lost its heading:\n${block.slice(0, 80)}`);
-  for (const e of changelogEntries(KIT_ROOT)) assert.notEqual(e.byHand, null, `CHANGELOG.md § ${e.version} has no "By hand" part ("By hand: nothing." when there is none)`);
+  versionsAgree(KIT_ROOT);
+});
+
+// kit.json, package.json, the kit's own installation and the first entry of CHANGELOG.md name one version, and every
+// entry has its one "By hand" part. Held for the kit as it is, and below for a release just cut by bin/release.mjs.
+function versionsAgree(root) {
+  const { version } = loadKit(root), changelog = read(root, "CHANGELOG.md");
+  assert.equal(JSON.parse(read(root, "package.json")).version, version);
+  const own = readManifest(root);
+  if (own) assert.equal(own.kit.version, version, "the kit's own installation records the current version: `node bin/harness.mjs update .`");
+  assert.match(changelog, new RegExp(`^## ${version.replaceAll(".", "\\.")}( |$)`, "m"), "the current version has its entry in CHANGELOG.md");
+  assert.equal(changelog.match(/^## (\d+\.\d+\.\d+)/m)[1], version, "and it is the first one");
+  for (const block of changelog.split(/^(?=## \d)/m).slice(1)) assert.equal((block.match(/^By hand\b/gm) ?? []).length, 1, `CHANGELOG.md: one "By hand" part per entry — a second one is an entry that lost its heading:\n${block.slice(0, 80)}`);
+  for (const e of changelogEntries(root)) assert.notEqual(e.byHand, null, `CHANGELOG.md § ${e.version} has no "By hand" part ("By hand: nothing." when there is none)`);
+}
+
+// A release of the kit (bin/release.mjs): the fragments under changes/ become the next version, written everywhere
+// versionsAgree reads it, and one entry at the top of CHANGELOG.md. It runs on a committed tree only, so that a
+// release holds the fragments as merged and nothing else.
+test("release: two fragments become the next version and one entry, the fragments go, the root manifest follows", () => {
+  if (!readManifest(KIT_ROOT)) return; // a copy of the kit without its own harness: no root manifest to follow
+  const root = tmp("harness-release-");
+  const skip = [".git", ".claude/worktrees", "changes", "node_modules"].map((rel) => path.join(KIT_ROOT, rel));
+  fs.cpSync(KIT_ROOT, root, { recursive: true, filter: (src) => !skip.includes(src) });
+  const git = (...args) => { const r = run(root, "git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args]); assert.equal(r.status, 0, output(r)); return r.stdout; };
+  const release = (...args) => run(root, process.execPath, [path.join(root, "bin/release.mjs"), ...args], { input: "" });
+  git("init", "-q", "-b", "main"); git("add", "-A"); git("commit", "-qm", "the kit");
+  const from = loadKit(root).version, to = nextVersion(from, "minor");
+
+  const none = release(); assert.equal(none.status, 1); assert.match(none.stderr, /nothing to release: changes\/ holds no fragment/);
+  write(root, "changes/small-fix.md", "bump: patch\n\n- A fix.\n\nBy hand: nothing. A remark.\n");
+  write(root, "changes/new-thing.md", "bump: minor\n\n- A new thing.\n- Its second line.\n\nBy hand: add the line\nto the skeleton.\n");
+  const uncommitted = release(); assert.equal(uncommitted.status, 1, output(uncommitted));
+  assert.match(uncommitted.stderr, /uncommitted changes/, "a fragment never committed stays out of a release");
+  git("add", "-A"); git("commit", "-qm", "two fragments");
+
+  const dry = release("--dry-run"); assert.equal(dry.status, 0, output(dry));
+  assert.ok(dry.stdout.includes(`${from} → ${to} (minor)`), dry.stdout);
+  assert.equal(git("status", "--porcelain"), "", "--dry-run writes nothing");
+
+  const done = release(); assert.equal(done.status, 0, output(done));
+  assert.deepEqual(git("status", "--porcelain").trimEnd().split("\n").sort(), [" D changes/new-thing.md", " D changes/small-fix.md", " M .claude/harness.json", " M CHANGELOG.md", " M kit.json", " M package.json"], "what a release writes, and nothing else");
+  assert.equal(loadKit(root).version, to);
+  versionsAgree(root);
+  assert.ok(read(root, "CHANGELOG.md").includes(`\n\n## ${to}\n\n- A new thing.\n- Its second line.\n- A fix.\n\nBy hand: add the line\nto the skeleton.\n\nA remark.\n\n## ${from}\n`), "the higher level first, one list, one By hand part, above the previous entry");
+  assert.equal(changelogEntries(root)[0].byHand, "By hand: add the line\nto the skeleton.\n\nA remark.", "the step `update` will list for the version");
+  const check = run(root, process.execPath, [path.join(root, "bin/harness.mjs"), "update", ".", "--check"], { input: "" });
+  assert.equal(check.status, 0, output(check));
+  assert.match(release().stderr, /nothing to release/, "the fragments are spent");
+});
+
+// The CI check of the kit's own pull requests (.github/workflows/ci.yml): one that changes modules/, lib/ or bin/
+// adds a changelog fragment. The step's script runs here as on the runner, on the merge commit of a pull request
+// whose first parent is the base — the allows, and the nearby forms that must stay red.
+test("CI: a pull request that changes modules/, lib/ or bin/ adds a changelog fragment under changes/", () => {
+  const step = /\n      - name: Changelog fragment[^\n]*\n(?: {8}(?!run: \|)[^\n]*\n)* {8}run: \|\n((?: {10}[^\n]*\n|\n)+)/.exec(read(KIT_ROOT, ".github/workflows/ci.yml"));
+  assert.ok(step, "the step is in ci.yml");
+  const script = step[1].replace(/^ {10}/gm, "");
+  assert.doesNotMatch(script, /\$\{\{/, "no expression in the script");
+  const pr = (change, mainMoves) => {
+    const dir = tmp("harness-ci-fragment-");
+    const git = (...args) => { const r = run(dir, "git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args]); assert.equal(r.status, 0, output(r)); };
+    write(dir, "lib/a.mjs", "a\n"); write(dir, "docs/a.md", "a\n"); write(dir, "changes/waiting.md", "a\n");
+    git("init", "-q", "-b", "main"); git("add", "-A"); git("commit", "-qm", "base");
+    git("checkout", "-qb", "topic"); change(dir); git("add", "-A"); git("commit", "-qm", "the pull request");
+    git("checkout", "-q", "main");
+    if (mainMoves) { mainMoves(dir); git("add", "-A"); git("commit", "-qm", "main moves"); }
+    git("merge", "-q", "--no-ff", "-m", "merge", "topic"); // as GitHub builds it: the base first, the pull request second
+    return run(dir, "bash", ["-c", script]);
+  };
+  const cases = [
+    ["lib/ and a new fragment", 0, (d) => { write(d, "lib/a.mjs", "b\n"); write(d, "changes/a-fix.md", "x\n"); }],
+    ["a new module and a new fragment", 0, (d) => { write(d, "modules/x/module.json", "{}\n"); write(d, "changes/x.md", "x\n"); }],
+    ["documentation only", 0, (d) => write(d, "docs/a.md", "b\n")],
+    ["a fragment only", 0, (d) => write(d, "changes/note.md", "x\n")],
+    ["lib/ without a fragment", 1, (d) => write(d, "lib/a.mjs", "b\n")],
+    ["bin/ without a fragment", 1, (d) => write(d, "bin/new.mjs", "x\n")],
+    ["a file of lib/ deleted, no fragment", 1, (d) => fs.unlinkSync(path.join(d, "lib/a.mjs"))],
+    ["lib/ and an edit of a fragment already waiting", 1, (d) => { write(d, "lib/a.mjs", "b\n"); write(d, "changes/waiting.md", "b\n"); }],
+    ["lib/, while main gains a fragment of its own", 1, (d) => write(d, "lib/a.mjs", "b\n"), (d) => write(d, "changes/other.md", "x\n")],
+  ];
+  for (const [what, status, change, mainMoves] of cases) {
+    const r = pr(change, mainMoves);
+    assert.equal(r.status, status, `${what}:\n${output(r)}`);
+    if (status) assert.match(r.stdout, /^::error::This pull request changes modules\/, lib\/ or bin\/ and adds no changelog fragment/m, what);
+  }
+  assert.match(pr((d) => write(d, "lib/::warning::x.mjs", "x\n")).stdout, /^ {2}lib\/::warning::x\.mjs$/m, "a file name is printed indented, never where the runner reads a command");
+  const single = tmp("harness-ci-fragment-");
+  write(single, "a.txt", "a\n");
+  for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "one"]]) assert.equal(run(single, "git", args).status, 0);
+  const lone = run(single, "bash", ["-c", script]);
+  assert.equal(lone.status, 1); assert.match(lone.stdout, /::error::HEAD is not the merge commit of a pull request/, "anything but a merge commit is refused, not passed");
 });
 
 // Seeds never follow the kit: what a version asks to report by hand is in the changelog, and `update` shows it.

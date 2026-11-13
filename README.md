@@ -199,13 +199,18 @@ Most of the kit is not Claude configuration at all: scripts, git hooks, workflow
 
 ```bash
 node --test test/*.test.mjs     # unit tests, static rules on every module, end-to-end installs
+node bin/release.mjs --dry-run  # the next release, from the changelog fragments in changes/
 ```
 
 `CLAUDE.md` at the root of this repository holds the rules for changing the kit; `docs/module-authoring.md` the contract for modules.
 
-A release is a version in `kit.json` and `package.json`, its entry at the top of `CHANGELOG.md` (a test holds the three together), `node bin/harness.mjs update .` for the root manifest, and nothing after the merge: `.github/workflows/release.yml` puts the tag `v<version>` on the commit of `main` that changes `kit.json`, and never moves an existing tag. That workflow is the kit's own, not a module; it ran once, on the merge that added it, and tagged that commit.
+**A pull request leaves the version alone.** It adds a changelog fragment, `changes/<slug>.md` — its level, the lines of its entry and its "By hand" part, in the format given at the top of `CHANGELOG.md` — and touches neither `kit.json`, `package.json`, the version in `.claude/harness.json` nor `CHANGELOG.md`. Pull requests written in parallel then never edit the same lines for their entries, and none has to be renumbered when another one merges first. The tests check every fragment, and CI fails a pull request that changes `modules/`, `lib/` or `bin/` without adding one.
 
-The kit installs part of itself at its root — `core`, `ci-security`, `weekly-digest` and `ready-on-green` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
+**A release is a pull request of its own.** From an up-to-date `main`, in a checkout without uncommitted changes, `node bin/release.mjs` takes the highest level among the fragments, writes the next version to `kit.json` and `package.json`, puts the entry at the top of `CHANGELOG.md` (the fragments' lines, then one "By hand" part), removes the fragments and runs `node bin/harness.mjs update .` for the root manifest; `--dry-run` shows the result and writes nothing. A test holds the version files, the root manifest and the changelog together. The pull request is reviewed and merged by hand like any other, and nothing follows the merge but the tag: `.github/workflows/release.yml` puts `v<version>` on the commit of `main` that changes `kit.json`, and never moves an existing tag. That workflow is the kit's own, not a module; it has tagged every release since 0.3.1. The command is covered by the kit's tests and was run by hand in a copy of the kit; no release has been cut with it yet.
+
+No workflow commits the version or opens the release pull request: a bot that writes to `main` without a pull request is a privilege the kit refuses itself, such a commit would start no CI, and a ruleset that forbids direct pushes would stop it; a pull request opened with a job's own token starts no CI either. The level sits in the fragment rather than in a label, so that it is in the diff, reviewed and checked by the tests.
+
+The kit installs part of itself at its root — `core`, `ci-security`, `weekly-digest`, `ready-on-green` and `parallel-sessions` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
 
 ## License and security
 
