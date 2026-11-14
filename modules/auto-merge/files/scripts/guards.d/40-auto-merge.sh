@@ -18,8 +18,9 @@
 #         validated head as parents; tip and test merge are used nowhere else.
 #         The gate patterns and the weakened-tests selection run on both
 #         listings; a listing of 300 files holds whatever the count, and the
-#         base is re-read before each merge. A pull request or a test merge
-#         that cannot be read fails the job instead of passing for a moved head.
+#         base and the tip are re-read before each merge call, which stops
+#         when the tip moved. A pull request, a test merge or a tip that cannot
+#         be read fails the job instead of passing for a moved head.
 #   AM-4  marking a pull request ready never merges it. The two ready lines are
 #         pinned to their exact text, and every merge call in the file, however
 #         it is spelled, is one of the gated REST calls AM-1 counts.
@@ -696,11 +697,13 @@ if [ "$ranges" != "$merging" ]; then
   bad 7 "$merging merging job(s) but $ranges read the immutable range compare/\${TIP}...\${HEAD_SHA}"
 fi
 # Two listings per merging job, both from the tip: to the validated head, and
-# to the test merge. The tip is named on five lines of each (its read, its
-# check, the two listings, the parent check), the test merge on four (its read
-# from the pull request, its check, the read of its parents, its listing). A
-# third compare call, or a TIP or a TEST_MERGE taken again from anything else
-# (the pull request's base object, a merge ref, an env value), is red.
+# to the test merge. The tip is named on six lines of each (its read, its
+# check, the two listings, the parent check, and what the merge call is
+# checked against: the gate's output for promote-from-ci's merge step, the
+# re-read in promote-docs), the test merge on four (its read from the pull
+# request, its check, the read of its parents, its listing). A third compare
+# call, or a TIP or a TEST_MERGE taken again from anything else (the pull
+# request's base object, a merge ref, an env value), is red.
 compares=$(grep -o 'compare/' <<< "$code" | grep -c . || true)
 if [ "$compares" != "$((2 * merging))" ]; then
   bad 7 "$compares compare call(s) for $merging merging job(s) — two listings per job, from the tip to the head and to the test merge"
@@ -710,8 +713,8 @@ if [ "$merge_ranges" != "$merging" ]; then
   bad 7 "$merging merging job(s) but $merge_ranges list GitHub's test merge from the tip (compare/\${TIP}...\${TEST_MERGE})"
 fi
 tip_lines=$(grep -cE '(^|[^A-Za-z0-9_])TIP([^A-Za-z0-9_]|$)' <<< "$code" || true)
-if [ "$tip_lines" != "$((5 * merging))" ]; then
-  bad 7 "$tip_lines code line(s) name TIP, $((5 * merging)) expected — the tip is read once per merging job, by its full ref, and used only by its check, the two listings and the parent check"
+if [ "$tip_lines" != "$((6 * merging))" ]; then
+  bad 7 "$tip_lines code line(s) name TIP, $((6 * merging)) expected — the tip is read once per merging job, by its full ref, and used only by its check, the two listings, the parent check and the check before the merge call"
 fi
 tm_lines=$(grep -cE '(^|[^A-Za-z0-9_])TEST_MERGE([^A-Za-z0-9_]|$)' <<< "$code" || true)
 if [ "$tm_lines" != "$((4 * merging))" ]; then
@@ -731,6 +734,7 @@ fi
 order=(
   '          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '"'"'.object.sha'"'"') || TIP=""'
   '          RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${HEAD_SHA}" \'
+  '@@RANGE_JQ@@'
   "          ROWS=\$(jq -r '.files[] | @tsv' <<< \"\$RANGE\")"
   '          LISTED=$(grep -c . <<< "$ROWS" || true)'
   '          if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then'
@@ -743,6 +747,8 @@ order=(
   '          PARENTS=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${TEST_MERGE}" --jq '"'"'[.parents[].sha] | join(" ")'"'"') || PARENTS=""'
   '          if [ "$PARENTS" != "$TIP $HEAD_SHA" ]; then'
   '          MERGE_RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${TEST_MERGE}" \'
+  "                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // \"\")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || MERGE_RANGE=\"\""
+  '          if [ -z "$MERGE_RANGE" ]; then'
   '          if [ "$(jq -r '"'"'.listed'"'"' <<< "$MERGE_RANGE")" != "array" ]; then'
   "          MERGE_ROWS=\$(jq -r '.files[] | @tsv' <<< \"\$MERGE_RANGE\")"
   '          MERGE_LISTED=$(grep -c . <<< "$MERGE_ROWS" || true)'
@@ -750,10 +756,16 @@ order=(
   "          PATHS=\$(printf '%s\\n%s\\n' \"\$ROWS\" \"\$MERGE_ROWS\" | tr '\\t' '\\n' | grep . | LC_ALL=C sort -u || true)"
   '          CLAUDE_FILES=$(grep -i -E -c -e "$CLAUDE_GATE_RE" -e "$PROJECT_GATE_RE" <<< "$PATHS" || true)'
 )
+# The jq of the first listing differs by job: promote-from-ci also reads the
+# commits, for Dependabot.
+range_jq_ci="                    --jq '{total: .total_commits, commits: [.commits[] | {login: (.author.login // \"unknown\"), message: .commit.message}], files: [.files[]? | [.filename, (.previous_filename // \"\")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')"
+range_jq_docs="                    --jq '{files: [.files[]? | [.filename, (.previous_filename // \"\")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')"
 for job in promote-from-ci promote-docs; do
   block=$(awk -v j="  $job:" '$0 == j { f = 1; next } f && /^  [a-z][a-z_-]*:$/ { exit } f' "$AM")
+  if [ "$job" = promote-from-ci ]; then range_jq=$range_jq_ci; else range_jq=$range_jq_docs; fi
   prev=0; in_order=1; missing=""
   for want in "${order[@]}"; do
+    [ "$want" = '@@RANGE_JQ@@' ] && want=$range_jq
     nums=$(grep -nxF -- "$want" <<< "$block" | cut -d: -f1 | tr '\n' ' ')
     set -- $nums
     if [ "$#" != 1 ] || [ "$1" -le "$prev" ]; then
@@ -763,12 +775,43 @@ for job in promote-from-ci promote-docs; do
     fi
   done
   [ "$in_order" = 1 ] || bad 7 "$job: each of these lines must appear once, in the order of the list (tip, range, wait on the test merge, its parents, its listing, the paths of both, the gate); out of place or not once:$missing"
+  # Inside the merge loop, right before the call: the tip read again, a
+  # failed read stopping the job, a moved tip stopping the merge.
+  if [ "$job" = promote-from-ci ]; then moved='              if [ "$NOW_TIP" != "$GATE_TIP" ]; then'; else moved='              if [ "$NOW_TIP" != "$TIP" ]; then'; fi
+  prev=0; loop_ok=1
+  for want in '            for method in squash merge; do' \
+              '              NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '"'"'.object.sha'"'"') || NOW_TIP=""' \
+              '              if [ -z "$NOW_TIP" ]; then' \
+              "$moved" \
+              '              if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \'; do
+    nums=$(grep -nxF -- "$want" <<< "$block" | cut -d: -f1 | tr '\n' ' ')
+    set -- $nums
+    if [ "$#" != 1 ] || [ "$1" -le "$prev" ]; then loop_ok=0; else prev=$1; fi
+  done
+  [ "$loop_ok" = 1 ] || bad 7 "$job: inside the merge loop, each once and in this order: the tip re-read, its failure stopping the job, a moved tip stopping the merge, then the merge call"
+  # The merging step stops on any failed command it does not handle itself.
+  case "$job" in
+    promote-from-ci) step='      - name: Merge gate (Claude config, Dependabot breaking bumps and Action minors)' ;;
+    *) step='      - name: Mark ready + squash-merge' ;;
+  esac
+  first=$(awk -v s="$step" '$0 == s { f = 1; next } f && /^        run: \|$/ { getline; print; exit }' <<< "$block")
+  [ "$first" = '          set -euo pipefail' ] || bad 7 "$job: the merging step's script must start with set -euo pipefail"
 done
+nondocs=$(grep -cxF "          NON_DOCS=\$(grep -E -v -c '(\.md\$|^docs/|^LICENSE\$|^\.gitignore\$)' <<< \"\$PATHS\" || true)" "$AM" || true)
+[ "$nondocs" = "1" ] || bad 7 "promote-docs must count the files that are not documentation on the paths of both listings, with one pinned line (found $nondocs)"
+# The merge step of promote-from-ci compares the tip with the gate's own.
+if [ "$(grep -cxF '          GATE_TIP: ${{ steps.gate.outputs.tip }}' "$AM")" != "1" ] \
+   || [ "$(grep -cE '(^|[^A-Za-z0-9_])GATE_TIP([^A-Za-z0-9_]|$)' <<< "$code" || true)" != "2" ] \
+   || [ "$(grep -cxF '          echo "tip=${TIP}" >> "$GITHUB_OUTPUT"' "$AM")" != "1" ]; then
+  bad 7 "the gate must export the tip it read (tip=\${TIP}) and the merge step take GATE_TIP from that output only, to compare it with the tip read again"
+fi
 # Each value assigned on one line per merging job, its pinned one: a second
 # assignment, anywhere on a line, would undo it.
-for var in RANGE ROWS LISTED MERGEABILITY PARENTS MERGE_RANGE MERGE_ROWS MERGE_LISTED PATHS; do
+# (MERGE_RANGE: on two, its read and the empty fallback on its jq line, both pinned above.)
+for var in RANGE ROWS LISTED MERGEABILITY PARENTS MERGE_RANGE MERGE_ROWS MERGE_LISTED PATHS NOW_TIP; do
   n=$(grep -cE "(^|[^A-Za-z0-9_])$var=" <<< "$code" || true)
-  [ "$n" = "$merging" ] || bad 7 "$var is assigned on $n line(s) for $merging merging job(s) — on one per job, its pinned line"
+  want=$merging; [ "$var" = MERGE_RANGE ] && want=$((2 * merging))
+  [ "$n" = "$want" ] || bad 7 "$var is assigned on $n line(s) for $merging merging job(s) — $want expected, its pinned lines"
 done
 # A read that fails stops the job with an error; a hold reports and ends the
 # step, merging nothing. Each block, up to its `fi`, is checked line by line.
@@ -781,7 +824,7 @@ block_ends() { # block_ends <exact condition line, trimmed> <exit 0|exit 1>: blo
     armed && (t ~ /^exit / || t ~ /merge=true|pulls\/|gh pr ready/) { dirty = 1 }
     END { print n + 0 }' "$AM"
 }
-for cond in 'if [ -z "$MERGEABILITY" ]; then' 'if [ -z "$PARENTS" ]; then'; do
+for cond in 'if [ -z "$MERGEABILITY" ]; then' 'if [ -z "$PARENTS" ]; then' 'if [ -z "$MERGE_RANGE" ]; then' 'if [ -z "$NOW_TIP" ]; then'; do
   n=$(block_ends "$cond" 'exit 1')
   [ "$n" = "$merging" ] || bad 7 "$merging merging job(s) but $n stop with an error under '$cond' — a failed read is an error (exit 1), never a verdict"
 done
@@ -791,6 +834,10 @@ for cond in 'if [ "$MERGEABLE" != "true" ] || ! [[ "$TEST_MERGE" =~ ^[0-9a-f]{40
             'if [ "$MERGE_LISTED" -ge 300 ]; then'; do
   n=$(block_ends "$cond" 'exit 0')
   [ "$n" = "$merging" ] || bad 7 "$merging merging job(s) but $n hold (report, exit 0, nothing merged) under '$cond'"
+done
+for cond in 'if [ "$NOW_TIP" != "$GATE_TIP" ]; then' 'if [ "$NOW_TIP" != "$TIP" ]; then'; do
+  n=$(block_ends "$cond" 'exit 0')
+  [ "$n" = "1" ] || bad 7 "a moved tip must stop the merge (report, exit 0) under '$cond'"
 done
 stale=$(grep -ciE 'base[._]sha|compare/\$\{?(BASE|DEFAULT)' <<< "$code" || true)
 if [ "$stale" != "0" ]; then
@@ -841,7 +888,7 @@ foreign_base=$(grep -E '^ +(BASE_(SHA|REF)|TIP): ' "$AM" | grep -cvE '^ +BASE_RE
 if [ "$foreign_base" != "0" ]; then
   bad 7 "BASE_REF must come from the triggering event or from the gate step's output, and no commit of the base may come from outside the job's own read of the tip"
 fi
-pass 7 "the gate reads two listings per job from the base branch's tip, to the head and to GitHub's test merge (waited for, its parents checked), runs on both, holds a listing of 300 files, re-reads the base before each merge, and fails on a failed read"
+pass 7 "the gate reads two listings per job from the base branch's tip, to the head and to GitHub's test merge (waited for, its parents checked), runs on both, holds a listing of 300 files, re-reads the base and the tip before each merge call, and fails on a failed read"
 
 # ── AM-8 — tests that get weaker are held ───────────────────────────────────
 # The CI that went green ran the tests as the pull request left them. What the

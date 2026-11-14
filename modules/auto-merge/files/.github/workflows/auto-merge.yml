@@ -413,6 +413,8 @@ jobs:
           # The base the range is judged against: the merge step refuses a pull
           # request retargeted since.
           echo "base_ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
+          # And the tip: the merge step stops if the branch moved since.
+          echo "tip=${TIP}" >> "$GITHUB_OUTPUT"
           # Each file row carries `previous_filename` too, so a rename OUT of a
           # gated path (CLAUDE.md → docs/legacy.md) is still seen. The compare
           # lists 300 files at most, and the pull request's changed_files may
@@ -468,7 +470,11 @@ jobs:
             exit 0
           fi
           MERGE_RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${TEST_MERGE}" \
-                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
+                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || MERGE_RANGE=""
+          if [ -z "$MERGE_RANGE" ]; then
+            echo "::error::The listing of the test merge of PR #${PR} could not be read — nothing was decided and nothing was merged. Re-run this job."
+            exit 1
+          fi
           # An answer without its list of files (no `files`, a null body, an
           # empty one) would read as a merge that changes nothing: hold.
           if [ "$(jq -r '.listed' <<< "$MERGE_RANGE")" != "array" ]; then
@@ -661,6 +667,7 @@ jobs:
           PR: ${{ steps.find-pr.outputs.pr }}
           HEAD_SHA: ${{ steps.event.outputs.head_sha }}
           BASE_REF: ${{ steps.gate.outputs.base_ref }}
+          GATE_TIP: ${{ steps.gate.outputs.tip }}
         run: |
           set -euo pipefail
           # The gate judged the range against the base it read. A pull request
@@ -684,6 +691,19 @@ jobs:
           # commit GitHub created) is there for a post-merge dispatch.
           for attempt in 1 2 3 4 5; do
             for method in squash merge; do
+              # The gate judged the merge onto the tip it read (AM-7). A branch
+              # landed since moves what the merge writes, and the API pins the
+              # head of a merge, not its base: re-read the tip right before each
+              # call, and stop when it moved. A later run judges it again.
+              NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || NOW_TIP=""
+              if [ -z "$NOW_TIP" ]; then
+                echo "::error::The tip of ${BASE_REF} could not be read again — nothing was merged. Re-run this job."
+                exit 1
+              fi
+              if [ "$NOW_TIP" != "$GATE_TIP" ]; then
+                echo "::notice::PR #${PR}: ${BASE_REF} moved since the gate judged it — not merged; a new run judges it again, or merge it by hand."
+                exit 0
+              fi
               if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \
                   -f merge_method="$method" -f sha="$HEAD_SHA" 2>&1); then
                 echo "$OUT"
@@ -868,7 +888,11 @@ jobs:
             exit 0
           fi
           MERGE_RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${TEST_MERGE}" \
-                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
+                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || MERGE_RANGE=""
+          if [ -z "$MERGE_RANGE" ]; then
+            echo "::error::The listing of the test merge of PR #${PR} could not be read — nothing was decided and nothing was merged. Re-run this job."
+            exit 1
+          fi
           if [ "$(jq -r '.listed' <<< "$MERGE_RANGE")" != "array" ]; then
             echo "::notice::PR #${PR}: the listing of its test merge came back without its files — leaving it for a hand merge."
             exit 0
@@ -920,6 +944,16 @@ jobs:
           # branch cleanup below is skipped.
           for attempt in 1 2 3 4 5; do
             for method in squash merge; do
+              # The tip, re-read right before each call (see promote-from-ci).
+              NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || NOW_TIP=""
+              if [ -z "$NOW_TIP" ]; then
+                echo "::error::The tip of ${BASE_REF} could not be read again — nothing was merged. Re-run this job."
+                exit 1
+              fi
+              if [ "$NOW_TIP" != "$TIP" ]; then
+                echo "::notice::PR #${PR}: ${BASE_REF} moved since the gate judged it — not merged; a new run judges it again, or merge it by hand."
+                exit 0
+              fi
               if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \
                   -f merge_method="$method" -f sha="$HEAD_SHA" 2>&1); then
                 echo "$OUT"
