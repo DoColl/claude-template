@@ -881,3 +881,139 @@ test("parallel-sessions: without a remote, a commit or a repository, the report 
   r = report(dir, "--fetch-harder");
   assert.equal(r.status, 2); assert.match(r.stderr, /^usage: /);
 });
+
+test("headroom: the gate goes red when a committed file routes sessions through a proxy or keeps Headroom's state", () => {
+  if (!kit.modules.has("headroom")) return;
+  // The kit is often installed by a session: the steps meant for a person's machine say so first.
+  assert.match(listModules(kit).find((m) => m.id === "headroom").postInstall[0], /^For a person, to relay — the session that installs or updates the kit does none of these steps/);
+  const pristine = tmp();
+  install(pristine, ["headroom"]);
+  // Each row starts from a fresh copy of the installed project. `links` maps a path to its symlink target.
+  const project = (files = {}, forced = [], links = {}, before, after) => {
+    const dir = tmp();
+    fs.cpSync(pristine, dir, { recursive: true });
+    for (const [rel, text] of Object.entries(files)) write(dir, rel, typeof text === "string" ? text : `${JSON.stringify(text, null, 2)}\n`);
+    for (const [rel, target] of Object.entries(links)) { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.symlinkSync(target, path.join(dir, rel)); }
+    assert.equal(run(dir, "git", ["init", "-q", "-b", "main"]).status, 0);
+    if (before) before(dir);
+    assert.equal(run(dir, "git", ["add", "-A"]).status, 0);
+    if (forced.length) assert.equal(run(dir, "git", ["add", "-f", ...forced]).status, 0);
+    if (after) after(dir);
+    return run(dir, "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "" } });
+  };
+  const red = (label, id, files, forced, links, before, after) => {
+    const r = project(files, forced, links, before, after);
+    assert.equal(r.status, 1, `${label}: the gate must fail\n${output(r)}`);
+    assert.match(r.stderr, new RegExp(`FAIL\\s+${id}:`), `${label}\n${output(r)}`);
+    return r;
+  };
+  const green = (label, files, forced, links) => {
+    const r = project(files, forced, links);
+    assert.equal(r.status, 0, `${label}: the gate must pass\n${output(r)}`);
+    assert.doesNotMatch(output(r), /(FAIL|skip)\s+HR-\d:|HR-\d: [^\n]*not checked/, label);
+    return r;
+  };
+  const S = ".claude/settings.json";
+  const env = (e) => ({ [S]: { env: e } });
+  const wf = (body) => `on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n${body}    steps:\n      - run: true\n`;
+
+  green("core and headroom alone", {});
+  // HR-1, settings: any committed base URL or proxy, whatever the host or the provider.
+  for (const url of ["http://127.0.0.1:8787", "http://localhost:8787", "http://[::1]:8787", "https://gateway.example.com"]) red(`ANTHROPIC_BASE_URL=${url}`, "HR-1", env({ ANTHROPIC_BASE_URL: url }));
+  for (const k of ["ANTHROPIC_VERTEX_BASE_URL", "ANTHROPIC_FOUNDRY_BASE_URL", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_AWS_BASE_URL", "HTTPS_PROXY", "http_proxy", "ALL_PROXY"]) red(k, "HR-1", env({ [k]: "http://127.0.0.1:8787" }));
+  red("a Headroom session header", "HR-1", env({ ANTHROPIC_CUSTOM_HEADERS: "X-Headroom-Project: demo" }));
+  red("a nested settings file", "HR-1", { "packages/api/.claude/settings.json": { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8787" } } });
+  red("a settings file spelled with capitals, which macOS and Windows open as settings.json", "HR-1", { ".claude/Settings.json": { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8787" } } }, [".claude/Settings.json"]);
+  red("a session-start hook running headroom", "HR-1", { [S]: { hooks: { SessionStart: [{ hooks: [{ type: "command", command: "/usr/local/bin/headroom init hook ensure" }] }] } } });
+  for (const host of ["localhost", "127.1", "[0:0:0:0:0:0:0:1]", "devbox"]) red(`an http hook on ${host}:8787`, "HR-1", { [S]: { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "http", url: `http://${host}:8787/hook` }] }] } } });
+  red("a status line polling the proxy", "HR-1", { [S]: { statusLine: { type: "command", command: "curl -s http://127.0.0.1:8787/stats" } } });
+  red("a key helper going through headroom", "HR-1", { [S]: { apiKeyHelper: "headroom key" } });
+  red("an MCP server in the settings file", "HR-1", { [S]: { mcpServers: { ctx: { type: "http", url: "http://127.0.0.1:8787/mcp" } } } });
+  red("the headroom plugin enabled", "HR-1", { [S]: { enabledPlugins: { "headroom@headroom-marketplace": true } } });
+  red("its marketplace declared", "HR-1", { [S]: { extraKnownMarketplaces: { tools: { source: { source: "github", repo: "headroomlabs-ai/headroom" } } } } });
+  red("a settings file that is not JSON", "HR-1", { [S]: "{ not json\n" });
+  // HR-1, .mcp.json and plugins committed in the repository.
+  red("a project MCP server running headroom", "HR-1", { ".mcp.json": { mcpServers: { compress: { command: "headroom", args: ["mcp", "serve"] } } } });
+  red("a project MCP server on the proxy's port", "HR-1", { "tools/.mcp.json": { mcpServers: { ctx: { type: "http", url: "http://127.0.0.1:8787/mcp" } } } });
+  red(".mcp.json spelled with capitals", "HR-1", { ".MCP.json": { mcpServers: { compress: { command: "headroom", args: ["mcp", "serve"] } } } });
+  red("a plugin of an in-repository marketplace with a headroom hook", "HR-1", { [S]: { enabledPlugins: { "compress@local": true } }, "plugins/compress/hooks/hooks.json": { hooks: { SessionStart: [{ hooks: [{ type: "command", command: "headroom init hook ensure" }] }] } } });
+  // HR-1, symlinks: git lists the link and never what is behind it.
+  red("a .claude directory committed as a symlink", "HR-1", { "tooling/claude/settings.json": { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8787" } } }, [], { "packages/api/.claude": "../../tooling/claude" });
+  red(".mcp.json committed as a symlink", "HR-1", { "tooling/servers.json": { mcpServers: {} } }, [], { ".mcp.json": "tooling/servers.json" });
+  // HR-1, workflows and composite actions.
+  red("a workflow setting the base URL", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      ANTHROPIC_BASE_URL: http://127.0.0.1:8787\n") });
+  red("a workflow naming the headers, even in a comment", "HR-1", { ".github/workflows/agent.yaml": "on: push\n# ANTHROPIC_CUSTOM_HEADERS: X-Headroom-Project\njobs: {}\n" });
+  red("a workflow whose name is not ASCII", "HR-1", { ".github/workflows/déploiement.yml": wf("    env:\n      ANTHROPIC_BASE_URL: http://127.0.0.1:8787\n") });
+  red("a composite action", "HR-1", { ".github/actions/claude/action.yml": "runs:\n  using: composite\n  steps:\n    - run: echo \"ANTHROPIC_BASE_URL=http://127.0.0.1:8787\" >> \"$GITHUB_ENV\"\n      shell: bash\n" });
+  red("a name spelled with a YAML escape", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      \"ANTHROPIC\\x5FBASE_URL\": http://127.0.0.1:8787\n") });
+  red("a name split across an escaped line break", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      ? \"HTTPS_\\\n        PROXY\"\n      : http://127.0.0.1:8787\n") });
+  const r = red("a proxy for a job with no Claude session", "HR-1", { ".github/workflows/ci.yml": wf("    env:\n      HTTPS_PROXY: http://proxy.internal:3128\n") });
+  assert.match(r.stderr, /refused in every workflow and action, whatever the job/);
+  // HR-1, what a second adversarial pass found.
+  red("a name split over three continued lines in a run block", "HR-1", { ".github/workflows/agent.yml": wf("") + "      - run: |\n          echo ANTHROPIC\\\n          _BASE\\\n          _URL=http://x >> \"$GITHUB_ENV\"\n" });
+  red("a name split over three lines of a double-quoted scalar", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      V: \"ANTHROPIC\\\n        _BASE\\\n        _URL=http://x\"\n") });
+  red("a continued name in a CRLF workflow", "HR-1", { ".github/workflows/agent.yml": wf("").replace(/\n/g, "\r\n") + "      - run: echo ANTHROPIC_BASE\\\r\n          _URL=http://x >> \"$GITHUB_ENV\"\r\n" });
+  red("a composite action under a directory holding '='", "HR-1", { "act=x/action.yml": "runs:\n  using: composite\n  steps:\n    - run: echo \"HTTPS_PROXY=http://x\" >> \"$GITHUB_ENV\"\n      shell: bash\n" });
+  red("a name spelled with shell octal escapes", "HR-1", { ".github/workflows/agent.yml": wf("") + "      - run: echo $'ANTHROPIC\\137BASE\\137URL=http://x' >> \"$GITHUB_ENV\"\n" });
+  red("a workflow running headroom wrap", "HR-1", { ".github/workflows/agent.yml": wf("") + "      - run: pipx install 'headroom-ai[proxy]' && headroom wrap claude -- -p fix\n" });
+  red("a port written with a leading zero", "HR-1", { ".mcp.json": { mcpServers: { ctx: { type: "http", url: "http://127.0.0.1:08787/mcp" } } } });
+  red("a settings key the check did not list", "HR-1", { [S]: { fileSuggestion: { type: "command", command: "headroom wrap claude" } } });
+  red("a plugin manifest pointing its hooks at another file", "HR-1", { "plugins/c/.claude-plugin/plugin.json": { name: "c", hooks: "./config/h.json" }, "plugins/c/config/h.json": { hooks: { SessionStart: [{ hooks: [{ type: "command", command: "./bin/start.sh" }] }] } }, "plugins/c/bin/start.sh": "#!/bin/sh\nexec headroom proxy --port 8787\n" });
+  red("a settings file named with U+017F", "HR-1", { ".claude/ſettings.json": { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8787" } } }, [".claude/ſettings.json"]);
+  red(".mcp.json named with U+017F", "HR-1", { ".mcp.jſon": { mcpServers: { compress: { command: "headroom" } } } });
+  red("a submodule mounted at a .claude directory", "HR-1", {}, [], {}, undefined, (dir) => assert.equal(run(dir, "git", ["update-index", "--add", "--cacheinfo", `160000,${"1".repeat(40)},packages/api/.claude`]).status, 0));
+  green("a symlink named hooks outside a plugin, and a CRLF .gitignore", { ".gitignore": read(pristine, ".gitignore").replace(/\n/g, "\r\n"), "lib/x.js": "export {};\n" }, [], { "src/hooks": "../lib" });
+  // HR-1, what a third adversarial pass found: every committed file is read, as committed.
+  const hook = (cmd) => ({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: cmd }] }] } });
+  red("a plugin script under node_modules", "HR-1", { "plugins/p/.claude-plugin/plugin.json": { name: "p" }, "plugins/p/hooks/hooks.json": hook("${CLAUDE_PLUGIN_ROOT}/node_modules/.bin/start"), "plugins/p/node_modules/.bin/start": "#!/bin/sh\nexec headroom proxy\n" }, ["plugins/p/node_modules/.bin/start"]);
+  red("a plugin script holding a NUL byte", "HR-1", { "plugins/p/.claude-plugin/plugin.json": { name: "p" }, "plugins/p/bin/start.sh": "#!/bin/sh\nheadroom proxy\n# \0\n" });
+  red("a JSON file spelling the name with \\u escapes", "HR-1", { "plugins/p/cfg/h.json": "{\"command\": \"\\u0068eadroom proxy\"}\n" });
+  red("a root plugin's monitor", "HR-1", { ".claude-plugin/plugin.json": { name: "root" }, "monitors/monitors.json": { monitors: [{ command: "headroom proxy --port 8787" }] } });
+  red("an .envrc starting the proxy", "HR-1", { ".envrc": "headroom proxy &\n" });
+  red("a Makefile reaching the port without a colon", "HR-1", { Makefile: "probe:\n\tnc 127.0.0.1 8787\n" });
+  red("a hook reaching the port through /dev/tcp", "HR-1", { "scripts/probe.sh": "exec 3<>/dev/tcp/127.0.0.1/8787\n" });
+  red("permissions.allow pre-approving the proxy", "HR-1", { [S]: { permissions: { allow: ["Bash(headroom proxy:*)"] } } });
+  red("an agent whose frontmatter declares a hook", "HR-1", { ".claude/agents/fast.md": "---\nname: fast\nhooks:\n  SessionStart:\n    - command: headroom proxy\n---\n\nAn agent.\n" });
+  red("a workflow saved as UTF-16", "HR-1", {}, [], {}, (dir) => { fs.mkdirSync(path.join(dir, ".github/workflows"), { recursive: true }); fs.writeFileSync(path.join(dir, ".github/workflows/ci.yml"), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(wf("    env:\n      ANTHROPIC_BASE_URL: http://127.0.0.1:8787\n"), "utf16le")])); });
+  red("a name joined across U+2028", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      ? \"ANTHROPIC_BASE\\         _URL\"\n      : http://x\n") });
+  red("what is committed, not what is on the disk", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      ANTHROPIC_BASE_URL: http://127.0.0.1:8787\n") }, [], {}, undefined, (dir) => write(dir, ".github/workflows/agent.yml", wf("")));
+  {
+    // Installed in a sub-directory, the root's workflows and settings would go unchecked.
+    const repo = tmp();
+    write(repo, ".github/workflows/agent.yml", wf("    env:\n      ANTHROPIC_BASE_URL: http://127.0.0.1:8787\n"));
+    fs.cpSync(pristine, path.join(repo, "apps/tool"), { recursive: true });
+    assert.equal(run(repo, "git", ["init", "-q", "-b", "main"]).status, 0);
+    assert.equal(run(repo, "git", ["add", "-A"]).status, 0);
+    const r3 = run(path.join(repo, "apps/tool"), "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "" } });
+    assert.equal(r3.status, 1, output(r3));
+    assert.match(r3.stderr, /FAIL\s+HR-1: this project is apps\/tool\/ inside a larger repository/);
+  }
+  green("Markdown prose about Headroom, a lockfile hash holding 8787, a deny rule", { "docs/notes.md": "We run Headroom on our laptops: see docs/conventions/headroom.md.\n", "package-lock.json": "{\"integrity\": \"sha512-ab8787cd\"}\n", [S]: { permissions: { deny: ["Bash(headroom:*)"], ask: ["Bash(curl http://127.0.0.1:8787/*)"] } } });
+  // HR-1, what a fourth adversarial pass found (each run live against Claude Code with a stand-in headroom).
+  const bang = "!" + "`";
+  red("a command whose body runs dynamic shell context", "HR-1", { ".claude/commands/tidy.md": "---\ndescription: Tidy\nallowed-tools: Bash\n---\nStatus: " + bang + "headroom proxy`\n" });
+  red("a skill whose body holds a fenced block that runs", "HR-1", { ".claude/skills/tidy/SKILL.md": "---\nname: tidy\ndescription: Use for every task\n---\n```!\nheadroom proxy &\n```\n" });
+  red("a frontmatter closed by three dashes and a space", "HR-1", { ".claude/agents/helper.md": "---\nname: helper\nhooks:\n  PreToolUse:\n    - command: headroom proxy\n--- \nAn agent.\n" });
+  red("a frontmatter that is never closed", "HR-1", { ".claude/agents/open.md": "---\nname: open\nhooks:\n  PreToolUse:\n    - command: headroom proxy\n" });
+  red("a symlink whose target is the headroom binary", "HR-1", { [S]: hook("\"$CLAUDE_PROJECT_DIR\"/tools/compress proxy") }, [], { "tools/compress": "/usr/local/bin/headroom" });
+  red("the port as a call argument", "HR-1", { ".claude/hooks/warm.js": "require(\"net\").connect(8787, \"127.0.0.1\");\n" });
+  red("the port at the start of a line", "HR-1", { ".claude/hooks/probe.sh": "args=(\n127.0.0.1\n8787\n)\nexec nc -z \"${args[@]}\"\n" });
+  green("a Markdown body that only talks about Headroom, a version and a port inside a longer number", { "docs/howto.md": "---\ntitle: How we work\n---\nWe start Headroom by hand; `npm i lib@1.8787.0`.\n", "config/ports.json": "{\"dev\": 18787, \"build\": \"v1.8787\"}\n" });
+  // HR-2: one machine's files, force-added past .gitignore.
+  for (const rel of [".claude/settings.local.json", ".claude/.headroom_wrap_marker.json", ".headroom/memory.db", "services/web/.headroom/memory.db", ".Headroom/memory.db", "CLAUDE.local.md", "docs/CLAUDE.local.md", "packages/api/.claude/.headroom_wrap_owners.json"]) red(`${rel} tracked`, "HR-2", { [rel]: "{}\n" }, [rel]);
+  {
+    const without = read(pristine, ".gitignore").replace(/^\.headroom\/$/m, "");
+    const r2 = red("the .gitignore block removed, even when a local exclude file still lists .headroom/", "HR-2", { ".gitignore": without }, [], {}, (dir) => write(dir, ".git/info/exclude", ".headroom/\n"));
+    assert.match(r2.stderr, /HR-2: \.gitignore no longer holds the claude-template:headroom block/);
+  }
+  // HR-3: a learn block in any tracked file, the convention page included.
+  const block = "<!-- headroom:learn:start -->\n- prefer rg\n<!-- headroom:learn:end -->\n";
+  red("a learn block in CLAUDE.md", "HR-3", { "CLAUDE.md": block });
+  red("a learn block in another tracked file", "HR-3", { "docs/AGENTS.md": block });
+  red("a learn block appended to the convention page", "HR-3", { "docs/conventions/headroom.md": `${read(pristine, "docs/conventions/headroom.md")}\n${block}` });
+  // What stays green.
+  green("ENABLE_TOOL_SEARCH, NO_PROXY and a deny rule naming headroom", { [S]: { env: { ENABLE_TOOL_SEARCH: "true", NO_PROXY: "localhost" }, permissions: { deny: ["Bash(headroom:*)"] } } });
+  green("an unrelated MCP server on another port", { ".mcp.json": { mcpServers: { docs: { type: "http", url: "http://localhost:18787/mcp" } } } });
+  green("a learn block in the ignored CLAUDE.local.md", { "CLAUDE.local.md": block });
+  green("a workflow naming the API key and NO_PROXY, with a shell continuation and a colour escape", { ".github/workflows/ci.yml": wf("    env:\n      ANTHROPIC_API_KEY: ${{ secrets.KEY }}\n      NO_PROXY: localhost\n") + "      - run: |\n          printf '\\x1b[32mok\\x1b[0m\\n'\n          curl -s \\\n            https://example.com\n" });
+});
