@@ -1,5 +1,5 @@
 {
-  "$comment": "TODO(harness): the exact commands the verifier agent may run — your tests, build, type-check, linter in check mode. Each entry is an exact argv; with \"cwd\" the agent must write `cd <cwd> && <argv>`. Never a command that writes files, installs packages or reaches the network. Examples: {\"argv\": [\"make\", \"test\"]}, {\"cwd\": \"backend\", \"argv\": [\"npm\", \"test\"]}, {\"argv\": [\"go\", \"test\", \"./...\"]}, {\"argv\": [\"cargo\", \"test\", \"--locked\"]}. Rules and limits: docs/conventions/agent-bash-guard.md.",
+  "$comment": "TODO(harness): the exact commands the verifier agent may run — your tests, build, type-check, linter in check mode. Each entry is an exact argv; with \"cwd\" the agent must write `cd ./<cwd> && <argv>`. Never a command that writes files, installs packages or reaches the network. Examples: {\"argv\": [\"make\", \"test\"]}, {\"cwd\": \"backend\", \"argv\": [\"npm\", \"test\"]}, {\"argv\": [\"go\", \"test\", \"./...\"]}, {\"argv\": [\"cargo\", \"test\", \"--locked\"]}. Rules and limits: docs/conventions/agent-bash-guard.md.",
   "verify": [
     { "argv": ["node", "--test", ".claude/hooks/agent-bash-guard.test.mjs"], "note": "the guard's own specification" }
   ]

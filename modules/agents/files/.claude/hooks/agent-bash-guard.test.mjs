@@ -29,7 +29,7 @@ const ALLOW_RO = [
   "git log --format='%h %s' -5", "git log -1 --format=%ad --date=short v1.2.0", "git log --since=2026-01-01 --author=alice --oneline", "git ls-files .claude/hooks", "git ls-files --error-unmatch .claude/hooks/agent-bash-guard.mjs", "git check-ignore -v .claude/agents/x.md", "git rev-parse --show-toplevel", "git rev-parse --abbrev-ref HEAD",
   "git blame -L 10,20 backend/src/main.ts", "git blame -w -L10,20 backend/src/main.ts", "git grep -n -e ensureOwner backend/src", "git grep -n -e 'ensure[A-Z]' -- backend/src", "git grep -c -e TODO", "git merge-base --is-ancestor HEAD origin/main", "git rev-list --count HEAD..origin/main",
   "cat CLAUDE.md | head -50", "cat backend/package.json", "head -n 20 README.md", "tail -3 f", "wc -l backend/src/main.ts", "grep -rn -e pattern backend/src | head", "grep -rn --include='*.ts' -e x backend/src", "grep -E -e 'x' f 2>/dev/null || true", "grep -n -A 3 -e fn f", "grep -ril -e todo backend/src", "grep -E -e 'a|b' f", "ls -la .claude/agents", "ls .claude/hooks",
-  "./scripts/security-checks.sh --offline 2>&1 | tail -3", "scripts/security-checks.sh --offline", "\"$CLAUDE_PROJECT_DIR\"/scripts/security-checks.sh --offline", "cat \"$CLAUDE_PROJECT_DIR\"/CLAUDE.md | wc -l", "LC_ALL=C git log -1", "GIT_PAGER=cat git log -1", "cat f >&2", "git log -3 | cat",
+  "./scripts/security-checks.sh --offline 2>&1 | tail -3", "scripts/security-checks.sh --offline", "cat CLAUDE.md | wc -l", "LC_ALL=C git log -1", "GIT_PAGER=cat git log -1", "cat f >&2", "git log -3 | cat",
   // a # is a plain character once quoted or escaped
   "grep -n -e '#include' src/a.c", "git grep -n -e \"# TODO\" -- src", "grep -e \\#x f", "grep -c -e 'a#b' f",
   // so is a glob character: quoted or escaped, the shell leaves the word alone, and git or grep reads its own pattern
@@ -94,24 +94,34 @@ const BLOCK_RO = [
   "PAGER=cat\u2028cat touch x", "GIT_OPTIONAL_LOCKS=0\u3000cat npx x", "LC_ALL=C\ufeffcat rm x", "NO_COLOR=1\u1680ls rm -R src", "TZ=UTC\u2009cat git stash", "LC_ALL=C\u202fcat rm x", "LC_ALL=C\u205fcat rm x", "LC_ALL=C\u2029cat rm x",
   "cat f >&2\vx", "cat f 1>&2\rx", "git log -1 >&1\u00a0x", "cat f >/dev/null\fx", "git status\r", "git status\v", "cat f\u2028", "cat a\fb", "git\u00a0status", "\r| cat f",
   "./scripts/security-checks.sh --offline\r", "grep -e 'a\u00a0b' f", "git log -1 --format='%h\u3000%s'",
+  // the Bash tool's shell has no CLAUDE_PROJECT_DIR: "$CLAUDE_PROJECT_DIR"/x is /x there. A path is written relative to the root
+  "\"$CLAUDE_PROJECT_DIR\"/scripts/security-checks.sh --offline", "cat \"$CLAUDE_PROJECT_DIR\"/CLAUDE.md | wc -l", "cat \"$CLAUDE_PROJECT_DIR\"/etc/passwd", "grep -rn -e x \"$CLAUDE_PROJECT_DIR\"/src", "git log -1 -- \"$CLAUDE_PROJECT_DIR\"/src",
+  // a backslash at the end of a segment, or before the blanks that end it: this check dropped the escaped blank, the shell keeps it
+  "git status\\ ", "git status\\", "git log --oneline\\ | head -n 5", "scripts/security-checks.sh --offline\\ ", "cat CLAUDE.md\\\t", "git status\\ ; ls",
   // readers: pattern never bare, dangerous options, unknown clusters
   "grep -rn x f", "grep x f", "grep -rn x . --include=\"$(rm x)\"", "ls --color=always -R /", "wc -L f", "grep -P -e x f", "grep --exclude-dir=x -r -e y /", "cat -A f", "head -n x f", "grep -A x -e y f", "ls -Z .",
 ];
 const ALLOW_VERIFY_EXTRA = [
-  "cd backend && npm test", "cd backend && npm test 2>&1 | tail -40", "cd backend && npm run test:e2e", "cd backend && npm run build", "cd backend && npx --no tsc --noEmit", "cd frontend && npx --no tsc --noEmit 2>&1 | tail -20", "cd services/api && make test",
-  "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/services/api && make test 2>&1 | tail -20", "make check", "node --test .claude/hooks/agent-bash-guard.test.mjs", "./gradlew check", "go test ./...", "cargo test --locked 2>&1 | tail -30",
-  "go test ./... ; cargo test --locked", "cd backend && npm test ; git status --short",
+  "cd ./backend && npm test", "cd ./backend && npm test 2>&1 | tail -40", "cd ./backend && npm run test:e2e", "cd ./backend && npm run build", "cd ./backend && npx --no tsc --noEmit", "cd ./frontend && npx --no tsc --noEmit 2>&1 | tail -20", "cd ./services/api && make test",
+  "make check", "node --test .claude/hooks/agent-bash-guard.test.mjs", "./gradlew check", "go test ./...", "cargo test --locked 2>&1 | tail -30",
+  "go test ./... ; cargo test --locked", "cd ./backend && npm test ; git status --short",
 ];
 const BLOCK_VERIFY = [
-  "npm install", "npm ci", "npm test", "npm run build", "make test", "node --test .claude/hooks", "node --test .claude/hooks/", "node --test .claude/hooks/agent-bash-guard-lib.mjs", "cd backend && npm run lint", "cd backend && npm run start:dev", "cd backend && npm test -- --config evil.js", "cd backend && npm run build -- --watch", "cd backend && npm test; touch x", "cd backend && npm test && touch x", "cd backend && npm test | tee out",
-  "cd /tmp && npm test", "cd ../other && npm test", "cd ~ && ls", "cd backend; npm test", "cd backend && npx tsc --noEmit", "cd backend && npx --no codegen run", "cd frontend && npm test", "cd frontend && npx --no tsc-evil", "cd services && make test", "cd services/api && make install", "cd services/api/../.. && make test", "cd backend",
+  "npm install", "npm ci", "npm test", "npm run build", "make test", "node --test .claude/hooks", "node --test .claude/hooks/", "node --test .claude/hooks/agent-bash-guard-lib.mjs", "cd ./backend && npm run lint", "cd ./backend && npm run start:dev", "cd ./backend && npm test -- --config evil.js", "cd ./backend && npm run build -- --watch", "cd ./backend && npm test; touch x", "cd ./backend && npm test && touch x", "cd ./backend && npm test | tee out",
+  "cd /tmp && npm test", "cd ../other && npm test", "cd ~ && ls", "cd ./backend; npm test", "cd ./backend && npx tsc --noEmit", "cd ./backend && npx --no codegen run", "cd ./frontend && npm test", "cd ./frontend && npx --no tsc-evil", "cd ./services && make test", "cd ./services/api && make install", "cd services/api/../.. && make test", "cd backend",
   // a root command never runs after a cd, nor a directory's command at the root
-  "cd backend && make check", "cd backend && node --test .claude/hooks/agent-bash-guard.test.mjs", "cd backend && npm test && make check", "cd backend && npm test && go test ./...", "cd backend && npm test && npm run build",
-  "make install", "node -e 1", "node --test /tmp/evil.mjs", "node --test ../other/", "node --test --import /tmp/x.mjs .claude/hooks/agent-bash-guard.test.mjs", "node --test scripts/", "NODE_OPTIONS=--require=/tmp/x.js cd backend && npm test", "git push", "cd \"$CLAUDE_PROJECT_DIR\"/../other && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test -- x", "git status && cd backend && npm test",
+  "cd ./backend && make check", "cd ./backend && node --test .claude/hooks/agent-bash-guard.test.mjs", "cd ./backend && npm test && make check", "cd ./backend && npm test && go test ./...", "cd ./backend && npm test && npm run build",
+  "make install", "node -e 1", "node --test /tmp/evil.mjs", "node --test ../other/", "node --test --import /tmp/x.mjs .claude/hooks/agent-bash-guard.test.mjs", "node --test scripts/", "NODE_OPTIONS=--require=/tmp/x.js cd ./backend && npm test", "git push", "cd \"$CLAUDE_PROJECT_DIR\"/../other && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test -- x", "git status && cd ./backend && npm test",
   // the gate is the root's: after a cd the same relative path would be another script
-  "cd backend && ./scripts/security-checks.sh --offline", "cd backend && npm test ; ./scripts/security-checks.sh --offline", "cd backend && \"$CLAUDE_PROJECT_DIR\"/scripts/security-checks.sh --offline", "cd backend && npm test && scripts/security-checks.sh --offline 2>&1 | tail -3",
+  "cd ./backend && ./scripts/security-checks.sh --offline", "cd ./backend && npm test ; ./scripts/security-checks.sh --offline", "cd ./backend && \"$CLAUDE_PROJECT_DIR\"/scripts/security-checks.sh --offline", "cd ./backend && npm test && scripts/security-checks.sh --offline 2>&1 | tail -3",
   // whitespace other than a space, a tab or a newline extends or joins a word for the shell: the exact argv is never the one checked
-  "cargo test --locked\r", "go test\v./...", "cd backend && npm test\u00a0", "cd backend\f&& npm test", "make\u3000check", "LC_ALL=C\u3000cd backend && npm test",
+  "cargo test --locked\r", "go test\v./...", "cd ./backend && npm test\u00a0", "cd ./backend\f&& npm test", "make\u3000check", "LC_ALL=C\u3000cd backend && npm test",
+  // the cd is written `cd ./<cwd> && ` exactly. bash looks a bare name up in CDPATH first; the Bash tool's shell has no
+  // CLAUDE_PROJECT_DIR, so "$CLAUDE_PROJECT_DIR"/backend is /backend there (and /lib, /tmp for such a cwd); quotes,
+  // escapes and a trailing slash name, to bash, another directory than the word this check read
+  "cd backend && npm test", "cd services/api && make test", "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/services/api && make test 2>&1 | tail -20",
+  "cd \"$CLAUDE_PROJECT_DIR/backend\" && npm test", "cd $CLAUDE_PROJECT_DIR/backend && npm test", "cd '$CLAUDE_PROJECT_DIR'/backend && npm test", "cd \\$CLAUDE_PROJECT_DIR/backend && npm test",
+  "cd './backend' && npm test", "cd \"./backend\" && npm test", "cd ./backend\\ && npm test", "cd ./backend\\\t&& npm test", "cd ./backend/ && npm test", "cd  ./backend && npm test", "cd ./backend/../backend && npm test", "cd ./ backend && npm test",
   "./gradlew publish", "./gradlew check --offline", "gradlew check", "go test ./... -run X", "go build ./...", "cargo test", "cargo test --locked --features x",
 ];
 
@@ -138,6 +148,18 @@ test("the config accepts exact argv entries only", () => {
   assert.deepEqual(normalizeConfig({}).root, []);
 });
 
+// The hook's CLAUDE_PROJECT_DIR names the checkout the session started in, also once the session works in a
+// worktree: an absolute path under it is another checkout's file, never a project-relative path.
+test("an absolute path under the hook's CLAUDE_PROJECT_DIR is refused like any other", () => {
+  const saved = process.env.CLAUDE_PROJECT_DIR;
+  process.env.CLAUDE_PROJECT_DIR = "/main/checkout";
+  try {
+    for (const c of ["cat /main/checkout/CLAUDE.md", "/main/checkout/scripts/security-checks.sh --offline", "grep -rn -e x /main/checkout/src"]) assert.equal(decide(c, "readonly").allow, false, `should block: ${c}`);
+    for (const c of ["cd /main/checkout/backend && npm test", "cd /main/checkout/./backend && npm test"]) assert.equal(decide(c, "verify", CFG).allow, false, `should block: ${c}`);
+    assert.equal(decide("cat CLAUDE.md", "readonly").allow, true);
+  } finally { if (saved === undefined) delete process.env.CLAUDE_PROJECT_DIR; else process.env.CLAUDE_PROJECT_DIR = saved; }
+});
+
 const cli = (input, ...args) => spawnSync(process.execPath, [CLI, ...args], { input, encoding: "utf8" });
 test("CLI exit codes: 2 blocked, 0 allowed, 0 non-Bash tool, 2 malformed, 2 without profile", () => {
   const b = cli(payload("touch x"), "readonly"); assert.equal(b.status, 2); assert.match(b.stderr, /blocked/);
@@ -153,7 +175,7 @@ test("agent-bash-guard.config.json is valid and each of its commands passes the 
   const raw = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
   normalizeConfig(raw);
   for (const e of raw.verify ?? []) {
-    const cmd = `${e.cwd ? `cd ${e.cwd} && ` : ""}${e.argv.join(" ")}`;
+    const cmd = `${e.cwd ? `cd ./${e.cwd} && ` : ""}${e.argv.join(" ")}`;
     const r = cli(payload(cmd), "verify"); assert.equal(r.status, 0, `the config lists a command the hook blocks: ${cmd}\n  ${r.stderr}`);
     assert.equal(cli(payload(cmd), "readonly").status === 0 && !["cat", "head", "tail", "wc", "grep", "ls", "true", "false"].includes(e.argv[0]), false, `a verification command must not pass the readonly profile: ${cmd}`);
   }

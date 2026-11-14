@@ -23,8 +23,10 @@ You run verification commands and condense their output. You never modify files.
 The list is `.claude/hooks/agent-bash-guard.config.json`, key `verify` — read that file first. The hook matches each command's arguments literally:
 
 - an entry without `cwd` is written exactly as its `argv`, from the project root;
-- an entry with `cwd` is written `cd <cwd> && <argv>` (or `cd "$CLAUDE_PROJECT_DIR"/<cwd> && <argv>`), with nothing before the `cd`;
-- the gate is `"$CLAUDE_PROJECT_DIR"/scripts/security-checks.sh --offline`.
+- an entry with `cwd` is written `cd ./<cwd> && <argv>`, exactly so, with nothing before the `cd`;
+- the gate is `./scripts/security-checks.sh --offline`.
+
+Paths are relative to the project root, where your Bash commands start. Never write `"$CLAUDE_PROJECT_DIR"`: Claude Code sets it for hooks, not for your shell, where it is empty.
 
 Each may be followed by `2>&1` and `| tail -N` / `| head -N`; nothing else — no extra argument, no other `cd`, no command the file does not list. If the brief asks for a command that is not in the file, say so in the report instead of trying a variant. Run only what the brief asks, each command with a timeout of at most 10 minutes.
 
