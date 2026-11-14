@@ -119,11 +119,15 @@ const BLOCK_VERIFY = [
   // whitespace other than a space, a tab or a newline extends or joins a word for the shell: the exact argv is never the one checked
   "cargo test --locked\r", "go test\v./...", "cd ./backend && npm test\u00a0", "cd ./backend\f&& npm test", "make\u3000check", "LC_ALL=C\u3000cd backend && npm test",
   // the cd is written `cd ./<cwd> && ` exactly. bash looks a bare name up in CDPATH first; the Bash tool's shell has no
-  // CLAUDE_PROJECT_DIR, so "$CLAUDE_PROJECT_DIR"/backend is /backend there (and /lib, /tmp for such a cwd); quotes,
-  // escapes and a trailing slash name, to bash, another directory than the word this check read
-  "cd backend && npm test", "cd services/api && make test", "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/services/api && make test 2>&1 | tail -20",
+  // CLAUDE_PROJECT_DIR, so "$CLAUDE_PROJECT_DIR"/backend is /backend there (and /lib, /tmp for such a cwd). The text is
+  // matched as written so that no quoting or escape is modelled: an escaped blank or a quoted suffix names another
+  // directory (`./backend\ ` is `./backend `, `./backend'/../..'` the project's parent), a quoted or trailing-slash
+  // form the same one, and every variant is refused
+  "cd backend && npm test", "cd services/api && make test", "cd backend\\ && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/services/api && make test 2>&1 | tail -20",
   "cd \"$CLAUDE_PROJECT_DIR/backend\" && npm test", "cd $CLAUDE_PROJECT_DIR/backend && npm test", "cd '$CLAUDE_PROJECT_DIR'/backend && npm test", "cd \\$CLAUDE_PROJECT_DIR/backend && npm test",
   "cd './backend' && npm test", "cd \"./backend\" && npm test", "cd ./backend\\ && npm test", "cd ./backend\\\t&& npm test", "cd ./backend/ && npm test", "cd  ./backend && npm test", "cd ./backend/../backend && npm test", "cd ./ backend && npm test",
+  // the match is anchored at both ends: nothing after `./<cwd>` in the same word, and no other word before it
+  "cd ./backend'/../..' && npm test", "cd ./backend\"\" && npm test", "cd ./backend$X && npm test", "cd cd ./backend && npm test", "cd ../.. cd ./backend && npm test",
   "./gradlew publish", "./gradlew check --offline", "gradlew check", "go test ./... -run X", "go build ./...", "cargo test", "cargo test --locked --features x",
 ];
 
@@ -150,8 +154,8 @@ test("the config accepts exact argv entries only", () => {
   assert.deepEqual(normalizeConfig({}).root, []);
 });
 
-// The hook's CLAUDE_PROJECT_DIR names the checkout the session started in, also once the session works in a
-// worktree: an absolute path under it is another checkout's file, never a project-relative path.
+// In a worktree session, the hook's CLAUDE_PROJECT_DIR is not the worktree the session works in: an absolute path
+// under it is another checkout's file, never a project-relative path.
 test("an absolute path under the hook's CLAUDE_PROJECT_DIR is refused like any other", () => {
   const saved = process.env.CLAUDE_PROJECT_DIR;
   process.env.CLAUDE_PROJECT_DIR = "/main/checkout";

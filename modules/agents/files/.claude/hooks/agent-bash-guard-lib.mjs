@@ -171,7 +171,7 @@ function words(segment) {
 // ---- shapes ----------------------------------------------------------------
 // Paths are relative to the project root, as written. "$CLAUDE_PROJECT_DIR"/x is not one: Claude Code sets that
 // variable for hooks, not for the Bash tool's shell, where it is /x. Nor is the hook's own root as an absolute path:
-// once a session works in a worktree, that variable still names the checkout it started in.
+// in a worktree session it is not the worktree the session works in.
 
 // Shared option walker: literal flags, value options, clusters; returns the positional args or an error string.
 // git reads the value of -U only attached (-U5): its value is optional, so a bare -U is a whole option and the
@@ -222,7 +222,7 @@ function checkReader(argv, first) {
 
 const CD_RULE = "cd is only allowed as `cd ./<dir> && <command>`, written exactly so, for a verification command the config binds to that directory";
 
-// verifyShapes: the argv list valid at this position (after `cd <dir> &&`, or at
+// verifyShapes: the argv list valid at this position (after `cd ./<dir> &&`, or at
 // the root as long as no cd came before), or null when none is.
 function checkSegment(argv, { first, profile, verifyShapes, cfg, atRoot }) {
   while (argv.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[0])) { if (!SAFE_PREFIX.has(argv[0])) return `environment prefix '${argv[0].split("=")[0]}=…' is not allowed`; argv.shift(); }
@@ -238,7 +238,7 @@ function checkSegment(argv, { first, profile, verifyShapes, cfg, atRoot }) {
     if (cmd === "git") return checkGit(argv);
     if (profile === "verify") {
       if (verifyShapes?.some(s => sameArgv(argv, s))) return null;
-      if (cfg.heads.has(cmd)) return `'${argv.join(" ")}' is not one of the verification commands of agent-bash-guard.config.json at this position (exact arguments, and \`cd <dir> &&\` first when the entry has a "cwd")`;
+      if (cfg.heads.has(cmd)) return `'${argv.join(" ")}' is not one of the verification commands of agent-bash-guard.config.json at this position (exact arguments, and \`cd ./<dir> &&\` first when the entry has a "cwd")`;
     }
   }
   if (Object.hasOwn(READERS, cmd)) return checkReader(argv, first);
@@ -269,7 +269,9 @@ export function decide(command, profile, config = EMPTY_CONFIG) {
     for (let i = 0; i < segs.length; i++) {
       const argv = words(segs[i].text);
       if (i === 0 && profile === "verify" && argv[0] === "cd") { // the only accepted cd: first, to a configured directory, then && one of its commands
-        // Read from the segment as written, never from its words: quote removal would read './x' or "./x" as ./x.
+        // Read from the segment as written, never from its words: one exact text, anchored at both ends, so that no
+        // quoting or escape has to be modelled. Some variants name another directory (`./x\ ` is `./x `,
+        // `./x'/..'` is the project root), others the same one (`'./x'`, `./x/`): all are refused.
         // `./` keeps CDPATH out of it, which the shell consults first for a bare name.
         const dir = /^cd \.\/([A-Za-z0-9._\/-]+)$/.exec(segs[0].text)?.[1];
         if (!(dir !== undefined && cfg.byDir.has(dir) && segs[1]?.op === "&&")) return { allow: false, reason: CD_RULE };
