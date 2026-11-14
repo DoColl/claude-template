@@ -156,7 +156,7 @@
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "945078cd580cbdfc56cfea8de5e791dc992109d11a0f4d8518f2da5080368a88"
+      "sha256": "9a404255262a0ccd95323f62d582a26a3e1fa5413a2ff966872244d8b548716e"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",

@@ -6,7 +6,7 @@ Files: `.github/workflows/ready-on-green.yml`, `scripts/guards.d/41-ready-on-gre
 
 ## Status
 
-**Run live on the kit's own repository: it failed once, then the fix worked.** On the first draft pull request after the workflow reached a default branch, the job took the green run and skipped the cancelled one, found the pull request and its head — and GitHub refused the call: `markPullRequestReadyForReview` is not accessible to a job token that holds `pull-requests: write` alone. `auto-merge.yml`, which lifts drafts, holds `contents: write` as well; the job now holds both. On 2026-11-13, with both, the run that a green CI run started found the draft pull request whose head was the commit CI had validated and marked it ready for review. Not exercised: a head that moved after CI, a branch written by a CI Claude session, two open pull requests on one commit.
+**Run live on the kit's own repository: refused twice, then drafts lifted once the fix was on the default branch.** On the first draft pull request after the workflow reached a default branch, the job took the green run and skipped the cancelled one, found the pull request and its head — and GitHub refused the call: `markPullRequestReadyForReview` is not accessible to a job token that holds `pull-requests: write` alone. `auto-merge.yml`, which lifts drafts, holds `contents: write` as well; the job now holds both. The call was refused a second time on the commit that added it: a `workflow_run` workflow runs as the default branch has it, and the change was not there yet. Once it was, on 2026-11-13, the runs that green CI runs started lifted the drafts of several pull requests, each at the head CI had validated; they left pull requests that were not drafts alone, and skipped a commit whose pull request had been merged before its CI ended. Not exercised: a head that moved after CI, a branch written by a CI Claude session, two open pull requests on one commit.
 
 ## Why
 
@@ -44,4 +44,4 @@ GitHub reads a `workflow_run` workflow from the default branch, whatever the pul
 
 - Written for the kit from the draft-lifting steps of `auto-merge.yml`, for repositories that do not install that module.
 - First live run: the call was refused with `pull-requests: write` alone. `contents: write` added, RG-2 changed with it.
-- Second live run, with both permissions: the draft was lifted.
+- Refused again on the commit that added `contents: write`: a `workflow_run` workflow runs as the default branch has it. Once the change was there, drafts were lifted, each at its validated head.
