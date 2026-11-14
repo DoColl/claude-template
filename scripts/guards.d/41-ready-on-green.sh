@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RG-1..3 — the workflow that lifts a draft on green CI
+# RG-1..4 — the workflow that lifts a draft on green CI
 # (docs/conventions/ready-on-green.md). It runs with a write token on an
 # event a pull request causes, so what it can do is pinned here:
 #   RG-1  its only trigger is workflow_run. A pull_request trigger would run
@@ -12,6 +12,10 @@
 #   RG-3  every job refuses a run that is not a green pull_request run of
 #         this repository, and a branch a CI Claude session wrote; the draft
 #         is lifted only after the head is read again and compared.
+#   RG-4  a pull request labelled session-active keeps its draft: the label
+#         is read with the pull request, and checked before the pull request
+#         is named to the step that lifts it. A session still at work on its
+#         pull request says so with the label; green CI is not its work done.
 . "$(dirname "$0")/_lib.sh"
 
 W=.github/workflows/ready-on-green.yml
@@ -56,6 +60,16 @@ if [ "$jobs" -ge 1 ] && [ -z "$missing" ] && [ "$ready" -ge 1 ] && [ "$ready" = 
   ok "RG-3: the $jobs job(s) take green pull_request runs of this repository only, and lift a draft only on the validated head"
 else
   fail "RG-3: $jobs job(s), $ready \`gh pr ready\`, $compared head comparison(s); conditions not on every job:${missing:- none}"
+fi
+
+# ─── RG-4 ───────────────────────────────────────────────────────────────
+read_label=$(grep -cF 'any(.labels[]?; .name == "session-active")' "$W" || true)
+held_at=$(grep -nF 'if [ "$HELD" = "true" ]; then' "$W" | head -n 1 | cut -d: -f1)
+named_at=$(grep -nF 'echo "pr=$PR" >> "$GITHUB_OUTPUT"' "$W" | head -n 1 | cut -d: -f1)
+if [ "$read_label" -ge 1 ] && [ -n "$held_at" ] && [ -n "$named_at" ] && [ "$held_at" -lt "$named_at" ]; then
+  ok "RG-4: a pull request labelled session-active keeps its draft"
+else
+  fail "RG-4: $W must read the session-active label and stop on it before it names the pull request to lift"
 fi
 
 finish
