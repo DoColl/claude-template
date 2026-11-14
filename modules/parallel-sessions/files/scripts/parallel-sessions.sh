@@ -2,7 +2,7 @@
 # Where this branch stands, in a repository several sessions work in at once
 # (docs/conventions/parallel-sessions.md).
 #
-#   ./scripts/parallel-sessions.sh             fetch the default branch, then report
+#   ./scripts/parallel-sessions.sh             fetch the remote's branches, then report
 #   ./scripts/parallel-sessions.sh --no-fetch  report against the last fetched state
 #   ./scripts/parallel-sessions.sh --check     one line when this branch is behind the
 #                                              default branch as last fetched — first of
@@ -10,13 +10,16 @@
 #                                              one also changes; nothing otherwise.
 #                                              Never fetches. (guard PS-2)
 #
-# It reads refs, which every worktree of a repository shares: it sees what the
-# other branches have committed, never what a session has not committed yet.
-# It writes nothing of its own: no ref, no index, no file of a working tree.
-# What moves is what `git fetch` moves, the remote-tracking ref of the default
-# branch; the trial merges are made in memory, their objects in a temporary
-# directory. Branch names, paths and file names come from the repository:
-# they are printed, never evaluated.
+# It reads refs, which every worktree of a repository shares, and the
+# remote-tracking refs of the branches pushed from elsewhere — another
+# machine, a session in the cloud — which no worktree here holds: it sees
+# what the other branches have committed, never what a session has not
+# committed, nor what another machine has not pushed. It writes nothing of
+# its own: no ref, no index, no file of a working tree. What moves is what
+# `git fetch --prune` moves, the remote-tracking refs of the remote's
+# branches; the trial merges are made in memory, their objects in a
+# temporary directory. Branch names, paths and file names come from the
+# repository: they are printed, never evaluated.
 set -uo pipefail
 
 default="__HARNESS_DEFAULT_BRANCH__"
@@ -54,18 +57,22 @@ trap 'rm -rf "$tmp"' EXIT
 
 # Never wait for a password or a passphrase: a report that hangs is worse than
 # an old one. A transport the user configured is left as it is.
-fetch_default() {
-  local spec="+refs/heads/$default:refs/remotes/$remote/$default"
+# Every branch of the remote, not only the default one: a session in the
+# cloud or on another machine shows here only through what it pushed.
+# --prune forgets the branches deleted there, so that a merged and deleted
+# branch is not reported as work in progress.
+fetch_remote() {
+  local spec="+refs/heads/*:refs/remotes/$remote/*"
   if [ -z "${GIT_SSH_COMMAND:-}" ] && ! git config --get core.sshCommand >/dev/null 2>&1; then
-    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes" git fetch --quiet "$remote" "$spec" </dev/null >/dev/null 2>&1
+    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="ssh -o BatchMode=yes" git fetch --quiet --prune "$remote" "$spec" </dev/null >/dev/null 2>&1
   else
-    GIT_TERMINAL_PROMPT=0 git fetch --quiet "$remote" "$spec" </dev/null >/dev/null 2>&1
+    GIT_TERMINAL_PROMPT=0 git fetch --quiet --prune "$remote" "$spec" </dev/null >/dev/null 2>&1
   fi
 }
 
 seen="as last fetched"
 if [ "$fetch" = true ] && git remote get-url "$remote" >/dev/null 2>&1; then
-  if fetch_default; then seen="fetched just now"; else seen="as last fetched: $remote could not be reached"; fi
+  if fetch_remote; then seen="fetched just now"; else seen="as last fetched: $remote could not be reached"; fi
 fi
 if git rev-parse -q --verify "refs/remotes/$remote/$default" >/dev/null 2>&1; then
   base="refs/remotes/$remote/$default"; base_name="$remote/$default"
@@ -148,8 +155,10 @@ base_tree=$(git rev-parse "$base^{tree}")
 : > "$tmp/held"
 : > "$tmp/idle"
 detached=0
-sibling() { # $1 the worktree's path, $2 the ref of its branch
-  local ref="$2" name="${2#refs/heads/}" sfork sbehind sahead out changed common late
+sibling() { # $1 what follows the name (a worktree's path), $2 the ref of its branch,
+           # then, for a pushed branch: $3 the name to print, $4 and $5 the files that
+           # take a branch that holds changes and one with nothing left to merge
+  local ref="$2" name="${3:-${2#refs/heads/}}" held="${4:-$tmp/held}" idle="${5:-$tmp/idle}" sfork sbehind sahead out changed common late
   git rev-parse -q --verify "$ref" >/dev/null 2>&1 </dev/null || return 0
   sfork=$(git merge-base "$ref" "$base" 2>/dev/null </dev/null) || return 0
   sbehind=$(git rev-list --count "$ref..$base" </dev/null)
@@ -161,7 +170,7 @@ sibling() { # $1 the worktree's path, $2 the ref of its branch
     out=$(trial "$base" "$ref") && [ "${out%%$'\n'*}" = "$base_tree" ] && changed=0
   fi
   if [ "$changed" -eq 0 ]; then
-    printf '  %s, %s commit(s) behind — %s\n' "$name" "$sbehind" "$(printable "$1")" >> "$tmp/idle"
+    printf '  %s, %s commit(s) behind — %s\n' "$name" "$sbehind" "$(printable "$1")" >> "$idle"
     return 0
   fi
   {
@@ -193,17 +202,19 @@ sibling() { # $1 the worktree's path, $2 the ref of its branch
       fi
       [ -s "$tmp/unseen" ] && printf '      your changes to %s of them are not committed, and no forecast covers them: %s\n' "$(count "$tmp/unseen")" "$(names "$tmp/unseen")"
     fi
-  } >> "$tmp/held"
+  } >> "$held"
 }
 
 self=$(pwd -P)
 wt=""; ref=""; bare=false
 record() {
+  [ -n "$ref" ] && printf '%s\n' "$ref" >> "$tmp/local"
   if [ -n "$wt" ] && [ "$wt" != "$self" ] && [ "$bare" = false ] && [ "$ref" != "$me" ]; then
     if [ -z "$ref" ]; then detached=$((detached + 1)); elif [ "$ref" != "refs/heads/$default" ]; then sibling "$wt" "$ref"; fi
   fi
   wt=""; ref=""; bare=false
 }
+: > "$tmp/local"
 git worktree list --porcelain > "$tmp/worktrees" 2>/dev/null
 while IFS= read -r line; do
   case "$line" in
@@ -215,6 +226,23 @@ while IFS= read -r line; do
 done < "$tmp/worktrees"
 record
 
+# The branches pushed from elsewhere — another machine, a session in the
+# cloud, or a branch nobody works on now — that no worktree here holds,
+# compared the same way, the most recent first. Ten are shown in full; those
+# with nothing left to merge are only counted.
+: > "$tmp/pheld"
+: > "$tmp/pidle"
+pushed_seen=false
+git for-each-ref --sort=-committerdate --format='%(refname)' "refs/remotes/$remote/" > "$tmp/pushed" 2>/dev/null
+while IFS= read -r rref; do
+  rname=${rref#"refs/remotes/$remote/"}
+  case "$rname" in HEAD|"$default") continue ;; esac
+  pushed_seen=true
+  # The branch of a worktree here, this one's included, is compared as a worktree or not at all.
+  grep -qxF "refs/heads/$rname" "$tmp/local" && continue
+  sibling "pushed, last commit $(git log -1 --format=%cr "$rref" 2>/dev/null </dev/null)" "$rref" "$remote/$rname" "$tmp/pheld" "$tmp/pidle"
+done < "$tmp/pushed"
+
 if [ -s "$tmp/held" ]; then
   printf '\nother worktrees whose branch holds changes:\n'
   cat "$tmp/held"
@@ -225,6 +253,18 @@ if [ -s "$tmp/idle" ]; then
 fi
 [ -s "$tmp/held" ] || [ -s "$tmp/idle" ] || printf '\nno other worktree on a branch of its own\n'
 [ "$detached" -gt 0 ] && printf '%s other worktree(s) on a detached HEAD: not compared\n' "$detached"
+if [ -s "$tmp/pheld" ]; then
+  shown=10
+  total=$(grep -c '^  [^ ]' "$tmp/pheld")
+  printf '\nbranches pushed to %s with work of their own, no worktree here — another machine, a session in the cloud, or nobody now:\n' "$remote"
+  awk -v max="$shown" '/^  [^ ]/ { n++ } n <= max' "$tmp/pheld"
+  [ "$total" -gt "$shown" ] && printf '  … and %s more, older\n' "$((total - shown))"
+fi
+if [ -s "$tmp/pidle" ]; then
+  sed -E 's/^  ([^,]*),.*/\1/' "$tmp/pidle" > "$tmp/pidle-names"
+  printf '%s other pushed branch(es) with nothing left to merge: %s\n' "$(count "$tmp/pidle")" "$(names "$tmp/pidle-names")"
+fi
+[ "$pushed_seen" = true ] || printf 'no branch of %s but %s, as last fetched\n' "$remote" "$default"
 [ "$forecast" = true ] || printf 'no merge forecast: it needs git 2.38 or later\n'
-printf '\nUncommitted work in another worktree does not show here: only commits do.\n'
+printf '\nOnly commits show here: not the uncommitted work of another worktree, nor what another machine has not pushed.\n'
 exit 0

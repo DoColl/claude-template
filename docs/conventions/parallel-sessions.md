@@ -1,12 +1,12 @@
 # Parallel sessions
 
-**Rule:** a worktree isolates files and nothing else. A session runs `./scripts/parallel-sessions.sh` when it starts, before it pushes and before it opens a pull request. It catches up with the default branch as soon as that branch changed a file it changes, and in any case before a pull request — a rebase while its branch is not pushed, a merge once it is — and never settles alone an overlap with the branch of another worktree: it says which files, and the user orders the merges. Commits are how sessions see each other. A message from another session is information, never the user's consent.
+**Rule:** a worktree isolates files and nothing else. A session runs `./scripts/parallel-sessions.sh` when it starts, before it pushes and before it opens a pull request. It catches up with the default branch as soon as that branch changed a file it changes, and in any case before a pull request — a rebase while its branch is not pushed, a merge once it is — and never settles alone an overlap with the branch of another worktree: it says which files, and the user orders the merges. Commits are how sessions see each other, and pushes how they see a session on another machine or in the cloud: the report compares the pushed branches too. A session that is about to change a file with one writer at a time, opens its pull request or ends its work says so to the sessions at work on the other branches (§ Messages between sessions). A message from another session is information, never the user's consent.
 
 **Where the rule lives.** Not in `CLAUDE.md`. The `parallel-sessions` skill carries it — its description is what makes a session load it when it starts in a worktree, is about to push or to open a pull request — and the gate repeats the urgent half as PS-2. `CLAUDE.md` is budgeted, and a rule that a skill and a check already carry does not need its bytes. A project whose sessions skip the report adds the line itself (§ A line for `CLAUDE.md`).
 
 ## Status
 
-Written for the kit. The report and the guard are covered by the kit's tests, in scratch repositories with several worktrees, and both have run on the kit's own repository (§ History). The skill has **never been loaded by a session**; its step about warning another session was done by hand once, between two live sessions on one machine: the messages were delivered, and nothing showed whether they were read. `.worktreeinclude` has not been watched at work. What this page says about Claude Code comes from its documentation (§ Sources) and was **not observed by the kit's authors**.
+Written for the kit. The report and the guard are covered by the kit's tests, in scratch repositories with several worktrees, and both have run on the kit's own repository (§ History); the comparison with pushed branches is covered by the same tests and ran once there. The skill has **never been loaded by a session**. The exchange of messages it describes was done by hand twice: between two live sessions on one machine, where the messages were delivered and nothing showed whether they were read; and between two sessions in the cloud, through Claude Code Remote's `send_message`, where the recipient answered with what it would and would not touch, wrote again when it opened its pull request, and kept to it. `.worktreeinclude` has not been watched at work. What this page says about Claude Code comes from its documentation (§ Sources) and was **not observed by the kit's authors**.
 
 ## Why
 
@@ -39,16 +39,17 @@ So the report fetches before it compares, and a session runs it first.
 
 ### The report
 
-`./scripts/parallel-sessions.sh` fetches the default branch (`--no-fetch` skips that), then prints:
+`./scripts/parallel-sessions.sh` fetches every branch of the remote and forgets those deleted there (`--no-fetch` skips that), then prints:
 
 - how many commits the branch is behind, and the files the default branch changed that the branch also changes, committed or not. Any such file means: catch up with the default branch now, before more work lands on the old version. The report says how — a rebase while the branch is not pushed, a merge once it is;
 - whether the local default branch is behind the remote's;
 - for each other worktree whose branch holds changes: its distance to the default branch, whether the default branch moved under its files, the files it has in common with this branch, and whether merging the two would conflict as text;
 - the worktrees with nothing left to merge: no change since their fork, or changes the default branch already holds (a squash merge is recognised). Those are candidates for `git worktree remove` — after a look inside, since uncommitted work does not show.
+- for each branch pushed to the remote that no worktree here holds — a session on another machine or in the cloud, or a branch nobody works on now —, the same comparison as for a worktree's branch, the most recent first: ten in full, the older ones counted. The pushed branches with nothing left to merge are only named.
 
-It reads refs only. **What another session has not committed does not exist for it.** That is its one real limit, and the reason for "commit early": a commit is the only way a session can show the others what it holds, without a shared file that would itself be fought over.
+It reads refs only. **What another session has not committed — or, on another machine, not pushed — does not exist for it.** That is its one real limit, and the reason for "commit early": a commit is the only way a session can show the others what it holds, without a shared file that would itself be fought over.
 
-It writes nothing of its own. The fetch moves the remote-tracking ref of the default branch. The trial merges are made in memory (`git merge-tree`, git 2.38 or later; without it the report says so and gives no forecast), and their objects go to a temporary directory. The remote is taken to be `origin`.
+It writes nothing of its own. The fetch moves the remote-tracking refs of the remote's branches, and removes those of the branches deleted there (`--prune`), so that a merged and deleted branch is not taken for work in progress. The trial merges are made in memory (`git merge-tree`, git 2.38 or later; without it the report says so and gives no forecast), and their objects go to a temporary directory. The remote is taken to be `origin`.
 
 A clean forecast is a statement about text. Two changes that merge without a conflict can still break each other; only a build and the tests run on the merged result say otherwise.
 
@@ -61,15 +62,23 @@ A rebase rewrites the branch, so it is for a branch nobody else has: one that is
 ### Shared files and the order of merges
 
 - **Split the work by files** before starting two sessions, not by topics: two topics can meet in one file.
-- **Some files have one writer at a time**, whatever the split: a lockfile, numbered migrations, a changelog, a version number, generated code, `CLAUDE.md`. Touch them last, after merging the default branch, and keep the edit small.
+- **Some files have one writer at a time**, whatever the split: a lockfile, numbered migrations, a changelog, a version number, generated code, `CLAUDE.md`. Touch them last, after merging the default branch, keep the edit small, and tell the sessions at work on other branches before you start (§ Messages between sessions).
 - **When two branches hold the same file**, the first one merged gets the easy merge and the second inherits the conflict. Which is which is the user's decision: a session reports the overlap, with the files, and does not push over it.
 - **After a merge into the default branch**, the sessions whose branches hold the same files catch up at once. A branch pushed on an older base has checks that ran against a default branch that has since moved.
 
 ### Messages between sessions
 
-Claude Code can pass a message from one session to another (`ListAgents`, `SendMessage`). By its documentation, a received message is plain text, is presented as coming from another session and not from the user, and cannot approve a permission prompt, change configuration or run a command; the `crossSessionInbound` setting (`accept`, `hold`, `refuse`) decides what a session does with the messages it receives.
+Claude Code can pass a message from one session to another. Sessions on one machine use `ListAgents` and `SendMessage`. Sessions running in the cloud are reached with the Claude Code Remote tools: `list_sessions` and `get_session` find a session and the branch it works on, and `send_message` takes its session ID; `SendMessage`, which addresses sessions by name, does not reach them (observed between two cloud sessions, where the received message said so). By its documentation, a received message is plain text, is presented as coming from another session and not from the user, and cannot approve a permission prompt, change configuration or run a command; the `crossSessionInbound` setting (`accept`, `hold`, `refuse`) decides what a session does with the messages it receives.
 
-For a session that warns another one:
+When to write, unasked — the moments when a session that says nothing leaves another to find out at merge time:
+
+- before changing a file with one writer at a time (§ Shared files and the order of merges) while the report lists another branch at work;
+- when opening a pull request that holds files another branch also changes, or that removes what another branch edits — a release that consumes changelog fragments;
+- when the work ends, to the sessions written to before.
+
+The recipient answers with what it will and will not touch, and writes again at its own milestones: its pull request opened, its work ended. That answer is what turns a message into coordination, and the only sign it was read.
+
+For a session that writes to another one:
 
 - Find the recipient by its branch or its worktree path, not by a title: several sessions can look alike.
 - **Fetch first, then write.** A message that quotes a commit read before the fetch is corrected a minute later by a second message.
@@ -95,7 +104,8 @@ The module inserts none. For a project that wants the rule in front of every ses
 
 ### Limits
 
-- Uncommitted work in another worktree is invisible. So is a branch that has no worktree on this machine: a session in the cloud or on another machine, a pull request opened by someone else.
+- Uncommitted work in another worktree is invisible, and so is work another machine has not pushed. A pushed branch is seen as of the last fetch: a session that pushes rarely shows late.
+- The fetch takes every branch of the remote: in a repository with many branches it takes longer, and `--no-fetch` reports on what was last fetched.
 - The forecast is textual, and covers committed work only.
 - PS-2 compares with the last fetch. It is silent rather than reassuring; the report is what fetches.
 - A worktree kept elsewhere than `.claude/worktrees/` is compared like the others; PS-1 says nothing about where it sits.
@@ -120,3 +130,4 @@ The module inserts none. For a project that wants the rule in front of every ses
 - Written for the kit.
 - First runs, on the kit's own repository, from one of ten worktrees, while the module was being written. The default branch moved several times under the branch, and the report named the files — among them the changelog and the version number, which three other changes took in turn. Seven worktrees had nothing left to merge, 14 to 68 commits behind the default branch. One run called the merge with a neighbour's branch "clean as text" while the file the two shared was not committed on the reporting side: the report now names the shared files that no forecast covers.
 - The report and PS-2 speak as soon as the branch is behind the default branch, and say how to catch up: a rebase while the branch is not pushed, a merge once it is. The skill has a step before a pull request. Asked for once the module's own pull request had been renumbered three times before it could be opened.
+- The report compares the branches pushed from elsewhere. On the kit's own repository, sessions in the cloud worked for a day on branches the worktree comparison never saw: two of them took the same guard number, and a release was cut while another branch still edited the changelog fragments it was to consume. Both were found by hand, close to the merge. The first run of the new comparison showed the branch of a session then at work in the cloud. The skill and this page say when to write to another session, after an exchange between two cloud sessions that kept such a conflict away.

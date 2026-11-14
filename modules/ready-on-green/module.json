@@ -10,7 +10,7 @@
   },
   "postInstall": [
     "The CI workflow (the name given at install, \"CI\" by default) must exist under that exact `name:` and run on pull_request. A pull request CI does not run on — documentation only, where CI skips it — keeps its draft: lift it by hand.",
-    "Do not install this module with auto-merge, which lifts the draft itself. From now on a draft means \"CI has not signed off\", not \"the author is not done\": say so to whoever opens pull requests here.",
+    "Do not install this module with auto-merge, which lifts the draft itself. From now on a draft means \"CI has not signed off\": an author still at work on a pull request labels it session-active (create the label once: gh label create session-active). Say so to whoever opens pull requests here.",
     "The workflow acts once it is on the default branch. Open a draft pull request then and watch the draft lifted when CI turns green."
   ]
 }

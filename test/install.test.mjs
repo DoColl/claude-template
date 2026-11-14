@@ -868,6 +868,102 @@ test("parallel-sessions: the report names a stale base, the files two branches s
   assert.match(report(wt("a"), "--no-fetch").stdout, /\n  how: commit, then git merge origin\/main \(commits of the branch are pushed: a rebase would need a forced push\)\n/);
 });
 
+// A session on another machine or in the cloud shares no worktree with this one: the report sees it through what it
+// pushed. Staged with a second clone of the same bare "origin", whose commits carry fixed dates.
+test("parallel-sessions: the report compares the branches pushed from elsewhere, newest first, and forgets deleted ones", () => {
+  if (!kit.modules.has("parallel-sessions")) return;
+  const root = tmp(), origin = path.join(root, "origin.git"), dir = path.join(root, "here"), away = path.join(root, "away");
+  const env = { ...ENV, CI: "", GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
+  const gitAt = (date, cwd, ...args) => { const r = run(cwd, "git", ["-c", "commit.gpgsign=false", ...args], { env: { ...env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } }); assert.equal(r.status, 0, `git ${args.join(" ")}\n${output(r)}`); return r.stdout; };
+  const git = (cwd, ...args) => gitAt("2026-06-01T12:00:00Z", cwd, ...args);
+  const report = (...args) => run(dir, "bash", ["scripts/parallel-sessions.sh", ...args], { env });
+  fs.mkdirSync(dir);
+  git(root, "init", "-q", "--bare", "-b", "main", origin);
+  install(dir, ["parallel-sessions"]);
+  git(dir, "init", "-q", "-b", "main");
+  write(dir, "shared.txt", "1\n2\n3\n"); write(dir, "solo.txt", "s\n");
+  git(dir, "add", "-A"); git(dir, "commit", "-qm", "init");
+  git(dir, "remote", "add", "origin", origin); git(dir, "push", "-q", "origin", "main");
+  git(root, "clone", "-q", origin, away);
+  git(dir, "checkout", "-qb", "mine"); write(dir, "shared.txt", "one\n2\n3\n"); git(dir, "commit", "-qam", "mine");
+  // Pushed from the other clone: a branch that conflicts with this one, one on another file, one with a name a shell
+  // would run, one with nothing of its own, and eleven older ones.
+  const hostile = "x;touch${IFS}PWNED$(touch${IFS}PWNED2)`touch${IFS}PWNED3`";
+  const push = (name, date, file, text) => {
+    git(away, "checkout", "-q", "-b", name, "origin/main");
+    if (file) { write(away, file, text); git(away, "add", "-A"); gitAt(date, away, "commit", "-qm", name); }
+    git(away, "push", "-q", "origin", name);
+  };
+  push("cloud-conflict", "2026-06-03T12:00:00Z", "shared.txt", "uno\n2\n3\n");
+  push("cloud-other", "2026-06-03T11:00:00Z", "other.txt", "o\n");
+  push(hostile, "2026-06-03T10:00:00Z", "solo.txt", "S\n");
+  push("cloud-empty");
+  for (let i = 0; i < 11; i++) push(`old-${String(i).padStart(2, "0")}`, `2026-01-${String(i + 10).padStart(2, "0")}T12:00:00Z`, `old-${i}.txt`, "x\n");
+
+  const r = report();
+  assert.equal(r.status, 0, output(r));
+  const section = r.stdout.split("branches pushed to origin with work of their own, no worktree here")[1] ?? "";
+  assert.match(section, /^[^\n]*\n  origin\/cloud-conflict — pushed, last commit [^\n]*\n      1 commit\(s\) of its own on 1 file\(s\), 0 behind origin\/main\n      1 file\(s\) in common with this branch: shared\.txt\n      merging the two CONFLICTS in: shared\.txt\n  origin\/cloud-other — pushed, [^\n]*\n[^\n]*\n      no file in common with this branch\n/, "the most recent first, compared like a worktree's branch");
+  assert.ok(section.includes(`\n  origin/${hostile} — pushed, `), "a branch name is printed as it is");
+  assert.deepEqual(fs.readdirSync(root, { recursive: true }).filter((f) => /^PWNED[23]?$/.test(path.basename(String(f)))), [], "no part of a branch name was run");
+  assert.match(section, /\n  origin\/old-04 — pushed, [^\n]*\n(?:      [^\n]*\n)+  … and 4 more, older\n/, "ten in full (three recent, seven old), the four oldest counted");
+  assert.doesNotMatch(section, /old-0[0-3]/);
+  assert.match(r.stdout, /\n1 other pushed branch\(es\) with nothing left to merge: origin\/cloud-empty\n/);
+  assert.doesNotMatch(section, /origin\/(main|mine) /, "neither the base nor this branch's own copy");
+
+  // This branch, once pushed, is not its own neighbour; a pushed branch a worktree here holds is compared once, as a worktree.
+  git(dir, "push", "-q", "origin", "mine");
+  git(dir, "worktree", "add", "-q", path.join(dir, ".claude/worktrees/w"), "cloud-other");
+  const once = report();
+  assert.doesNotMatch(once.stdout, /origin\/mine/);
+  assert.match(once.stdout, /\nother worktrees whose branch holds changes:\n  cloud-other — /);
+  assert.doesNotMatch(once.stdout, /origin\/cloud-other/);
+
+  // A branch deleted on the remote stays until the next fetch, which forgets it.
+  git(away, "push", "-q", "origin", "--delete", "cloud-conflict");
+  assert.match(report("--no-fetch").stdout, /\n  origin\/cloud-conflict — /, "without a fetch, the state last fetched");
+  assert.doesNotMatch(report().stdout, /origin\/cloud-conflict/, "the fetch prunes it");
+
+  // --check, what the gate prints, says nothing of the pushed branches.
+  assert.equal(report("--check").stdout, "");
+});
+
+// ready-on-green: the step that picks the pull request whose draft green CI lifts, run as the runner runs it, with
+// `gh` answering from a table — the pull requests it lifts, and the nearby ones that keep their draft. The step
+// calls jq, as the runner provides it: without jq here, the test has nothing to run.
+test("ready-on-green: which draft green CI lifts, and which keep theirs — session-active among them", () => {
+  if (!kit.modules.has("ready-on-green") || run(KIT_ROOT, "jq", ["--version"]).status !== 0) return;
+  const yml = read(kit.modules.get("ready-on-green").dir, "files/.github/workflows/ready-on-green.yml");
+  const step = /\n      - name: Find PR for head_sha\n(?: {8}(?!run: \|)[^\n]*\n)* {8}run: \|\n((?: {10}[^\n]*\n|\n)+)/.exec(yml);
+  assert.ok(step, "the step is in the workflow");
+  const script = step[1].replace(/^ {10}/gm, "");
+  assert.doesNotMatch(script, /\$\{\{/, "no expression in the script");
+  const dir = tmp("harness-ready-");
+  write(dir, "bin/gh", "#!/usr/bin/env bash\n# Stands in for `gh pr list … --jq FILTER`: the filter runs on the table.\nwhile [ $# -gt 0 ]; do case \"$1\" in --jq) filter=$2; shift 2 ;; *) shift ;; esac; done\nexec jq -c \"$filter\" \"$PRS\"\n", 0o755);
+  const sha = "a".repeat(40);
+  const pr = (number, extra = {}) => ({ number, headRefOid: sha, headRefName: `feature-${number}`, isDraft: true, labels: [], ...extra });
+  const lift = (prs) => {
+    write(dir, "prs.json", JSON.stringify(prs)); write(dir, "output", "");
+    const env = { ...ENV, PATH: `${path.join(dir, "bin")}${path.delimiter}${process.env.PATH}`, PRS: path.join(dir, "prs.json"), HEAD_SHA: sha, DEFAULT_BRANCH: "main", GITHUB_OUTPUT: path.join(dir, "output"), GH_TOKEN: "unused" };
+    const r = run(dir, "bash", ["-c", script], { env });
+    assert.equal(r.status, 0, output(r));
+    return { picked: /^pr=(\d+)$/m.exec(read(dir, "output"))?.[1] ?? null, log: r.stdout };
+  };
+  const cases = [
+    ["a draft, CI green", [pr(7)], "7"],
+    ["a draft with another label", [pr(7, { labels: [{ name: "documentation" }] })], "7"],
+    ["a label that only begins the same", [pr(7, { labels: [{ name: "session-active-old" }] })], "7"],
+    ["a draft labelled session-active", [pr(7, { labels: [{ name: "bug" }, { name: "session-active" }] })], null],
+    ["not a draft", [pr(7, { isDraft: false })], null],
+    ["a branch a CI Claude session wrote", [pr(7, { headRefName: "claude/issue-12" })], null],
+    ["two pull requests with this head", [pr(7), pr(8)], null],
+    ["a pull request that only contains the commit", [pr(7, { headRefOid: "b".repeat(40) })], null],
+    ["no open pull request", [], null],
+  ];
+  for (const [what, prs, expected] of cases) assert.equal(lift(prs).picked, expected, what);
+  assert.match(lift([pr(7, { labels: [{ name: "session-active" }] })]).log, /^::notice::PR #7 carries the session-active label: a session is still at work on it — its draft stays\.$/m);
+});
+
 test("parallel-sessions: without a remote, a commit or a repository, the report says so and --check says nothing", () => {
   if (!kit.modules.has("parallel-sessions")) return;
   const dir = tmp(), nowhere = tmp();
