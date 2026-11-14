@@ -30,6 +30,11 @@ const isoDay = (d) => d.toISOString().slice(0, 10);
 const DIGEST_LABEL = 'weekly-digest';
 const DEADLINE_LABEL = 'deadline';
 const STALE_PR_HOURS = 48;
+// The label a session puts on a pull request it is still at work on: the
+// pull request is the session's, not the owner's — until nothing has moved on
+// it for this long, when the label may have been left behind.
+const HOLD_LABEL = 'session-active';
+const STALE_HOLD_HOURS = 48;
 const STALE_ALERT_DAYS = 7;
 const DEADLINE_SOON_DAYS = 7;
 
@@ -261,6 +266,14 @@ export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, aut
   const gated = files.some((p) => gateRe.test(p)) || pr.headRef.startsWith('claude/issue-');
   const ci = pr.ci; // { status, conclusion } of the latest CI run on the head SHA, or null
 
+  // Held by a session at work on it: its conflicts and its CI are the session's.
+  if ((pr.labels ?? []).includes(HOLD_LABEL)) {
+    const idleH = (now - new Date(pr.updatedAt ?? pr.createdAt)) / HOUR;
+    if (idleH < STALE_HOLD_HOURS) return null;
+    const lift = pr.draft ? ' and lift the draft by hand' : '';
+    return `labelled \`${HOLD_LABEL}\`, no activity for ${Math.floor(idleH / 24)} d: if no session is at work on it any more, remove the label${lift}`;
+  }
+
   if (pr.mergeableState === 'dirty') return `conflicts with \`${DEFAULT_BRANCH}\`: needs a rebase`;
   if (ci && ci.status !== 'completed') return ageH >= STALE_PR_HOURS ? 'CI has been running for a long time' : null;
   if (ci && ci.conclusion !== 'success') return `CI **${ci.conclusion}**`;
@@ -414,6 +427,9 @@ async function collectPr(gh, p, ciFile) {
     createdAt: p.created_at,
     author: p.user?.login ?? '',
     headRef: p.head.ref,
+    draft: Boolean(p.draft),
+    labels: (p.labels ?? []).map((l) => l.name),
+    updatedAt: p.updated_at,
     // Both sides of a rename, as auto-merge.yml counts them.
     files: listing.flatMap((f) => (f.previous_filename ? [f.filename, f.previous_filename] : [f.filename])),
     filesComplete: listing.length >= (detail.changed_files ?? 0),
