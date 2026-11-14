@@ -11,6 +11,12 @@ name: CI
 # root. The documentation set is skipped, and what the tests read or the kit
 # ships is taken back: a Markdown file under modules/ is shipped content, and
 # the tests read CHANGELOG.md and the fragments under changes/.
+#
+# While a session is still at work on a pull request — a draft labelled
+# session-active — every job is skipped, and the run ends `skipped`, which
+# ready-on-green does not act on. Taking the label off runs CI once, in full,
+# and ready-on-green lifts the draft if it is green
+# (docs/conventions/ready-on-green.md § A CI workflow that holds its jobs).
 on:
   push:
     branches: [main]
@@ -34,7 +40,9 @@ on:
     branches: [main]
     # `edited` too: a pull request retargeted to main is then tested against it
     # (the kit's ci-workflow seed does the same, for the reason AM-9 gives).
-    types: [opened, synchronize, reopened, edited]
+    # `unlabeled` and `ready_for_review`: the session-active label coming off,
+    # or a held draft lifted by hand, runs the jobs the label held back.
+    types: [opened, synchronize, reopened, edited, unlabeled, ready_for_review]
     paths:
       - '**'
       - '!docs/**'
@@ -58,9 +66,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Every job carries the same `if:`, and a test in test/install.test.mjs holds
+# each job to it: with one job left to run, a held run would end `success`
+# with the tests skipped, and ready-on-green could lift the draft on it if the
+# label came off before it read the pull request. Drafts only: GitHub does not
+# merge a draft, while a skipped job counts as passed for a required check.
 jobs:
   security:
     name: Security
+    if: ${{ !(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active')) }}
     # `$/` is this repository at the caller's commit. `./` means the same to
     # GitHub, but zizmor reports it (self-repository) and GA-2 would fail.
     uses: $/.github/workflows/security.yml
@@ -71,6 +85,7 @@ jobs:
   test:
     name: Tests and workflow lint
     needs: [security]
+    if: ${{ !(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
