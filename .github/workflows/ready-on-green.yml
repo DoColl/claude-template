@@ -67,9 +67,10 @@ jobs:
           # `sha:` matches any open PR that CONTAINS the commit (a stacked PR,
           # a sibling): keep only the one whose head IS the validated SHA, and
           # only into the default branch. Two such pull requests are one too
-          # many to choose from.
-          FOUND=$(gh pr list --search "sha:$HEAD_SHA" --state open --base "$DEFAULT_BRANCH" --json number,headRefOid,headRefName,isDraft \
-                 --jq '[.[] | select(.headRefOid == $ENV.HEAD_SHA) | [.number, .headRefName, .isDraft] | @tsv]')
+          # many to choose from. Its labels say whether a session is still at
+          # work on it.
+          FOUND=$(gh pr list --search "sha:$HEAD_SHA" --state open --base "$DEFAULT_BRANCH" --json number,headRefOid,headRefName,isDraft,labels \
+                 --jq '[.[] | select(.headRefOid == $ENV.HEAD_SHA) | [.number, .headRefName, .isDraft, any(.labels[]?; .name == "session-active")] | @tsv]')
           COUNT=$(jq 'length' <<< "$FOUND")
           if [ "$COUNT" = "0" ]; then
             echo "No open PR into ${DEFAULT_BRANCH} found for SHA $HEAD_SHA — skipping"
@@ -79,13 +80,21 @@ jobs:
             echo "::notice::${COUNT} open pull requests into ${DEFAULT_BRANCH} have head ${HEAD_SHA:0:7} — left as they are."
             exit 0
           fi
-          IFS=$'\t' read -r PR HEAD_REF DRAFT <<< "$(jq -r '.[0]' <<< "$FOUND")"
+          IFS=$'\t' read -r PR HEAD_REF DRAFT HELD <<< "$(jq -r '.[0]' <<< "$FOUND")"
           if [[ "$HEAD_REF" == claude/issue-* || "$HEAD_REF" == claude/rework-* ]]; then
             echo "::notice::PR #${PR} comes from ${HEAD_REF}, a branch a CI Claude session wrote — its draft is lifted by hand."
             exit 0
           fi
           if [ "$DRAFT" != "true" ]; then
             echo "PR #${PR} is not a draft — nothing to do"
+            exit 0
+          fi
+          # A session still at work on its pull request — a review running, a
+          # commit to come — says so with this label: green CI on one commit
+          # is not its work done. It removes the label and lifts the draft
+          # itself when it is.
+          if [ "$HELD" = "true" ]; then
+            echo "::notice::PR #${PR} carries the session-active label: a session is still at work on it — its draft stays."
             exit 0
           fi
           echo "pr=$PR" >> "$GITHUB_OUTPUT"

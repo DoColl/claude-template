@@ -93,7 +93,7 @@
     },
     ".claude/skills/parallel-sessions/SKILL.md": {
       "module": "parallel-sessions",
-      "sha256": "a51bf3a48dd77c4ebc3acba0fb9a3d6b27c2af5ea62999715095f99eb6146166"
+      "sha256": "d9a8e72cce4435f3d11de9b4fbbbc443e2ccd1d5cd2c9fb69fff4da5d367c3e8"
     },
     ".worktreeinclude": {
       "module": "parallel-sessions",
@@ -101,7 +101,7 @@
     },
     "docs/conventions/parallel-sessions.md": {
       "module": "parallel-sessions",
-      "sha256": "df7c9dfd002182c1145b9ee51089a3374ccd51aea7a3728696bc8505058813e8"
+      "sha256": "49107044eb19ebebcdedd0fb91b419450a0c207ffca0ee94806fac794bc6f910"
     },
     "scripts/guards.d/18-parallel-sessions.sh": {
       "module": "parallel-sessions",
@@ -109,7 +109,7 @@
     },
     "scripts/parallel-sessions.sh": {
       "module": "parallel-sessions",
-      "sha256": "b56ba8e6e2e69191f018b058e62279440a3df47add037e92e6fad585572c501a"
+      "sha256": "5c330c1d154180a917b74be99886c3538c822885b789e29ace1986b543d00ee1"
     },
     ".claude/rules/dependabot.md": {
       "module": "ci-security",
@@ -153,15 +153,15 @@
     },
     ".github/workflows/ready-on-green.yml": {
       "module": "ready-on-green",
-      "sha256": "9c827782c919dafa56cbcaeec525f82ac47df11d181199733ff1d54c17690f3b"
+      "sha256": "af88ec0e55a4541742021c2d099e0e163b2ff99cad515b97fe1110fb0694d26a"
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "9a404255262a0ccd95323f62d582a26a3e1fa5413a2ff966872244d8b548716e"
+      "sha256": "9dae728b59ce57dd0b237097c2564cfd1363b659d2289c1215a56efcc2a45bf3"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",
-      "sha256": "86e44232dd95f03cf9134c04c839dfb85bb7a243dc2215e1efae786545fdfe43"
+      "sha256": "109f8d46d162288c081917f6710bdb6fc8bdfc8adb23da1fc3bb6e39df3c13b2"
     },
     ".github/workflows/weekly-digest.yml": {
       "module": "weekly-digest",
