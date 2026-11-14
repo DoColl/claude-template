@@ -506,6 +506,25 @@ test("CI: a pull request that changes modules/, lib/ or bin/ adds a changelog fr
   assert.equal(lone.status, 1); assert.match(lone.stdout, /::error::HEAD is not the merge commit of a pull request/, "anything but a merge commit is refused, not passed");
 });
 
+// The kit's CI holds its jobs while a session is still at work on a pull request — a draft labelled session-active.
+// Every job, or a held run ends `success` with the tests skipped, and ready-on-green could lift the draft on it if the
+// label came off before it read the pull request; a run whose jobs all skip ends `skipped`, which it does not act on.
+// The label coming off (`unlabeled`) or the draft lifted by hand (`ready_for_review`) runs the jobs in full.
+test("CI: every job is held while a draft is labelled session-active, and runs once the label comes off", () => {
+  const ci = read(KIT_ROOT, ".github/workflows/ci.yml");
+  const types = /\n {2}pull_request:\n(?: {4}[^\n]*\n)*? {4}types: \[([^\]\n]*)\]\n/.exec(ci);
+  assert.ok(types, "the pull_request trigger lists its types on one line");
+  const listed = types[1].split(",").map((t) => t.trim());
+  for (const t of ["opened", "synchronize", "reopened", "unlabeled", "ready_for_review"]) assert.ok(listed.includes(t), `the pull_request types include ${t}`);
+  const hold = "    if: ${{ !(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active')) }}";
+  const jobs = ci.slice(ci.indexOf("\njobs:\n") + 1).split(/\n(?= {2}[A-Za-z0-9_-]+:\n)/).slice(1);
+  assert.ok(jobs.length >= 2, "the jobs are read");
+  for (const job of jobs) {
+    const name = /^ {2}([A-Za-z0-9_-]+):/.exec(job)[1];
+    assert.deepEqual(job.split("\n").filter((l) => /^ {4}if:/.test(l)), [hold], `job ${name} carries the hold, as written, and no other condition`);
+  }
+});
+
 // Seeds never follow the kit: what a version asks to report by hand is in the changelog, and `update` shows it.
 test("update lists the By hand steps of the versions it crosses, until the manifest names the new one", () => {
   const root = kitCopy(), dir = tmp();
