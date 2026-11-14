@@ -64,10 +64,10 @@ jobs:
           PR=$(jq -r '.[0]' <<< "$FOUND")
           # The diff starts at the default branch's tip as it is now, as the
           # merge gate's does, never at the pull request's base.sha: GitHub
-          # leaves that one where the branch was at the last push, and what a
-          # merge brings is the head's changes since its merge base with the
-          # current tip. Read by its full ref, so that no tag of the same name
-          # can answer.
+          # does not move that one when the branch moves, and what a merge
+          # brings is the head's changes since its merge base with the current
+          # tip. Read by its full ref, so that no tag of the same name can
+          # answer.
           if ! [[ "$DEFAULT_BRANCH" =~ ^[A-Za-z0-9._/@+-]+$ ]]; then
             echo "::error::The default branch's name cannot be used in a URL as it is. Held for a human."
             exit 1

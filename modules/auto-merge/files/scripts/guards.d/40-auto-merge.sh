@@ -10,11 +10,12 @@
 #         defined once too and applied in the same grep; the rows of
 #         scripts/auto-merge-paths.txt are run on the two patterns together.
 #   AM-7  the gate judges the range that is merged: files and commits come
-#         from compare/<base branch's tip>...<validated head>, the tip read by
-#         its full ref, never from the pull request's current state nor from
-#         its stored base.sha, and the base is re-read before each merge.
-#         A pull request that cannot be read fails the job instead of passing
-#         for a moved head.
+#         from one compare/<base branch's tip>...<validated head> per merging
+#         job, the tip read by its full ref and used nowhere else, never from
+#         the pull request's current state nor from its stored base.sha; a
+#         listing of 300 files holds whatever the count, and the base is
+#         re-read before each merge. A pull request that cannot be read fails
+#         the job instead of passing for a moved head.
 #   AM-4  marking a pull request ready never merges it. The two ready lines are
 #         pinned to their exact text, and every merge call in the file, however
 #         it is spelled, is one of the gated REST calls AM-1 counts.
@@ -684,9 +685,27 @@ ranges=$(grep -cF 'compare/${TIP}...${HEAD_SHA}"' "$AM" || true)
 if [ "$ranges" != "$merging" ]; then
   bad 7 "$merging merging job(s) but $ranges read the immutable range compare/\${TIP}...\${HEAD_SHA}"
 fi
+# One listing per merging job, and the tip named on three lines of each: its
+# read, its check, the listing. A second compare call, or a TIP taken again
+# from anything else (the pull request's base object, an env value), is red.
+compares=$(grep -o 'compare/' <<< "$code" | grep -c . || true)
+if [ "$compares" != "$merging" ]; then
+  bad 7 "$compares compare call(s) for $merging merging job(s) — one listing per job, from the tip"
+fi
+tip_lines=$(grep -cE '(^|[^A-Za-z0-9_])TIP([^A-Za-z0-9_]|$)' <<< "$code" || true)
+if [ "$tip_lines" != "$((3 * merging))" ]; then
+  bad 7 "$tip_lines code line(s) name TIP, $((3 * merging)) expected — the tip is read once per merging job, by its full ref, and used only by its check and the listing"
+fi
 stale=$(grep -ciE 'base[._]sha|compare/\$\{?(BASE|DEFAULT)' <<< "$code" || true)
 if [ "$stale" != "0" ]; then
-  bad 7 "$stale line(s) read the pull request's base.sha or compare from a base other than the tip — GitHub does not move base.sha with the branch"
+  bad 7 "$stale line(s) name base.sha, base_sha or BASE_SHA, or compare from \${BASE…} or \${DEFAULT…} — GitHub does not move base.sha with the branch"
+fi
+# The compare lists 300 files at most, and the pull request's changed_files can
+# come from another merge base than the tip's: equal counts do not prove a
+# whole listing, so 300 files hold whatever the count.
+cut=$(grep -cxF '          if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then' "$AM" || true)
+if [ "$cut" != "$merging" ]; then
+  bad 7 "$merging merging job(s) but $cut hold a listing of 300 files whatever the count, and any gap between the listing and the pull request's count"
 fi
 # The branch name goes into the URL of that read: a name the API would read
 # as another path (a `#`, a `?`, an encoded character) must hold, not resolve.
@@ -726,7 +745,7 @@ foreign_base=$(grep -E '^ +(BASE_(SHA|REF)|TIP): ' "$AM" | grep -cvE '^ +BASE_RE
 if [ "$foreign_base" != "0" ]; then
   bad 7 "BASE_REF must come from the triggering event or from the gate step's output, and no commit of the base may come from outside the job's own read of the tip"
 fi
-pass 7 "the gate reads the immutable range from the base branch's tip, the base is re-read before each merge, and a failed read fails the job"
+pass 7 "the gate reads one immutable range per job from the base branch's tip, holds a listing of 300 files, re-reads the base before each merge, and fails on a failed read"
 
 # ── AM-8 — tests that get weaker are held ───────────────────────────────────
 # The CI that went green ran the tests as the pull request left them. What the

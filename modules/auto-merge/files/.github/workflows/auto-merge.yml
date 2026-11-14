@@ -367,8 +367,8 @@ jobs:
           # and put back while this step runs changes nothing to it (AM-7). One
           # read of the pull request gives its base branch, its head, its file
           # count and its author. Any doubt holds: a head that is no longer HEAD_SHA,
-          # a file count that does not match the range (the compare lists 300
-          # files at most), a commit list cut short.
+          # a listing of 300 files (the most the compare lists), a file count that
+          # does not match the range, a commit list cut short.
           # A failed read is an error, never "the head moved": inside
           # `read … <<< "$(…)"` a failing call leaves every variable empty and
           # the job green.
@@ -411,14 +411,17 @@ jobs:
           # request retargeted since.
           echo "base_ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
           # Each file row carries `previous_filename` too, so a rename OUT of a
-          # gated path (CLAUDE.md → docs/legacy.md) is still seen. The count is
-          # checked against the pull request's changed_files: any gap holds.
+          # gated path (CLAUDE.md → docs/legacy.md) is still seen. The compare
+          # lists 300 files at most, and the pull request's changed_files may
+          # be counted from another merge base than the tip's: equal counts do
+          # not prove a whole listing. A listing of 300 files holds whatever
+          # the count, and so does any gap between the two.
           RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${HEAD_SHA}" \
                     --jq '{total: .total_commits, commits: [.commits[] | {login: (.author.login // "unknown"), message: .commit.message}], files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
           ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
-          if [ "$LISTED" != "$CHANGED" ]; then
-            echo "::notice::PR #${PR}: ${LISTED} file(s) listed from the tip of ${BASE_REF}, ${CHANGED} counted on the pull request (a listing cut short, or a merge base the tip moved) — leaving it for a hand merge."
+          if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then
+            echo "::notice::PR #${PR}: ${LISTED} file(s) listed from the tip of ${BASE_REF}, ${CHANGED} counted on the pull request (a listing of 300 may be cut short; a gap is a merge base the tip moved) — leaving it for a hand merge."
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -774,8 +777,8 @@ jobs:
                     --jq '{files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
           ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
-          if [ "$LISTED" != "$CHANGED" ]; then
-            echo "::notice::PR #${PR}: ${LISTED} file(s) listed from the tip of ${BASE_REF}, ${CHANGED} counted on the pull request (a listing cut short, or a merge base the tip moved) — leaving it for a hand merge."
+          if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then
+            echo "::notice::PR #${PR}: ${LISTED} file(s) listed from the tip of ${BASE_REF}, ${CHANGED} counted on the pull request (a listing of 300 may be cut short; a gap is a merge base the tip moved) — leaving it for a hand merge."
             exit 0
           fi
           PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
