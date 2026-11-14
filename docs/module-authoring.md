@@ -113,7 +113,7 @@ A module that enforces something ships a guard: `files/scripts/guards.d/NN-<name
 - A freshly installed module passes its own guard, in a project that contains only that module and what it requires.
 - Numbers: `10` core, `15` session-settings, `18` parallel-sessions, `20` agents, `25` security-review, `30` ci-security, `35` node-audit, `40` auto-merge, `41` ready-on-green, `42` weekly-digest, `44` claude-ci, `45` claude-review, `46` openspec, `47` claude-rework, `48` headroom, `50` the project's own, `90`–`99` advisory (`90` the gaps left to fill, `91` the kit files that drifted from their recorded hash).
 
-Tests a guard runs ship with the module, next to the code they test. Always name the test file (`node --test scripts/x.test.mjs`), never a directory: an older Node takes a directory argument for a module to run and fails.
+Tests a guard runs ship with the module, next to the code they test. Always name the test file (`node --test scripts/x.test.mjs`), never a directory: an older Node takes a directory argument for a module to run and fails. `_lib.sh` clears `NODE_TEST_CONTEXT`: a Node test run sets it for what it starts, and a `node --test` that inherits it exits 0 whatever its tests do, so a gate started from a project's own tests would otherwise pass a red self-test.
 
 ## Workflows
 

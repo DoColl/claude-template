@@ -14,6 +14,7 @@ That second place is not installed with this page. The gate is local until a CI 
 
 - **Entry point**: `./scripts/security-checks.sh` runs every `scripts/guards.d/NN-name.sh` in order and fails if any guard fails. `--offline` exports `HARNESS_OFFLINE=true`; guards that need the network skip themselves.
 - **Guard contract**: a bash script; exit `0` = pass, `77` = skipped (tool missing, offline), anything else = fail. Source `_lib.sh` for `ok`, `fail`, `note`, `skip`, `finish`. A guard prints one line per check, starting with the check's ID.
+- **A self-test fails whatever started the gate**: `_lib.sh` clears `NODE_TEST_CONTEXT`. A Node test run sets it for every process it starts, and a `node --test` that inherits it exits 0 whatever its tests do — so a project whose own tests call the gate, to watch a guard go red, would otherwise see every self-test pass.
 - **Skipping is not passing**: a guard whose tool is missing skips locally but must fail in CI (`$CI` set) when the check is mandatory — otherwise a broken runner image turns the gate green.
 - **Numbering**: `10-` instruction files, `20-49` harness modules, `50-project.sh` the project's own regression checks, `90-99` advisory notes. A new family of project checks is a new file (`60-<name>.sh`).
 - **IDs**: stable and short (`CM-1`, `AG-2`, `H3`). The same ID appears in the guard's output, in `SECURITY_REVIEW.md` and in the convention file, so a red line leads straight to the reason.
@@ -41,7 +42,7 @@ The rule that starts it is a sentence in `CLAUDE.md`, not a check: nothing fails
 
 It was first declared `disable-model-invocation: true`, run by hand only; that line went when the closing form was added, since a session must be able to start it.
 
-Status: written for the kit, never run live. Treat its first runs as its test.
+Status: written for the kit. Its closing form ran once, at the end of a session on the kit itself, and the issues it drafted for the kit were posted after the user's yes. Not run in an installed project that cannot reach the kit's repository, and the full form has not run: treat those first runs as its test.
 
 ## Sources
 
@@ -58,3 +59,4 @@ The gate checks itself only in the obvious way: with no guard to run, it fails r
 - Installed with the kit.
 - The `/retro` skill added, to turn a session's mistakes into findings.
 - `/retro` gets a closing form, run at the end of a session, and a destination for what concerns the kit: a drafted issue for the kit's repository, posted on the user's yes.
+- `_lib.sh` clears `NODE_TEST_CONTEXT`. With the gate started from a Node test run, the self-tests that four guards run with `node --test` reported `ok` while failing; the kit's own tests had met it and worked around it on their side only.

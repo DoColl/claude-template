@@ -267,6 +267,16 @@ test("the docs paths agree across the shipped workflows, and CI re-includes only
   for (const p of back) assert.match(p.replaceAll("**/", "sub/").replaceAll("**", "agents/x.md"), gate, `${p} is re-included by CI, so the merge gate must hold it`);
 });
 
+// What the kit ships under scripts/ is what its guards and workflows run or read: the gate's verdict in CI, a
+// scheduled job with a write token, the pre-push hook. A pull request that changes one is judged by a CI that
+// runs the changed file, so the merge gate holds every one of them, whichever module ships it — the next one too.
+test("the merge gate holds every file a module ships under scripts/", () => {
+  const gate = new RegExp(/^  CLAUDE_GATE_RE: '(.*)'$/m.exec(read(kit.modules.get("auto-merge").dir, "files/.github/workflows/auto-merge.yml"))[1], "i");
+  const shipped = [...kit.modules.values()].flatMap((mod) => walk(path.join(mod.dir, "files")).filter((rel) => rel.startsWith("scripts/")).map((rel) => `${mod.id}: ${rel}`));
+  assert.ok(shipped.length >= 10, "the scan found the kit's scripts");
+  assert.deepEqual(shipped.filter((entry) => !gate.test(entry.split(": ")[1])), [], "add these paths to CLAUDE_GATE_RE in auto-merge.yml, with AM-1 rows, and to DEFAULT_GATE_RE in weekly-digest.mjs");
+});
+
 // Without auto-merge.yml the digest falls back to its own copy of the kit's gate pattern: one list, two files.
 test("the weekly digest's built-in gate pattern is the one auto-merge ships", () => {
   const shipped = /^  CLAUDE_GATE_RE: '(.*)'$/m.exec(read(kit.modules.get("auto-merge").dir, "files/.github/workflows/auto-merge.yml"))[1];

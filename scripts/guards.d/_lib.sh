@@ -4,6 +4,13 @@
 #
 # A guard that needs a tool or the network must not pass silently without it:
 # call `skip` locally, and `fail` when $CI is set and the check is mandatory.
+#
+# Guards run self-tests with `node --test`. A Node test run puts
+# NODE_TEST_CONTEXT in the environment of what it starts, and a `node --test`
+# that inherits it exits 0 whatever its tests do: a gate started from a
+# project's own tests would pass every failing self-test. Cleared here, where
+# every guard starts.
+unset NODE_TEST_CONTEXT
 failures=0
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
   _g=$'\033[32m'; _r=$'\033[31m'; _y=$'\033[33m'; _n=$'\033[0m'

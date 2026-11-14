@@ -10,7 +10,7 @@
   },
   "seed": ["scripts/weekly-digest.config.mjs"],
   "postInstall": [
-    "The digest has never run live: once the workflow is on the default branch, run it by hand with dry_run ticked (Actions → Weekly digest → Run workflow) and read the run summary before trusting the schedule.",
+    "The digest has run live once, on the kit's own repository, and several of its sections have not (docs/conventions/weekly-digest.md § Status): once the workflow is on your default branch, run it by hand with dry_run ticked (Actions → Weekly digest → Run workflow) and read the run summary before trusting the schedule.",
     "Check scripts/weekly-digest.config.mjs: the CI workflow name, and a maxAgeDays entry for every scheduled workflow that runs more often than weekly.",
     "Track dated follow-ups as issues labelled `deadline` with a `Due: YYYY-MM-DD` line in the body; the digest picks them up."
   ]

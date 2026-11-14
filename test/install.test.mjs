@@ -16,9 +16,9 @@ const CLI = path.join(KIT_ROOT, "bin/harness.mjs");
 const ALL = listModules(kit).map((m) => m.id);
 const tmp = (prefix = "harness-e2e-") => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 // Under `node --test`, NODE_TEST_CONTEXT is set, and a `node --test` started with it in its environment exits 0
-// whatever its tests do. The gate runs the modules' self-tests that way (AG-1, PL-1, WD-1…): without this, a
-// broken self-test would pass here and fail in every project.
-const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "NODE_TEST_CONTEXT"));
+// whatever its tests do. The gate runs the modules' self-tests that way (AG-1, PL-1, WD-1…), so the guards clear it
+// (_lib.sh). gate() below starts the gate with it set, however this suite is run: as a project's own tests would.
+const ENV = process.env;
 const run = (cwd, cmd, args, opts = {}) => spawnSync(cmd, args, { cwd, encoding: "utf8", env: ENV, ...opts });
 const cli = (...args) => spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", input: "" });
 const read = (dir, rel) => fs.readFileSync(path.join(dir, rel), "utf8");
@@ -29,7 +29,7 @@ const install = (target, moduleIds, extra = {}) => { const plan = buildPlan({ ki
 function gate(dir, ...args) {
   assert.equal(run(dir, "git", ["init", "-q", "-b", "main"]).status, 0, "git init");
   assert.equal(run(dir, "git", ["add", "-A"]).status, 0, "git add");
-  return run(dir, "bash", ["scripts/security-checks.sh", ...(args.length ? args : ["--offline"])], { env: { ...ENV, CI: "" } });
+  return run(dir, "bash", ["scripts/security-checks.sh", ...(args.length ? args : ["--offline"])], { env: { ...ENV, CI: "", NODE_TEST_CONTEXT: "child-v8" } });
 }
 const output = (r) => `${r.stdout}\n${r.stderr}`;
 
@@ -605,10 +605,12 @@ test("nothing is written through a symlink that leaves the project", () => {
 test("the gate: a failing guard fails it, a skipped one does not, an empty one is an error", () => {
   const dir = tmp();
   install(dir, []);
-  // a self-test run with `node --test` that fails must fail the gate from inside this test run too
+  // A self-test run with `node --test` that fails must fail the gate, also when the gate is started from a Node test
+  // run (gate() sets NODE_TEST_CONTEXT as one does), and a guard started on its own from one.
   write(dir, "scripts/red.test.mjs", 'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("red", () => assert.equal(1, 2));\n');
   write(dir, "scripts/guards.d/96-self-test.sh", '#!/usr/bin/env bash\n. "$(dirname "$0")/_lib.sh"\nif node --test scripts/red.test.mjs >/dev/null 2>&1; then ok "self-test"; else fail "self-test"; fi\nfinish\n', 0o755);
   let nested = gate(dir); assert.equal(nested.status, 1, "a nested test run reports its failures"); assert.match(nested.stderr, /FAILED: 96-self-test/);
+  for (const context of ["child-v8", "child"]) assert.equal(run(dir, "bash", ["scripts/guards.d/96-self-test.sh"], { env: { ...ENV, NODE_TEST_CONTEXT: context } }).status, 1, `a guard started on its own, NODE_TEST_CONTEXT=${context}`);
   fs.rmSync(path.join(dir, "scripts/guards.d/96-self-test.sh"));
   write(dir, "scripts/guards.d/97-skipped.sh", "#!/usr/bin/env bash\nexit 77\n", 0o755);
   let r = gate(dir); assert.equal(r.status, 0, output(r)); assert.match(r.stdout, /skipped: 97-skipped/);
