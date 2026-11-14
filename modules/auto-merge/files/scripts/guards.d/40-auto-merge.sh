@@ -15,8 +15,10 @@
 #         the pull request's current state nor from its stored base.sha; a
 #         listing of 300 files holds whatever the count. Before each merge
 #         call, retries included, the pull request, the tip and, when the tip
-#         moved, the merge base are read again: a merge already made goes to
-#         the check (AM-10), a retarget or a moved merge base stops the merge.
+#         moved, the merge base are read again: a merge this workflow's token
+#         made goes to the check (AM-10), a hand merge is left alone, a
+#         retarget or a moved merge base stops the merge; after the last call
+#         the pull request is read once more.
 #         A pull request that cannot be read fails the job instead of passing
 #         for a moved head.
 #   AM-4  marking a pull request ready never merges it. The two ready lines are
@@ -738,9 +740,9 @@ if [ "$(grep -cxF '          echo "tip=${TIP}" >> "$GITHUB_OUTPUT"' <<< "$jobs_c
    || ! grep -qxF '          GATE_MB: ${{ steps.gate.outputs.merge_base }}' "$AM"; then
   bad 7 "the gate hands the tip and the merge base it judged to the merge step on one pinned line each (echo \"tip=\${TIP}\", echo \"merge_base=\${MB}\" >> \"\$GITHUB_OUTPUT\"; GATE_TIP: \${{ steps.gate.outputs.tip }}, GATE_MB: \${{ steps.gate.outputs.merge_base }}), and no other env value names a tip or a merge base"
 fi
-counts="$(names GATE_TIP) $(names GATE_MB) $(names MB) $(names NOW_TIP) $(names NOW_MB) $(names STATE) $(names NOW_MERGED) $(names NOW_COMMIT)"
-if [ "$counts" != "2 2 $((3 * merging)) $((4 * merging)) $((3 * merging)) $((3 * merging)) $((2 * merging)) $((2 * merging))" ]; then
-  bad 7 "lines naming GATE_TIP GATE_MB MB NOW_TIP NOW_MB STATE NOW_MERGED NOW_COMMIT: $counts — each is assigned and compared on its pinned lines only"
+counts="$(names GATE_TIP) $(names GATE_MB) $(names MB) $(names NOW_TIP) $(names NOW_MB) $(names STATE) $(names NOW_MERGED) $(names NOW_COMMIT) $(names NOW_BY)"
+if [ "$counts" != "2 2 $((3 * merging)) $((4 * merging)) $((4 * merging)) $((6 * merging)) $((4 * merging)) $((4 * merging)) $((4 * merging))" ]; then
+  bad 7 "lines naming GATE_TIP GATE_MB MB NOW_TIP NOW_MB STATE NOW_MERGED NOW_COMMIT NOW_BY: $counts — each is assigned and compared on its pinned lines only"
 fi
 mbs=$(grep -cxF "          MB=\$(jq -r '.base' <<< \"\$RANGE\")" <<< "$jobs_code" || true)
 mb_held=$(awk '/^          if ! \[\[ "\$MB" =~ \^\[0-9a-f\]\{40,64\}\$ \]\]; then$/ { armed = 1; regions++; next }
@@ -763,22 +765,37 @@ pre_put=$(awk '/^ *for method in squash merge; do$/ { on = 1; print "@@" }
   on && /^ *if OUT=\$\(gh api --method PUT / { on = 0 }
   on { sub(/^ */, ""); print }' "$AM" \
   | grep -vE '^(#|$)' | grep -vE '^echo "([^"$`\\]|\$\{[A-Za-z_][A-Za-z0-9_]*(:[0-9]+:[0-9]+)?\})*"$' || true)
+STATE_READ='STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '"'"'[.base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv'"'"') || STATE=""'
+STATE_SPLIT='IFS=$'"'"'\t'"'"' read -r NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"'
 before_call() { # before_call <the variable holding the tip the gate judged> <the one holding its merge base>
-  printf '%s\n' '@@' 'for method in squash merge; do' \
-    'STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '"'"'[.base.ref, (.merged | tostring), (.merge_commit_sha // "")] | @tsv'"'"') || STATE=""' \
-    'if [ -z "$STATE" ]; then' 'exit 1' 'fi' \
-    'IFS=$'"'"'\t'"'"' read -r NOW_BASE NOW_MERGED NOW_COMMIT <<< "$STATE"' \
-    'if [ "$NOW_MERGED" = "true" ]; then' 'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi' \
+  printf '%s\n' '@@' 'for method in squash merge; do' "$STATE_READ" \
+    'if [ -z "$STATE" ]; then' 'exit 1' 'fi' "$STATE_SPLIT" \
+    'if [ "$NOW_MERGED" = "true" ]; then' 'if [ "$NOW_BY" != "github-actions[bot]" ]; then' 'exit 0' 'fi' \
+    'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi' \
     'if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then' 'exit 0' 'fi' \
     'NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '"'"'.object.sha'"'"') || NOW_TIP=""' \
     'if ! [[ "$NOW_TIP" =~ ^[0-9a-f]{40,64}$ ]]; then' 'exit 1' 'fi' \
     "if [ \"\$NOW_TIP\" != \"\$$1\" ]; then" \
     'NOW_MB=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${NOW_TIP}...${HEAD_SHA}" --jq '"'"'.merge_base_commit.sha // ""'"'"') || NOW_MB=""' \
     'if ! [[ "$NOW_MB" =~ ^[0-9a-f]{40,64}$ ]]; then' 'exit 1' 'fi' \
+    'if [ "$NOW_MB" = "$HEAD_SHA" ]; then continue; fi' \
     "if [ \"\$NOW_MB\" != \"\$$2\" ]; then" 'exit 0' 'fi' 'fi'
 }
 if [ "$pre_put" != "$(before_call GATE_TIP GATE_MB; before_call TIP MB)" ]; then
-  bad 7 "each merge loop must, before its merge call, read the pull request again (hand a merge already made to the check, stop on a retarget), read the tip again and, when it moved, stop if the merge base moved (promote-from-ci against GATE_TIP and GATE_MB, promote-docs against TIP and MB), fail on any failed read, with nothing else before the call"
+  bad 7 "each merge loop must, before its merge call, read the pull request again (hand a merge this workflow's token made to the check, leave a hand merge alone, stop on a retarget), read the tip again and, when it moved, wait while the head is on the base branch already and stop if the merge base moved (promote-from-ci against GATE_TIP and GATE_MB, promote-docs against TIP and MB), fail on any failed read, with nothing else before the call"
+fi
+# After the last call, before calling the merge failed: the pull request read
+# once more, a merge this workflow's token made handed to the check. From the
+# loop's last wait to the step's end, nothing else runs.
+after_loop=$(awk '/^            sleep "\$attempt"$/ { on = 1; print "@@" }
+  on && /^          exit 1$/ { print "exit 1"; on = 0; next }
+  on { line = $0; sub(/^ */, "", line); print line }' "$AM" \
+  | grep -vE '^(#|$)' | grep -vE '^echo "([^"$`\\]|\$\{[A-Za-z_][A-Za-z0-9_]*(:[0-9]+:[0-9]+)?\})*"$' || true)
+last_read=$(printf '%s\n' '@@' 'sleep "$attempt"' 'done' "$STATE_READ" 'if [ -z "$STATE" ]; then' 'exit 1' 'fi' "$STATE_SPLIT" \
+  'if [ "$NOW_MERGED" = "true" ] && [ "$NOW_BY" = "github-actions[bot]" ]; then' \
+  'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi' 'exit 1')
+if [ "$after_loop" != "$(printf '%s\n%s' "$last_read" "$last_read")" ]; then
+  bad 7 "after the last merge call, each merge step must read the pull request once more, hand a merge this workflow's token made to the check, and otherwise fail — with nothing else between the loop and its end"
 fi
 reassigned=$(grep -cE '(^|[^A-Za-z0-9_])(ROWS|LISTED)\+?=' <<< "$jobs_code" || true)
 if [ "$reassigned" != "$((2 * merging))" ]; then
@@ -1030,7 +1047,7 @@ handover=$(awk '$0 ~ /^ +echo "merged=true" >> "\$GITHUB_OUTPUT"$/ { armed = 1; 
   { armed = 0 }
   END { print merged + 0, made + 0, found + 0 }' "$AM")
 shas=$(grep -E '(^|[^A-Za-z0-9_])sha=' <<< "$jobs_code" | grep -c 'GITHUB_OUTPUT' || true)
-if [ "$handover" != "$((2 * merging)) $merging $merging" ] || [ "$shas" != "$((2 * merging))" ]; then
+if [ "$handover" != "$((3 * merging)) $merging $((2 * merging))" ] || [ "$shas" != "$((3 * merging))" ]; then
   bad 10 "each merge step must write sha=<the merge commit> right after each merged=true, on the two pinned lines, and nowhere else (found: merged=true lines, made, found = $handover; lines writing sha= = $shas)"
 fi
 pass 10 "what each merge wrote is listed and judged again by the gate's rules, right after the merge, and turns the run red"

@@ -631,23 +631,29 @@ jobs:
           for attempt in 1 2 3 4 5; do
             for method in squash merge; do
               # Before each call, retries included (AM-7). The pull request:
-              # merged already — by an earlier call that answered an error, or
-              # by hand — its merge commit goes to the check that follows;
-              # retargeted since the gate, it stops. Then the merge base: the
-              # tip moves with every merge, while what this merge writes is the
-              # head's changes since its merge base with the tip, which moves
-              # only when a commit of the head lands. Unchanged, the merge goes
-              # on; moved, it stops and a re-run judges it again. The API pins
-              # the head of a merge, not its base: the instant between these
-              # reads and the call stays open (docs/conventions/auto-merge-policy.md).
-              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // "")] | @tsv') || STATE=""
+              # merged already by this workflow's token — an earlier call that
+              # answered an error — its merge commit goes to the check that
+              # follows; merged by hand, it is not this run's merge; retargeted
+              # since the gate, it stops. Then the merge base: the tip moves
+              # with every merge, while what this merge writes is the head's
+              # changes since its merge base with the tip, which moves when a
+              # commit of the head lands. Unchanged, the merge goes on; moved,
+              # it stops and a re-run judges it again. A rename the base branch
+              # made can still carry a change elsewhere, and the API pins the
+              # head of a merge, not its base: the check after the merge sees
+              # both (docs/conventions/auto-merge-policy.md § Residual risks).
+              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv') || STATE=""
               if [ -z "$STATE" ]; then
-                echo "::error::PR #${PR} could not be read again before a merge call — check whether an earlier call merged it, then re-run this job."
+                echo "::error::PR #${PR} could not be read again before a merge call. Check whether it is merged: if not, re-run this job; if it is (an earlier call can merge and answer an error), read its merge commit — a re-run does not check it."
                 exit 1
               fi
-              IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT <<< "$STATE"
+              IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
               if [ "$NOW_MERGED" = "true" ]; then
-                echo "::notice::PR #${PR} is merged already: an earlier call merged it and answered an error, or someone merged it by hand. Its merge commit is checked next."
+                if [ "$NOW_BY" != "github-actions[bot]" ]; then
+                  echo "::notice::PR #${PR} was merged by hand meanwhile: not this run's merge, so nothing is checked or cleaned up here."
+                  exit 0
+                fi
+                echo "::notice::PR #${PR} is merged already, by this workflow's token: an earlier call merged it and answered an error. Its merge commit is checked next."
                 echo "merged=true" >> "$GITHUB_OUTPUT"
                 echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"
                 exit 0
@@ -658,15 +664,20 @@ jobs:
               fi
               NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || NOW_TIP=""
               if ! [[ "$NOW_TIP" =~ ^[0-9a-f]{40,64}$ ]]; then
-                echo "::error::The tip of ${BASE_REF} could not be read again — nothing was merged. Re-run this job."
+                echo "::error::The tip of ${BASE_REF} could not be read again. Check whether PR #${PR} is merged: if not, re-run this job; if it is (an earlier call can merge and answer an error), read its merge commit — a re-run does not check it."
                 exit 1
               fi
               if [ "$NOW_TIP" != "$GATE_TIP" ]; then
                 NOW_MB=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${NOW_TIP}...${HEAD_SHA}" --jq '.merge_base_commit.sha // ""') || NOW_MB=""
                 if ! [[ "$NOW_MB" =~ ^[0-9a-f]{40,64}$ ]]; then
-                  echo "::error::The merge base of PR #${PR} with the tip of ${BASE_REF} could not be read — nothing was merged. Re-run this job."
+                  echo "::error::The merge base of PR #${PR} with the tip of ${BASE_REF} could not be read. Check whether the pull request is merged: if not, re-run this job; if it is (an earlier call can merge and answer an error), read its merge commit — a re-run does not check it."
                   exit 1
                 fi
+                # The head on the base branch already: a merge commit of this
+                # pull request landed — an earlier call that answered an error
+                # — and the pull request does not say so yet. No other call:
+                # the next read, or the one after the last call, hands it over.
+                if [ "$NOW_MB" = "$HEAD_SHA" ]; then continue; fi
                 if [ "$NOW_MB" != "$GATE_MB" ]; then
                   echo "::notice::PR #${PR}: ${BASE_REF} gained a commit of its head since the gate judged it, which changes what the merge would write — not merged. Re-run this workflow to judge it again, or merge it by hand."
                   exit 0
@@ -692,6 +703,20 @@ jobs:
             echo "attempt ${attempt}: merge failed, retrying in ${attempt}s"
             sleep "$attempt"
           done
+          # The last call can merge and answer an error too: the pull request is
+          # read once more before the merge is called failed.
+          STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv') || STATE=""
+          if [ -z "$STATE" ]; then
+            echo "::error::PR #${PR} could not be read after the last merge call. Check whether it is merged: if it is, read its merge commit — a re-run does not check it."
+            exit 1
+          fi
+          IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
+          if [ "$NOW_MERGED" = "true" ] && [ "$NOW_BY" = "github-actions[bot]" ]; then
+            echo "::notice::PR #${PR} is merged, by this workflow's token: the last call merged it and answered an error. Its merge commit is checked next."
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+            echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "::error::Merge of #${PR} failed after 5 attempts. The PR is non-draft and can be merged manually."
           exit 1
 
@@ -763,7 +788,7 @@ jobs:
           WEAKENED=0
           if [ -n "$WROTE_SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$WROTE_SHRUNK" || true); fi
           if [ "$WROTE_COUNT" -ge 300 ] || [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then
-            echo "::error::PR #${PR} was merged as ${MERGED:0:7}, which changed ${WROTE_COUNT} file(s) (at 300 the listing may be cut short): ${HELD} held by CLAUDE_GATE_RE or PROJECT_GATE_RE, ${WEAKENED} weakened under TEST_HOLD_RE, ${NON_DOCS} outside the docs after a docs-only merge. The gate judged none of this: read that commit and revert what nobody reviewed (docs/conventions/auto-merge-policy.md § Residual risks)."
+            echo "::error::PR #${PR} was merged as ${MERGED:0:7}, which changed ${WROTE_COUNT} file(s) (at 300 the listing may be cut short): ${HELD} held by CLAUDE_GATE_RE or PROJECT_GATE_RE, ${WEAKENED} weakened under TEST_HOLD_RE, ${NON_DOCS} outside the docs after a docs-only merge. The gate judged none of this: read that commit and revert what nobody reviewed. A re-run of this job ends green without checking again (docs/conventions/auto-merge-policy.md § Residual risks)."
             exit 1
           fi
           echo "PR #${PR}: ${MERGED:0:7} changed ${WROTE_COUNT} file(s), none that the gate holds."
@@ -948,14 +973,18 @@ jobs:
             for method in squash merge; do
               # The pull request and the merge base, read again before each
               # call (see promote-from-ci).
-              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // "")] | @tsv') || STATE=""
+              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv') || STATE=""
               if [ -z "$STATE" ]; then
-                echo "::error::PR #${PR} could not be read again before a merge call — check whether an earlier call merged it, then re-run this job."
+                echo "::error::PR #${PR} could not be read again before a merge call. Check whether it is merged: if not, re-run this job; if it is (an earlier call can merge and answer an error), read its merge commit — a re-run does not check it."
                 exit 1
               fi
-              IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT <<< "$STATE"
+              IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
               if [ "$NOW_MERGED" = "true" ]; then
-                echo "::notice::PR #${PR} is merged already: an earlier call merged it and answered an error, or someone merged it by hand. Its merge commit is checked next."
+                if [ "$NOW_BY" != "github-actions[bot]" ]; then
+                  echo "::notice::PR #${PR} was merged by hand meanwhile: not this run's merge, so nothing is checked or cleaned up here."
+                  exit 0
+                fi
+                echo "::notice::PR #${PR} is merged already, by this workflow's token: an earlier call merged it and answered an error. Its merge commit is checked next."
                 echo "merged=true" >> "$GITHUB_OUTPUT"
                 echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"
                 exit 0
@@ -966,15 +995,20 @@ jobs:
               fi
               NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || NOW_TIP=""
               if ! [[ "$NOW_TIP" =~ ^[0-9a-f]{40,64}$ ]]; then
-                echo "::error::The tip of ${BASE_REF} could not be read again — nothing was merged. Re-run this job."
+                echo "::error::The tip of ${BASE_REF} could not be read again. Check whether PR #${PR} is merged: if not, re-run this job; if it is (an earlier call can merge and answer an error), read its merge commit — a re-run does not check it."
                 exit 1
               fi
               if [ "$NOW_TIP" != "$TIP" ]; then
                 NOW_MB=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${NOW_TIP}...${HEAD_SHA}" --jq '.merge_base_commit.sha // ""') || NOW_MB=""
                 if ! [[ "$NOW_MB" =~ ^[0-9a-f]{40,64}$ ]]; then
-                  echo "::error::The merge base of PR #${PR} with the tip of ${BASE_REF} could not be read — nothing was merged. Re-run this job."
+                  echo "::error::The merge base of PR #${PR} with the tip of ${BASE_REF} could not be read. Check whether the pull request is merged: if not, re-run this job; if it is (an earlier call can merge and answer an error), read its merge commit — a re-run does not check it."
                   exit 1
                 fi
+                # The head on the base branch already: a merge commit of this
+                # pull request landed — an earlier call that answered an error
+                # — and the pull request does not say so yet. No other call:
+                # the next read, or the one after the last call, hands it over.
+                if [ "$NOW_MB" = "$HEAD_SHA" ]; then continue; fi
                 if [ "$NOW_MB" != "$MB" ]; then
                   echo "::notice::PR #${PR}: ${BASE_REF} gained a commit of its head since the gate judged it, which changes what the merge would write — not merged. Re-run this workflow to judge it again, or merge it by hand."
                   exit 0
@@ -1000,6 +1034,20 @@ jobs:
             echo "attempt ${attempt}: merge failed, retrying in ${attempt}s"
             sleep "$attempt"
           done
+          # The last call can merge and answer an error too: the pull request is
+          # read once more before the merge is called failed.
+          STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv') || STATE=""
+          if [ -z "$STATE" ]; then
+            echo "::error::PR #${PR} could not be read after the last merge call. Check whether it is merged: if it is, read its merge commit — a re-run does not check it."
+            exit 1
+          fi
+          IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
+          if [ "$NOW_MERGED" = "true" ] && [ "$NOW_BY" = "github-actions[bot]" ]; then
+            echo "::notice::PR #${PR} is merged, by this workflow's token: the last call merged it and answered an error. Its merge commit is checked next."
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+            echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "::error::Merge of #${PR} failed after 5 attempts. The PR is non-draft and can be merged manually."
           exit 1
 
@@ -1063,7 +1111,7 @@ jobs:
           WEAKENED=0
           if [ -n "$WROTE_SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$WROTE_SHRUNK" || true); fi
           if [ "$WROTE_COUNT" -ge 300 ] || [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then
-            echo "::error::PR #${PR} was merged as ${MERGED:0:7}, which changed ${WROTE_COUNT} file(s) (at 300 the listing may be cut short): ${HELD} held by CLAUDE_GATE_RE or PROJECT_GATE_RE, ${WEAKENED} weakened under TEST_HOLD_RE, ${NON_DOCS} outside the docs after a docs-only merge. The gate judged none of this: read that commit and revert what nobody reviewed (docs/conventions/auto-merge-policy.md § Residual risks)."
+            echo "::error::PR #${PR} was merged as ${MERGED:0:7}, which changed ${WROTE_COUNT} file(s) (at 300 the listing may be cut short): ${HELD} held by CLAUDE_GATE_RE or PROJECT_GATE_RE, ${WEAKENED} weakened under TEST_HOLD_RE, ${NON_DOCS} outside the docs after a docs-only merge. The gate judged none of this: read that commit and revert what nobody reviewed. A re-run of this job ends green without checking again (docs/conventions/auto-merge-policy.md § Residual risks)."
             exit 1
           fi
           echo "PR #${PR}: ${MERGED:0:7} changed ${WROTE_COUNT} file(s), none that the gate holds."
