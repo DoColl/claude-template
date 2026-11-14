@@ -254,6 +254,12 @@ export function decide(command, profile, config = EMPTY_CONFIG) {
   // byte after it as one character when that byte is a backslash or a `|`: what this check reads as an escape
   // or a pipe is neither to the shell, and an escaped quote becomes a live one. zsh does not do this.
   if (/[^\x00-\x7f][\\|]/.test(command)) return { allow: false, reason: "a backslash or | right after a non-ASCII character is not allowed: under some locales the shell reads the pair as one character" };
+  // The shell separates words on a space or a tab only, and lines on a newline. The loops below split on what
+  // JavaScript calls whitespace, which adds a carriage return, a vertical tab, a form feed, a no-break space and a
+  // dozen other Unicode spaces. Read as a break here, `LC_ALL=C<VT>cat rm x` was a `cat` of two files, while the
+  // shell read one assignment word, `LC_ALL=C<VT>cat`, and ran `rm x`. None of them belongs in a command the agents
+  // run, quoted or not.
+  if (/[^\S \t\n]/.test(command)) return { allow: false, reason: "whitespace other than a space, a tab or a newline is not allowed (a carriage return, a vertical tab, a form feed, a no-break or other Unicode space): the shell does not separate words on it, this check would" };
   const cfg = profile === "verify" ? config : EMPTY_CONFIG;
   try {
     const segs = splitSegments(command);

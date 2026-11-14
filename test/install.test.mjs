@@ -611,7 +611,17 @@ test("the gate: a failing guard fails it, a skipped one does not, an empty one i
   write(dir, "scripts/guards.d/96-self-test.sh", '#!/usr/bin/env bash\n. "$(dirname "$0")/_lib.sh"\nif node --test scripts/red.test.mjs >/dev/null 2>&1; then ok "self-test"; else fail "self-test"; fi\nfinish\n', 0o755);
   let nested = gate(dir); assert.equal(nested.status, 1, "a nested test run reports its failures"); assert.match(nested.stderr, /FAILED: 96-self-test/);
   for (const context of ["child-v8", "child"]) assert.equal(run(dir, "bash", ["scripts/guards.d/96-self-test.sh"], { env: { ...ENV, NODE_TEST_CONTEXT: context } }).status, 1, `a guard started on its own, NODE_TEST_CONTEXT=${context}`);
+  // A project's guard need not source _lib.sh: the gate clears the variable for it too.
+  write(dir, "scripts/guards.d/96-self-test.sh", "#!/usr/bin/env bash\nnode --test scripts/red.test.mjs >/dev/null 2>&1\n", 0o755);
+  nested = gate(dir); assert.equal(nested.status, 1, "a guard without _lib.sh"); assert.match(nested.stderr, /FAILED: 96-self-test/);
+  // Without NODE_TEST_CONTEXT nothing stops a guard that starts the gate again, but the gate itself: three levels.
+  write(dir, "scripts/guards.d/96-self-test.sh", "#!/usr/bin/env bash\nbash scripts/security-checks.sh --offline >/dev/null\n", 0o755);
+  nested = gate(dir); assert.equal(nested.status, 1, "a gate that starts itself again stops"); assert.match(nested.stderr, /started from inside its own guards 3 times/);
   fs.rmSync(path.join(dir, "scripts/guards.d/96-self-test.sh"));
+  const odd = run(dir, "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "", HARNESS_GATE_DEPTH: "x$(touch PWNED)" } });
+  assert.equal(odd.status, 0, `an unreadable depth counts as none:\n${output(odd)}`);
+  assert.ok(!fs.existsSync(path.join(dir, "PWNED")), "the depth is never evaluated");
+  assert.equal(run(dir, "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "", HARNESS_GATE_DEPTH: "3" } }).status, 1, "a fourth level is refused");
   write(dir, "scripts/guards.d/97-skipped.sh", "#!/usr/bin/env bash\nexit 77\n", 0o755);
   let r = gate(dir); assert.equal(r.status, 0, output(r)); assert.match(r.stdout, /skipped: 97-skipped/);
   write(dir, "scripts/guards.d/98-broken.sh", "#!/usr/bin/env bash\nexit 1\n", 0o755);

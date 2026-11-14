@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { loadKit, resolveSelection, listModules, PHASES } from "../lib/kit.mjs";
 import { walk } from "../lib/install.mjs";
 import { render, tokensIn, insertAtSlot, slotsIn, appendBlock } from "../lib/render.mjs";
@@ -267,14 +268,67 @@ test("the docs paths agree across the shipped workflows, and CI re-includes only
   for (const p of back) assert.match(p.replaceAll("**/", "sub/").replaceAll("**", "agents/x.md"), gate, `${p} is re-included by CI, so the merge gate must hold it`);
 });
 
-// What the kit ships under scripts/ is what its guards and workflows run or read: the gate's verdict in CI, a
-// scheduled job with a write token, the pre-push hook. A pull request that changes one is judged by a CI that
-// runs the changed file, so the merge gate holds every one of them, whichever module ships it — the next one too.
-test("the merge gate holds every file a module ships under scripts/", () => {
-  const gate = new RegExp(/^  CLAUDE_GATE_RE: '(.*)'$/m.exec(read(kit.modules.get("auto-merge").dir, "files/.github/workflows/auto-merge.yml"))[1], "i");
-  const shipped = [...kit.modules.values()].flatMap((mod) => walk(path.join(mod.dir, "files")).filter((rel) => rel.startsWith("scripts/")).map((rel) => `${mod.id}: ${rel}`));
-  assert.ok(shipped.length >= 10, "the scan found the kit's scripts");
-  assert.deepEqual(shipped.filter((entry) => !gate.test(entry.split(": ")[1])), [], "add these paths to CLAUDE_GATE_RE in auto-merge.yml, with AM-1 rows, and to DEFAULT_GATE_RE in weekly-digest.mjs");
+// What the kit ships to be run or read — its scripts and what they read, hooks, instruction files, scanner configs —
+// decides what the gate, CI and every session do. A pull request that changes one is judged by a CI that runs or
+// reads the changed file, so the unattended merge holds it (CLAUDE_GATE_RE) and a rework never writes it
+// (REWORK_HOLD_RE), whichever module ships it — the next one too. The patterns run as the workflows run them,
+// through grep -i -E. A file left out on purpose is named below with its reason.
+const NOT_HELD_BY_MERGE_GATE = new Map([
+  [".github/workflows/ci.yml", "a workflow that calls the gate: auto-merge-policy.md § Residual risks"],
+  [".github/workflows/security.yml", "a workflow that calls the gate: auto-merge-policy.md § Residual risks"],
+  [".github/workflows/weekly-digest.yml", "a workflow outside the kit's list: auto-merge-policy.md § Residual risks"],
+  [".github/workflows/ready-on-green.yml", "a workflow outside the kit's list, and never installed with auto-merge"],
+  [".github/workflows/eco-design.yml", "a workflow outside the kit's list, its shape pinned by ED-3; the code it fetches and runs is named in scripts/, which is held"],
+  [".github/dependabot.yml", "a file AM-5 checks, not one that configures a check"],
+]);
+const NOT_HELD_BY_EITHER = new Map([
+  [".worktreeinclude", "the ignored files Claude Code copies into a new worktree on the same machine: it runs nothing"],
+]);
+const isPage = (rel) => /^docs\/(adr|runbook)\//.test(rel); // read, never executed: the docs path of auto-merge-policy.md
+
+test("the merge gate and the rework hold every file the kit ships to be run or read", () => {
+  const pattern = (mod, file, name) => new RegExp(`^  ${name}: '(.*)'$`, "m").exec(read(kit.modules.get(mod).dir, "files", file))?.[1];
+  const patterns = {
+    CLAUDE_GATE_RE: pattern("auto-merge", ".github/workflows/auto-merge.yml", "CLAUDE_GATE_RE"),
+    REWORK_HOLD_RE: pattern("claude-rework", ".github/workflows/claude-rework.yml", "REWORK_HOLD_RE"),
+  };
+  // grep -v lists the paths a pattern does not match, as the workflows' grep -i -E would read them.
+  const unheld = (re, paths) => {
+    const r = spawnSync("grep", ["-i", "-E", "-v", "-e", re], { input: `${paths.join("\n")}\n`, encoding: "utf8" });
+    assert.ok(r.status === 0 || r.status === 1, `grep failed on the pattern: ${r.stderr}`);
+    return r.stdout.split("\n").filter(Boolean);
+  };
+  const shipped = [...kit.modules.values()].flatMap((mod) => walk(path.join(mod.dir, "files")).map((rel) => ({ id: mod.id, rel })));
+  assert.ok(shipped.length > 60, "the scan found the kit's files");
+  const owner = new Map(shipped.map(({ id, rel }) => [rel, id]));
+  for (const [name, re] of Object.entries(patterns)) {
+    assert.ok(re, `${name} is defined`);
+    const excused = name === "CLAUDE_GATE_RE" ? new Map([...NOT_HELD_BY_MERGE_GATE, ...NOT_HELD_BY_EITHER]) : NOT_HELD_BY_EITHER;
+    const mustHold = shipped.map(({ rel }) => rel).filter((rel) => !isPage(rel) && !excused.has(rel));
+    assert.deepEqual(unheld(re, mustHold).map((rel) => `${owner.get(rel)}: ${rel}`), [], `${name} must hold these: add them to it (CLAUDE_GATE_RE in auto-merge.yml with its AM-1 rows and DEFAULT_GATE_RE in weekly-digest.mjs; REWORK_HOLD_RE in claude-rework.yml with REWORK_DIGEST), or name them here with the reason`);
+    for (const rel of excused.keys()) assert.ok(owner.has(rel), `${rel} is excused from ${name} but no module ships it any more`);
+  }
+  // AM-1 runs the kit's pattern on its own table in every project: each script the kit ships is a row there,
+  // and every path that table holds is one a rework never writes either.
+  const guard = read(kit.modules.get("auto-merge").dir, "files/scripts/guards.d/40-auto-merge.sh");
+  const holdRows = /# Must be gated:[^\n]*\n(?:\s*#[^\n]*\n)*\s*for p in ([\s\S]*?); do/.exec(guard)?.[1].split(/[\s\\]+/).filter(Boolean);
+  assert.ok(holdRows?.length > 30, "AM-1's table of held paths was found");
+  const scripts = shipped.map(({ rel }) => rel).filter((rel) => /^scripts\/[^/]+$/.test(rel));
+  assert.deepEqual(scripts.filter((rel) => !holdRows.includes(rel)), [], "each script the kit ships has a held row in AM-1's table (40-auto-merge.sh)");
+  assert.deepEqual(unheld(patterns.REWORK_HOLD_RE, holdRows), [], "REWORK_HOLD_RE holds every path AM-1 holds");
+});
+
+// gitleaks reads a .gitleaks.json before .gitleaks.toml when it picks its own config: a commit that adds one with an
+// allow-all list would silence the scan judging it. Every call the kit ships names the seed.
+test("every gitleaks scan the kit ships names .gitleaks.toml as its config", () => {
+  let seen = 0;
+  for (const mod of kit.modules.values()) for (const rel of walk(path.join(mod.dir, "files")).filter((r) => !r.endsWith(".md"))) {
+    for (const line of read(mod.dir, "files", rel).split("\n").filter((l) => /\bgitleaks"? (git|dir|detect|protect)\b/.test(l) && !/^\s*#/.test(l))) {
+      seen++;
+      assert.match(line, / --config \.gitleaks\.toml /, `${mod.id}: ${rel} runs gitleaks without --config .gitleaks.toml:\n${line.trim()}`);
+    }
+  }
+  assert.ok(seen >= 2, "the scan found the security workflow's and the pre-commit hook's calls");
 });
 
 // Without auto-merge.yml the digest falls back to its own copy of the kit's gate pattern: one list, two files.

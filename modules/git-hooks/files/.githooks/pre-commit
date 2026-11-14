@@ -4,7 +4,9 @@
 # Opt in once per clone:   git config core.hooksPath .githooks
 #
 # Uses the repository's .gitleaks.toml (built-in rules plus the project's own
-# credential formats) and .gitleaksignore. This hook is the early warning: a
+# credential formats), named with --config so that gitleaks reads no other
+# config file (it would take a .gitleaks.json first), and .gitleaksignore.
+# Without .gitleaks.toml the hook fails. This hook is the early warning: a
 # secret caught here never enters the history. A hook can be skipped; a scan
 # of the pushed commits in CI cannot — if the project has one. Without it,
 # this hook is the only secret scan. Output is redacted, so a hit never prints
@@ -17,4 +19,4 @@ if ! command -v gitleaks >/dev/null 2>&1; then
   exit 1
 fi
 
-exec gitleaks git --staged --redact --exit-code 1 --no-banner --verbose
+exec gitleaks git --config .gitleaks.toml --staged --redact --exit-code 1 --no-banner --verbose

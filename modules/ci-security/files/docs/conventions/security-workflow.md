@@ -148,7 +148,7 @@ docker inspect --format '{{index .RepoDigests 0}}' semgrep/semgrep:latest
 
 After a bump:
 
-- **gitleaks** — rescan the history the way CI sees it, output redacted: `gitleaks git --redact --no-banner -v .`. A false positive that a rule can describe exactly (a variable name taken for a secret) gets a targeted `[[allowlists]]` entry in `.gitleaks.toml`; otherwise a fingerprint in `.gitleaksignore`, together with the fix that cleans the working tree. A real secret is rotated first and purged afterwards.
+- **gitleaks** — rescan the history the way CI sees it, output redacted: `gitleaks git --config .gitleaks.toml --redact --no-banner -v .` (named, since gitleaks would otherwise read a `.gitleaks.json` first). A false positive that a rule can describe exactly (a variable name taken for a secret) gets a targeted `[[allowlists]]` entry in `.gitleaks.toml`; otherwise a fingerprint in `.gitleaksignore`, together with the fix that cleans the working tree. A real secret is rotated first and purged afterwards.
 - **zizmor** — `./scripts/security-checks.sh` runs the new version at every severity; each new finding is fixed, or ignored in `.github/zizmor.yml` with its justification. Without that triage every pull request fails.
 - **Trivy, Syft, Semgrep** — advisory, nothing blocks: run the Security workflow by hand (`workflow_dispatch`) and read the three jobs.
 

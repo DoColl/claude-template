@@ -57,7 +57,7 @@
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
-      "sha256": "1bb1567a4582d1275beac4a658d5c9c51ae28a73e4244b6c98744585ff09d9d7"
+      "sha256": "e7b8b888bab17d8d20de9848afd1675131210ae7d2068dec106e088390a4dd6f"
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",
@@ -85,11 +85,11 @@
     },
     "scripts/guards.d/_lib.sh": {
       "module": "core",
-      "sha256": "c1c885b91abf7a5bf657af23a81048d3c6364f61db907db3b2a82acc7911ba4c"
+      "sha256": "3eb37464021abd39ff1fd64bb3380513e99c5e3bf821366a67b07978e0fa01f7"
     },
     "scripts/security-checks.sh": {
       "module": "core",
-      "sha256": "4627407a1f45787a50b900c345780cf9d84113841b3f16b206d74873dc04c790"
+      "sha256": "2a4319080cb862d3b86f326873d72d3f1c0e808ae295a7445349dbaed21fde7f"
     },
     ".claude/skills/parallel-sessions/SKILL.md": {
       "module": "parallel-sessions",
@@ -125,7 +125,7 @@
     },
     ".github/workflows/security.yml": {
       "module": "ci-security",
-      "sha256": "c11a7c0fb59b9d7453302124b5a5fc256acbdfefe863450da6bbed94218afc69"
+      "sha256": "9ca8c45af6957f1387ca618641b531bff047247ce7666dbb86b3b15ac0da1bab"
     },
     ".github/zizmor.yml": {
       "module": "ci-security",
@@ -141,7 +141,7 @@
     },
     "docs/conventions/security-workflow.md": {
       "module": "ci-security",
-      "sha256": "c62595e8f6f59d42bdb260677d7967c9b9c0faf265f8fcd5a708742e38a477ba"
+      "sha256": "839156a95e7981240ec15a2ab5d9df89534dd9abb85f358bf003bba8beabc1dd"
     },
     "scripts/fetch-pinned-release.sh": {
       "module": "ci-security",
@@ -157,7 +157,7 @@
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "945078cd580cbdfc56cfea8de5e791dc992109d11a0f4d8518f2da5080368a88"
+      "sha256": "9a404255262a0ccd95323f62d582a26a3e1fa5413a2ff966872244d8b548716e"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",
@@ -169,7 +169,7 @@
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "3438601e32d032f624fe535345027ddb634d1ffdb704e33563ebcdcb53906608"
+      "sha256": "b8cafdf6087ae709ea00c718355bb2ef8442b34aa604d319c5fa1567644ebc3d"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
@@ -181,7 +181,7 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "ba37953718d6a88b19602099e1cdc81003b371ce651c4ac26cf671e672fd24d1"
+      "sha256": "8dc9c83d605820a8620f9b63b6a45f819ab50de82e0b954db7916fe29512523e"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",

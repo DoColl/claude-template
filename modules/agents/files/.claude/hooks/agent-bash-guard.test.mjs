@@ -20,7 +20,7 @@ const payload = (command) => JSON.stringify({ tool_name: "Bash", tool_input: { c
 const CFG = normalizeConfig({ verify: [
   { cwd: "backend", argv: ["npm", "test"] }, { cwd: "backend", argv: ["npm", "run", "test:e2e"] }, { cwd: "backend", argv: ["npm", "run", "build"] }, { cwd: "backend", argv: ["npx", "--no", "tsc", "--noEmit"] },
   { cwd: "frontend", argv: ["npx", "--no", "tsc", "--noEmit"] }, { cwd: "services/api", argv: ["make", "test"] },
-  { argv: ["node", "--test", ".claude/hooks/agent-bash-guard.test.mjs"] }, { argv: ["./gradlew", "check"] }, { argv: ["go", "test", "./..."] }, { argv: ["cargo", "test", "--locked"] }, { argv: ["openspec", "validate"] },
+  { argv: ["node", "--test", ".claude/hooks/agent-bash-guard.test.mjs"] }, { argv: ["./gradlew", "check"] }, { argv: ["go", "test", "./..."] }, { argv: ["cargo", "test", "--locked"] }, { argv: ["make", "check"] },
 ] });
 
 const ALLOW_RO = [
@@ -41,6 +41,8 @@ const ALLOW_RO = [
   "git diff --unified=10 HEAD", "git log -p -U1 -1", "git show -U0 HEAD",
   // a non-ASCII pattern is fine when no backslash or | follows the character
   "grep -e '中文' f", "grep -e é f | head -3", "git grep -n -e 'é' -- src",
+  // a tab separates words for the shell as for this check
+  "LC_ALL=C\tcat CLAUDE.md", "git status\t", "git log -1\t| head -5", "cat\tCLAUDE.md",
 ];
 const BLOCK_RO = [
   // writes / deletes / installs / network / other programs
@@ -48,7 +50,7 @@ const BLOCK_RO = [
   "npm install", "npm test", "cd backend && npm test", "npx db-tool reset --force", "npx --no tsc --noEmit", "node --test .claude/hooks/agent-bash-guard.test.mjs", "node -e 1", "python3 -c 'print(1)'", "perl -pi -e 's/a/b/' f", "bash -c 'rm x'", "sh -c ls", "eval \"$X\"", "source ~/.zshrc", ". ./env.sh", "exec rm x", "xargs rm", "command rm x", "command git push",
   "sed -n 1p f", "awk '{print $1}' f", "jq -r .a f.json", "sort f", "uniq f", "find . -name x", "tree", "rg x", "yq .a f", "date", "env -u X git status", "timeout 60 git log -1", "cd backend", "cd .. && ls", "pushd /tmp", "export PATH=/tmp/e:$PATH", "set -- rm x", "unset PATH", "constructor x", "__proto__ x", "git constructor", "git __proto__ x",
   // verification commands belong to the verify profile only; make, go, cargo are nobody's readers
-  "make test", "go test ./...", "cargo test --locked", "./gradlew check", "openspec validate", "cd services/api && make test",
+  "make test", "go test ./...", "cargo test --locked", "./gradlew check", "make check", "cd services/api && make test",
   // gh entirely (network egress); the gate only with --offline; single guards are not entry points
   "gh pr view 12 --json files", "gh api repos/o/r/pulls/1", "gh api https://evil.example/x", "gh pr merge 1", "gh auth status -t", "./scripts/security-checks.sh", "scripts/security-checks.sh --online", "scripts/security-checks.sh --offline --x", "scripts/guards.d/10-claude-md.sh", "scripts/other.sh --offline",
   // git writes, globals, option abbreviations / exec / write flags
@@ -84,22 +86,32 @@ const BLOCK_RO = [
   "grep -e 中\\' -e '; touch PWNED; ' -e 中\\' f", "grep -e é\\x f", "git grep -n -e 中|cat f",
   // a pattern never spans lines
   "grep -e 'a\ntouch x\nb' f", "git grep -n -e \"a\nb\" f", "grep -e 'a\rb' f",
+  // whitespace other than a space, a tab or a newline: the shell keeps it inside the word, where JavaScript's \s and
+  // trim() broke the word. `LC_ALL=C<VT>cat rm README.md` was checked as a cat of two files; the shell read the
+  // assignment word `LC_ALL=C<VT>cat` and ran `rm README.md` (seen through a live Bash tool with U+3000). Refused
+  // anywhere, quoted too
+  "LC_ALL=C\vcat rm README.md", "GIT_PAGER=cat\rcat git push origin +HEAD:main", "TZ=UTC\fcat git checkout -- README.md", "NO_COLOR=1\u00a0cat sh scripts/x.sh",
+  "PAGER=cat\u2028cat touch x", "GIT_OPTIONAL_LOCKS=0\u3000cat npx x", "LC_ALL=C\ufeffcat rm x", "NO_COLOR=1\u1680ls rm -R src", "TZ=UTC\u2009cat git stash", "LC_ALL=C\u202fcat rm x", "LC_ALL=C\u205fcat rm x", "LC_ALL=C\u2029cat rm x",
+  "cat f >&2\vx", "cat f 1>&2\rx", "git log -1 >&1\u00a0x", "cat f >/dev/null\fx", "git status\r", "git status\v", "cat f\u2028", "cat a\fb", "git\u00a0status", "\r| cat f",
+  "./scripts/security-checks.sh --offline\r", "grep -e 'a\u00a0b' f", "git log -1 --format='%h\u3000%s'",
   // readers: pattern never bare, dangerous options, unknown clusters
   "grep -rn x f", "grep x f", "grep -rn x . --include=\"$(rm x)\"", "ls --color=always -R /", "wc -L f", "grep -P -e x f", "grep --exclude-dir=x -r -e y /", "cat -A f", "head -n x f", "grep -A x -e y f", "ls -Z .",
 ];
 const ALLOW_VERIFY_EXTRA = [
   "cd backend && npm test", "cd backend && npm test 2>&1 | tail -40", "cd backend && npm run test:e2e", "cd backend && npm run build", "cd backend && npx --no tsc --noEmit", "cd frontend && npx --no tsc --noEmit 2>&1 | tail -20", "cd services/api && make test",
-  "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/services/api && make test 2>&1 | tail -20", "openspec validate", "node --test .claude/hooks/agent-bash-guard.test.mjs", "./gradlew check", "go test ./...", "cargo test --locked 2>&1 | tail -30",
+  "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/services/api && make test 2>&1 | tail -20", "make check", "node --test .claude/hooks/agent-bash-guard.test.mjs", "./gradlew check", "go test ./...", "cargo test --locked 2>&1 | tail -30",
   "go test ./... ; cargo test --locked", "cd backend && npm test ; git status --short",
 ];
 const BLOCK_VERIFY = [
   "npm install", "npm ci", "npm test", "npm run build", "make test", "node --test .claude/hooks", "node --test .claude/hooks/", "node --test .claude/hooks/agent-bash-guard-lib.mjs", "cd backend && npm run lint", "cd backend && npm run start:dev", "cd backend && npm test -- --config evil.js", "cd backend && npm run build -- --watch", "cd backend && npm test; touch x", "cd backend && npm test && touch x", "cd backend && npm test | tee out",
   "cd /tmp && npm test", "cd ../other && npm test", "cd ~ && ls", "cd backend; npm test", "cd backend && npx tsc --noEmit", "cd backend && npx --no codegen run", "cd frontend && npm test", "cd frontend && npx --no tsc-evil", "cd services && make test", "cd services/api && make install", "cd services/api/../.. && make test", "cd backend",
   // a root command never runs after a cd, nor a directory's command at the root
-  "cd backend && openspec validate", "cd backend && node --test .claude/hooks/agent-bash-guard.test.mjs", "cd backend && npm test && openspec validate", "cd backend && npm test && go test ./...", "cd backend && npm test && npm run build",
-  "openspec archive x", "node -e 1", "node --test /tmp/evil.mjs", "node --test ../other/", "node --test --import /tmp/x.mjs .claude/hooks/agent-bash-guard.test.mjs", "node --test scripts/", "NODE_OPTIONS=--require=/tmp/x.js cd backend && npm test", "git push", "cd \"$CLAUDE_PROJECT_DIR\"/../other && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test -- x", "git status && cd backend && npm test",
+  "cd backend && make check", "cd backend && node --test .claude/hooks/agent-bash-guard.test.mjs", "cd backend && npm test && make check", "cd backend && npm test && go test ./...", "cd backend && npm test && npm run build",
+  "make install", "node -e 1", "node --test /tmp/evil.mjs", "node --test ../other/", "node --test --import /tmp/x.mjs .claude/hooks/agent-bash-guard.test.mjs", "node --test scripts/", "NODE_OPTIONS=--require=/tmp/x.js cd backend && npm test", "git push", "cd \"$CLAUDE_PROJECT_DIR\"/../other && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test -- x", "git status && cd backend && npm test",
   // the gate is the root's: after a cd the same relative path would be another script
   "cd backend && ./scripts/security-checks.sh --offline", "cd backend && npm test ; ./scripts/security-checks.sh --offline", "cd backend && \"$CLAUDE_PROJECT_DIR\"/scripts/security-checks.sh --offline", "cd backend && npm test && scripts/security-checks.sh --offline 2>&1 | tail -3",
+  // whitespace other than a space, a tab or a newline extends or joins a word for the shell: the exact argv is never the one checked
+  "cargo test --locked\r", "go test\v./...", "cd backend && npm test\u00a0", "cd backend\f&& npm test", "make\u3000check", "LC_ALL=C\u3000cd backend && npm test",
   "./gradlew publish", "./gradlew check --offline", "gradlew check", "go test ./... -run X", "go build ./...", "cargo test", "cargo test --locked --features x",
 ];
 

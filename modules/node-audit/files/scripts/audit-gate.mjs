@@ -83,8 +83,12 @@ const allowed = new Map(
 // The scope is pinned explicitly: npm silently implies `--omit=dev` when
 // NODE_ENV=production, which would drop the entire dev tree (the bulk of the
 // findings this gate exists for) while still printing a green "no
-// vulnerabilities". The child env is scrubbed of the knobs that could
-// re-narrow it from a shell or .npmrc.
+// vulnerabilities". Every dependency type is named, peer included, because an
+// `--include` on the command line wins over an `omit` in a workspace's
+// .npmrc; and the child env is scrubbed of the knobs that could re-narrow it
+// from a shell. What a .npmrc can still change — the registry asked, above
+// all — is not scrubbed here: a change to it is reviewed like a change to the
+// allowlist.
 const childEnv = { ...process.env };
 delete childEnv.NODE_ENV;
 delete childEnv.npm_config_omit;
@@ -94,7 +98,7 @@ let raw;
 try {
   raw = execFileSync(
     'npm',
-    ['audit', '--json', '--include=prod', '--include=dev', '--include=optional'],
+    ['audit', '--json', '--include=prod', '--include=dev', '--include=optional', '--include=peer'],
     {
       cwd: dir,
       encoding: 'utf8',

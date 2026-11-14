@@ -11,7 +11,7 @@
   "postInstall": [
     "For a PRIVATE repository only: read docs/conventions/claude-review.md first.",
     "Add the repository secret CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`), unless the repository already has it.",
-    "Run live once by the kit's authors, in a throwaway repository, and parts of it have not (docs/conventions/claude-review.md § Status): in yours, open a throwaway pull request, read the run log and the comment, then one that should hold.",
+    "Run live twice by the kit's authors, in throwaway repositories, and parts of it have not (docs/conventions/claude-review.md § Status): in yours, open a throwaway pull request, read the run log and the comment, then one that should hold.",
     "Fill CLAUDE.md § Conventions for new code: it is the review's checklist, and an empty one reviews against nothing of yours."
   ]
 }

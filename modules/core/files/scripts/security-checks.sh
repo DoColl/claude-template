@@ -22,6 +22,22 @@ for arg in "$@"; do
 done
 export HARNESS_OFFLINE="$offline"
 
+# Started from a Node test run, every guard would inherit NODE_TEST_CONTEXT,
+# and a `node --test` that inherits it passes whatever its tests do (Node 20.12
+# and later). Cleared for every guard, the ones that do not source _lib.sh too.
+unset NODE_TEST_CONTEXT
+# That variable was also what stopped a test run that starts itself again. A
+# guard that runs tests which start this gate would now loop: a few levels are
+# a project testing its guards, more is that loop.
+depth=${HARNESS_GATE_DEPTH:-0}
+case "$depth" in ''|*[!0-9]*) depth=0 ;; esac
+HARNESS_GATE_DEPTH=$((10#$depth + 1))
+if [ "$HARNESS_GATE_DEPTH" -gt 3 ]; then
+  echo "the gate was started from inside its own guards $((HARNESS_GATE_DEPTH - 1)) times: a guard runs tests that start the gate again" >&2
+  exit 1
+fi
+export HARNESS_GATE_DEPTH
+
 passed=0
 failed=""
 skipped=""
