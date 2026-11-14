@@ -1142,3 +1142,85 @@ test("headroom: the gate goes red when a committed file routes sessions through 
   green("a learn block in the ignored CLAUDE.local.md", { "CLAUDE.local.md": block });
   green("a workflow naming the API key and NO_PROXY, with a shell continuation and a colour escape", { ".github/workflows/ci.yml": wf("    env:\n      ANTHROPIC_API_KEY: ${{ secrets.KEY }}\n      NO_PROXY: localhost\n") + "      - run: |\n          printf '\\x1b[32mok\\x1b[0m\\n'\n          curl -s \\\n            https://example.com\n" });
 });
+
+test("auto-merge: AM-7 goes red when the gate stops judging GitHub's test merge, or reads the tip another way", async () => {
+  if (!kit.modules.has("auto-merge")) return;
+  const pristine = tmp();
+  install(pristine, ["auto-merge"]);
+  assert.equal(run(pristine, "git", ["init", "-q", "-b", "main"]).status, 0);
+  assert.equal(run(pristine, "git", ["add", "-A"]).status, 0);
+  const file = ".github/workflows/auto-merge.yml";
+  const shipped = read(pristine, file);
+  // Every line containing `fragment` (`times` of them in the file) becomes the lines `by`, at its indentation; `skip`
+  // more lines after it are dropped. `by` = [] drops the line.
+  const edit = (text, fragment, times, by, skip = 0) => {
+    const from = text.split("\n"), to = [];
+    let n = 0;
+    for (let i = 0; i < from.length; i++) {
+      if (!from[i].includes(fragment)) { to.push(from[i]); continue; }
+      n++;
+      to.push(...[].concat(by).map((line) => from[i].match(/^ */)[0] + line));
+      i += skip;
+    }
+    assert.equal(n, times, `${JSON.stringify(fragment)}: ${n} line(s), ${times} expected`);
+    return to.join("\n");
+  };
+  // Inside every block opened by a line containing `opener`, up to its `fi`, the line `line` (trimmed) becomes `by`.
+  const inBlock = (text, opener, times, line, by) => {
+    const to = [];
+    let n = 0, open = false;
+    for (const l of text.split("\n")) {
+      if (l.includes(opener)) { open = true; n++; to.push(l); continue; }
+      if (open && l.trim() === "fi") open = false;
+      if (open && l.trim() === line) { to.push(...[].concat(by).map((b) => l.match(/^ */)[0] + b)); continue; }
+      to.push(l);
+    }
+    assert.equal(n, times, `${JSON.stringify(opener)}: ${n} block(s), ${times} expected`);
+    return to.join("\n");
+  };
+  // Every block opened by a line containing `opener` dropped, up to and with its `fi`.
+  const dropBlock = (text, opener, times) => {
+    const to = [];
+    let n = 0, open = false;
+    for (const l of text.split("\n")) {
+      if (!open && l.includes(opener)) { open = true; n++; continue; }
+      if (open) { if (l.trim() === "fi") open = false; continue; }
+      to.push(l);
+    }
+    assert.equal(n, times, `${JSON.stringify(opener)}: ${n} block(s), ${times} expected`);
+    return to.join("\n");
+  };
+  // Each copy in a project of its own, the guard run on all of them at once (it takes a second or two each).
+  const guard = (label, text) => new Promise((resolve) => {
+    const dir = tmp();
+    fs.cpSync(pristine, dir, { recursive: true });
+    if (text !== undefined) write(dir, file, text);
+    const child = spawn("bash", ["scripts/guards.d/40-auto-merge.sh"], { cwd: dir, env: { ...ENV, CI: "" } });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", (d) => { stdout += d; });
+    child.stderr.on("data", (d) => { stderr += d; });
+    child.on("close", (status) => resolve({ label, status, stdout, stderr }));
+  });
+  const tipOnly = "PATHS=$(tr '\\t' '\\n' <<< \"$ROWS\" | grep . || true)";
+  const parentCheck = 'if [ "$PARENTS" != "$TIP $HEAD_SHA" ]; then';
+  const cases = [
+    // The test merge.
+    ["the parent check removed", "AM-7", dropBlock(shipped, parentCheck, 2)],
+    ["the parents read in the other order", "AM-7", edit(shipped, parentCheck, 2, 'if [ "$PARENTS" != "$HEAD_SHA $TIP" ]; then')],
+    ["mergeable read once, not waited for", "AM-7", edit(shipped, "for delay in 0 3 3 3 3; do", 2, "for delay in 0; do")],
+    ["the test merge's listing dropped", "AM-7", edit(edit(edit(shipped, "MERGE_RANGE=$(gh api", 2, [], 1), "MERGE_ROWS=$(jq", 2, []), "PATHS=$(printf", 2, tipOnly)],
+    ["the gate patterns run on the tip's listing only", "AM-7", edit(shipped, "PATHS=$(printf", 2, tipOnly)],
+    ["a failed read of the pull request merges", "AM-7", inBlock(shipped, 'if [ -z "$MERGEABILITY" ]; then', 2, "exit 1", ['echo "merge=true" >> "$GITHUB_OUTPUT"', "exit 0"])],
+    ["the merge ref read instead", "AM-7", edit(shipped, "MERGEABILITY=$(gh api", 2, "MERGEABILITY=$(gh api \"repos/${GITHUB_REPOSITORY}/git/ref/pull/${PR}/merge\" --jq '[\"true\", .object.sha] | @tsv') || MERGEABILITY=\"\"")],
+    ["weakened tests read on the tip's listing only", "AM-8", shipped.split('<<< "$RANGE$MERGE_RANGE" | LC_ALL=C sort -u)').join('<<< "$RANGE" | LC_ALL=C sort -u)')],
+    // The tip, on copies its own checks were written against.
+    ["the range from base.sha", "AM-7", shipped.split("compare/${TIP}...${HEAD_SHA}\"").join("compare/${BASE_SHA}...${HEAD_SHA}\"")],
+    ["a listing of 300 files trusted when the counts agree", "AM-7", edit(shipped, 'if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then', 2, 'if [ "$LISTED" != "$CHANGED" ]; then')],
+  ];
+  const [green, ...reds] = await Promise.all([guard("as shipped"), ...cases.map(([label, , text]) => guard(label, text))]);
+  assert.equal(green.status, 0, `${green.stdout}\n${green.stderr}`);
+  for (const [i, r] of reds.entries()) {
+    assert.equal(r.status, 1, `${r.label}: the guard must fail\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`FAIL\\s+${cases[i][1]}:`), `${r.label}\n${r.stdout}\n${r.stderr}`);
+  }
+});

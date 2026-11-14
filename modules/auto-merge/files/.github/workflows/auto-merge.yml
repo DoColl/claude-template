@@ -366,9 +366,12 @@ jobs:
           # base branch's tip and HEAD_SHA (compare API): a head or a base moved
           # and put back while this step runs changes nothing to it (AM-7). One
           # read of the pull request gives its base branch, its head, its file
-          # count and its author. Any doubt holds: a head that is no longer HEAD_SHA,
+          # count and its author. The paths are then read a second time, from
+          # GitHub's test merge of the pull request, and the gate runs on both
+          # listings. Any doubt holds: a head that is no longer HEAD_SHA,
           # a listing of 300 files (the most the compare lists), a file count that
-          # does not match the range, a commit list cut short.
+          # does not match the range, a commit list cut short, no test merge or
+          # one that is not the tip merged with HEAD_SHA.
           # A failed read is an error, never "the head moved": inside
           # `read … <<< "$(…)"` a failing call leaves every variable empty and
           # the job green.
@@ -425,7 +428,56 @@ jobs:
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
+          # The test merge. A compare from the tip lists the head's changes
+          # since ONE merge base of the two. When they have two (the head
+          # merged two branches that both landed with merge commits), the
+          # compare takes one of them while the merge starts from both: a held
+          # path that the other branch changed, and that the head set back, is
+          # changed back by the merge without being listed. GitHub's test merge
+          # commit of the pull request is that merge. A read of the pull request
+          # starts building it, and `mergeable` stays null until it is built:
+          # wait a bounded time, then hold. Its parents must be exactly the tip
+          # read above and HEAD_SHA, in GitHub's order (base first): a test merge
+          # of another tip or another head holds. Its first parent being the
+          # tip, the compare from the tip lists what the merge writes, 300 files
+          # at most. The merge refs (refs/pull/N/merge) can be stale without
+          # notice: never read them.
+          for delay in 0 3 3 3 3; do
+            sleep "$delay"
+            MERGEABILITY=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[(.mergeable | tostring), (.merge_commit_sha // "")] | @tsv') || MERGEABILITY=""
+            if [ -z "$MERGEABILITY" ]; then
+              echo "::error::PR #${PR} could not be read from the API — nothing was decided and nothing was merged. Re-run this job."
+              exit 1
+            fi
+            IFS=$'\t' read -r MERGEABLE TEST_MERGE <<< "$MERGEABILITY"
+            if [ "$MERGEABLE" != "null" ]; then break; fi
+          done
+          if [ "$MERGEABLE" != "true" ] || ! [[ "$TEST_MERGE" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::notice::PR #${PR}: GitHub gave no test merge for it (mergeable: ${MERGEABLE}) — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PARENTS=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${TEST_MERGE}" --jq '[.parents[].sha] | join(" ")') || PARENTS=""
+          if [ -z "$PARENTS" ]; then
+            echo "::error::The test merge of PR #${PR} could not be read — nothing was decided and nothing was merged. Re-run this job."
+            exit 1
+          fi
+          if [ "$PARENTS" != "$TIP $HEAD_SHA" ]; then
+            echo "::notice::PR #${PR}: its test merge is not the tip of ${BASE_REF} merged with ${HEAD_SHA:0:7} (parents: ${PARENTS}) — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          MERGE_RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${TEST_MERGE}" \
+                    --jq '{files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
+          MERGE_ROWS=$(jq -r '.files[] | @tsv' <<< "$MERGE_RANGE")
+          MERGE_LISTED=$(grep -c . <<< "$MERGE_ROWS" || true)
+          if [ "$MERGE_LISTED" -ge 300 ]; then
+            echo "::notice::PR #${PR}: ${MERGE_LISTED} file(s) listed for its test merge (a listing of 300 may be cut short) — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Every path of both listings, old and new names of renames, once.
+          PATHS=$(printf '%s\n%s\n' "$ROWS" "$MERGE_ROWS" | tr '\t' '\n' | grep . | LC_ALL=C sort -u || true)
           # Per path segment and case-folded: on a case-insensitive file system
           # `.Claude/agents/x.md` lands in `.claude/agents/`; `(/|$)` also
           # catches a `.claude` symlink entry. Patterns: CLAUDE_GATE_RE and
@@ -436,13 +488,14 @@ jobs:
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Tests that get weaker (AM-8). SHRUNK lists every file of the range
-          # that is not new and did more than gain lines — deleted, renamed
+          # Tests that get weaker (AM-8). SHRUNK lists every file of the range,
+          # and of the test merge's listing, that is not new and did more than
+          # gain lines — deleted, renamed
           # (old and new path), a line removed or rewritten, or a change with
           # no line count (a binary snapshot, a mode). One of them under
           # TEST_HOLD_RE holds the pull request, whoever wrote it: the CI that
           # just went green ran the tests as this pull request left them.
-          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE")
+          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE$MERGE_RANGE" | LC_ALL=C sort -u)
           WEAKENED=0
           if [ -n "$SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$SHRUNK" || true); fi
           if [ "$WEAKENED" != "0" ]; then
@@ -748,11 +801,12 @@ jobs:
           # Claude instruction files (`.claude/**`, `CLAUDE.md`) are `.md` too
           # but never merge unattended (see promote-from-ci's gate): no CI runs
           # on them either, so such a PR waits for a hand merge.
-          # Same listing and gate as promote-from-ci (comments there): the
+          # Same listings and gate as promote-from-ci (comments there): the
           # immutable range from the base branch's tip, read by its full ref,
           # to the head this event carries, never the pull request's current
-          # files nor the event's base.sha; a head or a base that is no longer
-          # the event's holds.
+          # files nor the event's base.sha, then GitHub's test merge of that
+          # tip and that head; a head or a base that is no longer the event's
+          # holds.
           # A failed read is an error, not a changed head (see promote-from-ci).
           PR_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .head.sha, .changed_files] | @tsv') || PR_INFO=""
           IFS=$'\t' read -r NOW_BASE PR_HEAD CHANGED <<< "$PR_INFO"
@@ -781,7 +835,40 @@ jobs:
             echo "::notice::PR #${PR}: ${LISTED} file(s) listed from the tip of ${BASE_REF}, ${CHANGED} counted on the pull request (a listing of 300 may be cut short; a gap is a merge base the tip moved) — leaving it for a hand merge."
             exit 0
           fi
-          PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
+          # The test merge, as in promote-from-ci (comments there): a docs-only
+          # head can set a held path back through a second merge base too.
+          for delay in 0 3 3 3 3; do
+            sleep "$delay"
+            MERGEABILITY=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[(.mergeable | tostring), (.merge_commit_sha // "")] | @tsv') || MERGEABILITY=""
+            if [ -z "$MERGEABILITY" ]; then
+              echo "::error::PR #${PR} could not be read from the API — nothing was decided and nothing was merged. Re-run this job."
+              exit 1
+            fi
+            IFS=$'\t' read -r MERGEABLE TEST_MERGE <<< "$MERGEABILITY"
+            if [ "$MERGEABLE" != "null" ]; then break; fi
+          done
+          if [ "$MERGEABLE" != "true" ] || ! [[ "$TEST_MERGE" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::notice::PR #${PR}: GitHub gave no test merge for it (mergeable: ${MERGEABLE}) — leaving it for a hand merge."
+            exit 0
+          fi
+          PARENTS=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${TEST_MERGE}" --jq '[.parents[].sha] | join(" ")') || PARENTS=""
+          if [ -z "$PARENTS" ]; then
+            echo "::error::The test merge of PR #${PR} could not be read — nothing was decided and nothing was merged. Re-run this job."
+            exit 1
+          fi
+          if [ "$PARENTS" != "$TIP $HEAD_SHA" ]; then
+            echo "::notice::PR #${PR}: its test merge is not the tip of ${BASE_REF} merged with ${HEAD_SHA:0:7} (parents: ${PARENTS}) — leaving it for a hand merge."
+            exit 0
+          fi
+          MERGE_RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${TEST_MERGE}" \
+                    --jq '{files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
+          MERGE_ROWS=$(jq -r '.files[] | @tsv' <<< "$MERGE_RANGE")
+          MERGE_LISTED=$(grep -c . <<< "$MERGE_ROWS" || true)
+          if [ "$MERGE_LISTED" -ge 300 ]; then
+            echo "::notice::PR #${PR}: ${MERGE_LISTED} file(s) listed for its test merge (a listing of 300 may be cut short) — leaving it for a hand merge."
+            exit 0
+          fi
+          PATHS=$(printf '%s\n%s\n' "$ROWS" "$MERGE_ROWS" | tr '\t' '\n' | grep . | LC_ALL=C sort -u || true)
           # Old AND new paths count: a rename out of code into docs/ is a code
           # change (the code file disappears) and must go through CI.
           NON_DOCS=$(grep -E -v -c '(\.md$|^docs/|^LICENSE$|^\.gitignore$)' <<< "$PATHS" || true)
@@ -802,7 +889,7 @@ jobs:
           # fixture kept as documentation is held here too. It stays a draft:
           # the one line that marks a pull request ready in this job is the
           # gate's above (AM-4).
-          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE")
+          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE$MERGE_RANGE" | LC_ALL=C sort -u)
           WEAKENED=0
           if [ -n "$SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$SHRUNK" || true); fi
           if [ "$WEAKENED" != "0" ]; then
