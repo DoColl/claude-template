@@ -2,8 +2,9 @@
 #
 # Flow: a pull request is opened, draft or not → the CI workflow runs as the
 # "review" → on success the draft is lifted and the pull request is
-# squash-merged, pinned to the commit CI validated → its head branch is
-# deleted. Policy, reasons and limits: docs/conventions/auto-merge-policy.md.
+# squash-merged, pinned to the commit CI validated → the commit the merge
+# created is listed and judged again → its head branch is deleted. Policy,
+# reasons and limits: docs/conventions/auto-merge-policy.md.
 #
 # The merge is a REST call (`PUT /repos/.../pulls/N/merge`) rather than
 # `gh pr merge`, because `gh pr merge` shells out to a local `git` and this
@@ -366,12 +367,9 @@ jobs:
           # base branch's tip and HEAD_SHA (compare API): a head or a base moved
           # and put back while this step runs changes nothing to it (AM-7). One
           # read of the pull request gives its base branch, its head, its file
-          # count and its author. The paths are then read a second time, from
-          # GitHub's test merge of the pull request, and the gate runs on both
-          # listings. Any doubt holds: a head that is no longer HEAD_SHA,
+          # count and its author. Any doubt holds: a head that is no longer HEAD_SHA,
           # a listing of 300 files (the most the compare lists), a file count that
-          # does not match the range, a commit list cut short, no test merge or
-          # one that is not the tip merged with HEAD_SHA.
+          # does not match the range, a commit list cut short.
           # A failed read is an error, never "the head moved": inside
           # `read … <<< "$(…)"` a failing call leaves every variable empty and
           # the job green.
@@ -413,7 +411,8 @@ jobs:
           # The base the range is judged against: the merge step refuses a pull
           # request retargeted since.
           echo "base_ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
-          # And the tip: the merge step stops if the branch moved since.
+          # And the tip it is judged against: the merge step stops when the
+          # branch moved since.
           echo "tip=${TIP}" >> "$GITHUB_OUTPUT"
           # Each file row carries `previous_filename` too, so a rename OUT of a
           # gated path (CLAUDE.md → docs/legacy.md) is still seen. The compare
@@ -430,67 +429,7 @@ jobs:
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # The test merge. A compare from the tip lists the head's changes
-          # since ONE merge base of the two. When they have two (the head
-          # merged two branches that both landed with merge commits), the
-          # compare takes one of them while the merge starts from both: a held
-          # path that the other branch changed, and that the head set back, is
-          # changed back by the merge without being listed. GitHub's test merge
-          # commit of the pull request is that merge. A read of the pull request
-          # starts building it, and `mergeable` stays null until it is built:
-          # wait a bounded time, then hold. Its parents must be exactly the tip
-          # read above and HEAD_SHA, in GitHub's order (base first): a test merge
-          # of another tip or another head holds. Its first parent being the
-          # tip, the compare from the tip lists what the merge writes, 300 files
-          # at most. The merge refs (refs/pull/N/merge) can be stale without
-          # notice: never read them.
-          for delay in 0 3 3 3 3; do
-            sleep "$delay"
-            MERGEABILITY=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[(.mergeable | tostring), (.merge_commit_sha // "")] | @tsv') || MERGEABILITY=""
-            if [ -z "$MERGEABILITY" ]; then
-              echo "::error::PR #${PR} could not be read from the API — nothing was decided and nothing was merged. Re-run this job."
-              exit 1
-            fi
-            IFS=$'\t' read -r MERGEABLE TEST_MERGE <<< "$MERGEABILITY"
-            if [ "$MERGEABLE" != "null" ]; then break; fi
-          done
-          if [ "$MERGEABLE" != "true" ] || ! [[ "$TEST_MERGE" =~ ^[0-9a-f]{40,64}$ ]]; then
-            echo "::notice::PR #${PR}: GitHub gave no test merge for it (mergeable: ${MERGEABLE}) — leaving it for a hand merge."
-            echo "merge=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          PARENTS=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${TEST_MERGE}" --jq '[.parents[].sha] | join(" ")') || PARENTS=""
-          if [ -z "$PARENTS" ]; then
-            echo "::error::The test merge of PR #${PR} could not be read — nothing was decided and nothing was merged. Re-run this job."
-            exit 1
-          fi
-          if [ "$PARENTS" != "$TIP $HEAD_SHA" ]; then
-            echo "::notice::PR #${PR}: its test merge is not the tip of ${BASE_REF} merged with ${HEAD_SHA:0:7} (parents: ${PARENTS}) — leaving it for a hand merge."
-            echo "merge=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          MERGE_RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${TEST_MERGE}" \
-                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || MERGE_RANGE=""
-          if [ -z "$MERGE_RANGE" ]; then
-            echo "::error::The listing of the test merge of PR #${PR} could not be read — nothing was decided and nothing was merged. Re-run this job."
-            exit 1
-          fi
-          # An answer without its list of files (no `files`, a null body, an
-          # empty one) would read as a merge that changes nothing: hold.
-          if [ "$(jq -r '.listed' <<< "$MERGE_RANGE")" != "array" ]; then
-            echo "::notice::PR #${PR}: the listing of its test merge came back without its files — leaving it for a hand merge."
-            echo "merge=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          MERGE_ROWS=$(jq -r '.files[] | @tsv' <<< "$MERGE_RANGE")
-          MERGE_LISTED=$(grep -c . <<< "$MERGE_ROWS" || true)
-          if [ "$MERGE_LISTED" -ge 300 ]; then
-            echo "::notice::PR #${PR}: ${MERGE_LISTED} file(s) listed for its test merge (a listing of 300 may be cut short) — leaving it for a hand merge."
-            echo "merge=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Every path of both listings, old and new names of renames, once.
-          PATHS=$(printf '%s\n%s\n' "$ROWS" "$MERGE_ROWS" | tr '\t' '\n' | grep . | LC_ALL=C sort -u || true)
+          PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
           # Per path segment and case-folded: on a case-insensitive file system
           # `.Claude/agents/x.md` lands in `.claude/agents/`; `(/|$)` also
           # catches a `.claude` symlink entry. Patterns: CLAUDE_GATE_RE and
@@ -501,14 +440,13 @@ jobs:
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Tests that get weaker (AM-8). SHRUNK lists every file of the range,
-          # and of the test merge's listing, that is not new and did more than
-          # gain lines — deleted, renamed
+          # Tests that get weaker (AM-8). SHRUNK lists every file of the range
+          # that is not new and did more than gain lines — deleted, renamed
           # (old and new path), a line removed or rewritten, or a change with
           # no line count (a binary snapshot, a mode). One of them under
           # TEST_HOLD_RE holds the pull request, whoever wrote it: the CI that
           # just went green ran the tests as this pull request left them.
-          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE$MERGE_RANGE" | LC_ALL=C sort -u)
+          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE")
           WEAKENED=0
           if [ -n "$SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$SHRUNK" || true); fi
           if [ "$WEAKENED" != "0" ]; then
@@ -688,20 +626,22 @@ jobs:
           # validated (AM-6): a head pushed since gets a 409 and no merge — the
           # next green run merges it. `merged=true` is what lets the head-branch
           # cleanup below run: only an actual merge sets it; `sha` (the merge
-          # commit GitHub created) is there for a post-merge dispatch.
+          # commit GitHub created) is what the next step reads, and what a
+          # post-merge dispatch would use.
           for attempt in 1 2 3 4 5; do
             for method in squash merge; do
               # The gate judged the merge onto the tip it read (AM-7). A branch
-              # landed since moves what the merge writes, and the API pins the
-              # head of a merge, not its base: re-read the tip right before each
-              # call, and stop when it moved. A later run judges it again.
+              # landed since can move what the merge writes, and the API pins
+              # the head of a merge, not its base: the tip is read again right
+              # before each call, retries included, and a tip that moved stops
+              # the merge. A re-run of this workflow judges the new tip.
               NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || NOW_TIP=""
               if [ -z "$NOW_TIP" ]; then
                 echo "::error::The tip of ${BASE_REF} could not be read again — nothing was merged. Re-run this job."
                 exit 1
               fi
               if [ "$NOW_TIP" != "$GATE_TIP" ]; then
-                echo "::notice::PR #${PR}: ${BASE_REF} moved since the gate judged it — not merged; a new run judges it again, or merge it by hand."
+                echo "::notice::PR #${PR}: ${BASE_REF} moved since the gate judged it — not merged. Re-run this workflow to judge the new tip, or merge it by hand."
                 exit 0
               fi
               if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \
@@ -727,12 +667,75 @@ jobs:
           echo "::error::Merge of #${PR} failed after 5 attempts. The PR is non-draft and can be merged manually."
           exit 1
 
+      # What the merge wrote, judged again by the gate's rules (AM-10). The
+      # gate listed compare/<tip>...<head>, the changes since ONE merge base of
+      # the two; the merge wrote what GitHub's merge engine computed. They
+      # agree when that engine starts from the same merge base, as it did when
+      # this was tried live with two merge bases; nothing documents it, and a
+      # branch landing between the last read of the tip and the merge call
+      # moves that merge base too. So the merge commit is listed and judged
+      # after the fact: red when it wrote something the gate holds.
+      # `!cancelled()` keeps it running whatever failed before, since the
+      # merge did happen.
+      - name: Check what the merge wrote
+        id: check
+        if: ${{ !cancelled() && steps.merge.outputs.merged == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.find-pr.outputs.pr }}
+          MERGED: ${{ steps.merge.outputs.sha }}
+          DOCS_ONLY: 'false'
+        run: |
+          set -euo pipefail
+          # The commit the merge created, listed against its first parent: the
+          # tip it landed on, whichever it was at that instant. What the gate
+          # holds must not be in it. Every failure is red, never a pass: the
+          # merge is done, so there is nothing left to hold, only to report.
+          if ! [[ "$MERGED" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::error::PR #${PR} was merged, but GitHub did not name the commit it created — read by hand what the merge changed on the base branch."
+            exit 1
+          fi
+          PARENT=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${MERGED}" --jq '.parents[0].sha // ""') || PARENT=""
+          if ! [[ "$PARENT" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::error::The commit that merged PR #${PR} (${MERGED:0:7}) could not be read — read by hand what it changed."
+            exit 1
+          fi
+          WROTE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PARENT}...${MERGED}" \
+                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || WROTE=""
+          if [ -z "$WROTE" ] || [ "$(jq -r '.listed' <<< "$WROTE")" != "array" ]; then
+            echo "::error::What ${MERGED:0:7} changed could not be listed — read by hand what the merge of PR #${PR} changed."
+            exit 1
+          fi
+          WROTE_ROWS=$(jq -r '.files[] | @tsv' <<< "$WROTE")
+          WROTE_COUNT=$(grep -c . <<< "$WROTE_ROWS" || true)
+          WROTE_PATHS=$(tr '\t' '\n' <<< "$WROTE_ROWS" | grep . || true)
+          # The gate's own rules on what landed: a path CLAUDE_GATE_RE or
+          # PROJECT_GATE_RE holds, a test weakened under TEST_HOLD_RE (the
+          # gate's selection, AM-8) and, after a docs-only merge, a file outside
+          # the docs. A listing of 300 files may be cut short: red as well.
+          HELD=0
+          NON_DOCS=0
+          if [ -n "$WROTE_PATHS" ]; then
+            HELD=$(grep -i -E -c -e "$CLAUDE_GATE_RE" -e "$PROJECT_GATE_RE" <<< "$WROTE_PATHS" || true)
+            if [ "$DOCS_ONLY" = "true" ]; then NON_DOCS=$(grep -E -v -c '(\.md$|^docs/|^LICENSE$|^\.gitignore$)' <<< "$WROTE_PATHS" || true); fi
+          fi
+          WROTE_SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$WROTE")
+          WEAKENED=0
+          if [ -n "$WROTE_SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$WROTE_SHRUNK" || true); fi
+          if [ "$WROTE_COUNT" -ge 300 ] || [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then
+            echo "::error::PR #${PR} was merged as ${MERGED:0:7}, which changed ${WROTE_COUNT} file(s) (at 300 the listing may be cut short): ${HELD} held by CLAUDE_GATE_RE or PROJECT_GATE_RE, ${WEAKENED} weakened under TEST_HOLD_RE, ${NON_DOCS} outside the docs after a docs-only merge. The gate judged none of this: read that commit and revert what nobody reviewed (docs/conventions/auto-merge-policy.md § Residual risks)."
+            exit 1
+          fi
+          echo "PR #${PR}: ${MERGED:0:7} changed ${WROTE_COUNT} file(s), none that the gate holds."
+
       # Nothing is dispatched after the merge (see the header). If a deploy or
-      # a test run must follow it, the dispatch goes here, before the branch
-      # cleanup, with what docs/conventions/auto-merge-policy.md § After the
-      # merge lists. That is an edit of this file: from then on `update` no
-      # longer refreshes it by itself, and `update --merge` carries the edit
-      # over a new version of the kit.
+      # a test run must follow it, the dispatch goes here: after the check
+      # above, never when it is red (`steps.check.outcome == 'success'` in its
+      # `if`), before the branch cleanup, with what
+      # docs/conventions/auto-merge-policy.md § After the merge lists. That is
+      # an edit of this file: from then on `update` no longer refreshes it by
+      # itself, and `update --merge` carries the edit over a new version of the
+      # kit.
 
       # Delete the head ref ourselves (see the header). `!cancelled()` keeps it
       # running when a step added between the merge and here failed, since the
@@ -828,12 +831,11 @@ jobs:
           # Claude instruction files (`.claude/**`, `CLAUDE.md`) are `.md` too
           # but never merge unattended (see promote-from-ci's gate): no CI runs
           # on them either, so such a PR waits for a hand merge.
-          # Same listings and gate as promote-from-ci (comments there): the
+          # Same listing and gate as promote-from-ci (comments there): the
           # immutable range from the base branch's tip, read by its full ref,
           # to the head this event carries, never the pull request's current
-          # files nor the event's base.sha, then GitHub's test merge of that
-          # tip and that head; a head or a base that is no longer the event's
-          # holds.
+          # files nor the event's base.sha; a head or a base that is no longer
+          # the event's holds.
           # A failed read is an error, not a changed head (see promote-from-ci).
           PR_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .head.sha, .changed_files] | @tsv') || PR_INFO=""
           IFS=$'\t' read -r NOW_BASE PR_HEAD CHANGED <<< "$PR_INFO"
@@ -862,48 +864,7 @@ jobs:
             echo "::notice::PR #${PR}: ${LISTED} file(s) listed from the tip of ${BASE_REF}, ${CHANGED} counted on the pull request (a listing of 300 may be cut short; a gap is a merge base the tip moved) — leaving it for a hand merge."
             exit 0
           fi
-          # The test merge, as in promote-from-ci (comments there): a docs-only
-          # head can set a held path back through a second merge base too.
-          for delay in 0 3 3 3 3; do
-            sleep "$delay"
-            MERGEABILITY=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[(.mergeable | tostring), (.merge_commit_sha // "")] | @tsv') || MERGEABILITY=""
-            if [ -z "$MERGEABILITY" ]; then
-              echo "::error::PR #${PR} could not be read from the API — nothing was decided and nothing was merged. Re-run this job."
-              exit 1
-            fi
-            IFS=$'\t' read -r MERGEABLE TEST_MERGE <<< "$MERGEABILITY"
-            if [ "$MERGEABLE" != "null" ]; then break; fi
-          done
-          if [ "$MERGEABLE" != "true" ] || ! [[ "$TEST_MERGE" =~ ^[0-9a-f]{40,64}$ ]]; then
-            echo "::notice::PR #${PR}: GitHub gave no test merge for it (mergeable: ${MERGEABLE}) — leaving it for a hand merge."
-            exit 0
-          fi
-          PARENTS=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${TEST_MERGE}" --jq '[.parents[].sha] | join(" ")') || PARENTS=""
-          if [ -z "$PARENTS" ]; then
-            echo "::error::The test merge of PR #${PR} could not be read — nothing was decided and nothing was merged. Re-run this job."
-            exit 1
-          fi
-          if [ "$PARENTS" != "$TIP $HEAD_SHA" ]; then
-            echo "::notice::PR #${PR}: its test merge is not the tip of ${BASE_REF} merged with ${HEAD_SHA:0:7} (parents: ${PARENTS}) — leaving it for a hand merge."
-            exit 0
-          fi
-          MERGE_RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${TEST_MERGE}" \
-                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || MERGE_RANGE=""
-          if [ -z "$MERGE_RANGE" ]; then
-            echo "::error::The listing of the test merge of PR #${PR} could not be read — nothing was decided and nothing was merged. Re-run this job."
-            exit 1
-          fi
-          if [ "$(jq -r '.listed' <<< "$MERGE_RANGE")" != "array" ]; then
-            echo "::notice::PR #${PR}: the listing of its test merge came back without its files — leaving it for a hand merge."
-            exit 0
-          fi
-          MERGE_ROWS=$(jq -r '.files[] | @tsv' <<< "$MERGE_RANGE")
-          MERGE_LISTED=$(grep -c . <<< "$MERGE_ROWS" || true)
-          if [ "$MERGE_LISTED" -ge 300 ]; then
-            echo "::notice::PR #${PR}: ${MERGE_LISTED} file(s) listed for its test merge (a listing of 300 may be cut short) — leaving it for a hand merge."
-            exit 0
-          fi
-          PATHS=$(printf '%s\n%s\n' "$ROWS" "$MERGE_ROWS" | tr '\t' '\n' | grep . | LC_ALL=C sort -u || true)
+          PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
           # Old AND new paths count: a rename out of code into docs/ is a code
           # change (the code file disappears) and must go through CI.
           NON_DOCS=$(grep -E -v -c '(\.md$|^docs/|^LICENSE$|^\.gitignore$)' <<< "$PATHS" || true)
@@ -924,7 +885,7 @@ jobs:
           # fixture kept as documentation is held here too. It stays a draft:
           # the one line that marks a pull request ready in this job is the
           # gate's above (AM-4).
-          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE$MERGE_RANGE" | LC_ALL=C sort -u)
+          SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$RANGE")
           WEAKENED=0
           if [ -n "$SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$SHRUNK" || true); fi
           if [ "$WEAKENED" != "0" ]; then
@@ -941,7 +902,8 @@ jobs:
           # `sha=` pins the merge to the head this event carries (a head pushed
           # since gets a 409 and its own run). `merged=true` only on an actual
           # merge: the deferral above and a failed merge leave it unset, so the
-          # branch cleanup below is skipped.
+          # check and the branch cleanup below are skipped. `sha` is the merge
+          # commit, which the check reads.
           for attempt in 1 2 3 4 5; do
             for method in squash merge; do
               # The tip, re-read right before each call (see promote-from-ci).
@@ -951,7 +913,7 @@ jobs:
                 exit 1
               fi
               if [ "$NOW_TIP" != "$TIP" ]; then
-                echo "::notice::PR #${PR}: ${BASE_REF} moved since the gate judged it — not merged; a new run judges it again, or merge it by hand."
+                echo "::notice::PR #${PR}: ${BASE_REF} moved since the gate judged it — not merged. Re-run this workflow to judge the new tip, or merge it by hand."
                 exit 0
               fi
               if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \
@@ -959,6 +921,7 @@ jobs:
                 echo "$OUT"
                 echo "merged via ${method}"
                 echo "merged=true" >> "$GITHUB_OUTPUT"
+                echo "sha=$(jq -r '.sha // empty' <<< "$OUT")" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
               echo "$OUT"
@@ -975,6 +938,59 @@ jobs:
           done
           echo "::error::Merge of #${PR} failed after 5 attempts. The PR is non-draft and can be merged manually."
           exit 1
+
+      # The same check as in promote-from-ci (comments there), with the docs
+      # rule: a docs-only merge that wrote anything else is red too.
+      - name: Check what the merge wrote
+        id: check
+        if: ${{ !cancelled() && steps.merge.outputs.merged == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          MERGED: ${{ steps.merge.outputs.sha }}
+          DOCS_ONLY: 'true'
+        run: |
+          set -euo pipefail
+          # The commit the merge created, listed against its first parent: the
+          # tip it landed on, whichever it was at that instant. What the gate
+          # holds must not be in it. Every failure is red, never a pass: the
+          # merge is done, so there is nothing left to hold, only to report.
+          if ! [[ "$MERGED" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::error::PR #${PR} was merged, but GitHub did not name the commit it created — read by hand what the merge changed on the base branch."
+            exit 1
+          fi
+          PARENT=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${MERGED}" --jq '.parents[0].sha // ""') || PARENT=""
+          if ! [[ "$PARENT" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::error::The commit that merged PR #${PR} (${MERGED:0:7}) could not be read — read by hand what it changed."
+            exit 1
+          fi
+          WROTE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PARENT}...${MERGED}" \
+                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || WROTE=""
+          if [ -z "$WROTE" ] || [ "$(jq -r '.listed' <<< "$WROTE")" != "array" ]; then
+            echo "::error::What ${MERGED:0:7} changed could not be listed — read by hand what the merge of PR #${PR} changed."
+            exit 1
+          fi
+          WROTE_ROWS=$(jq -r '.files[] | @tsv' <<< "$WROTE")
+          WROTE_COUNT=$(grep -c . <<< "$WROTE_ROWS" || true)
+          WROTE_PATHS=$(tr '\t' '\n' <<< "$WROTE_ROWS" | grep . || true)
+          # The gate's own rules on what landed: a path CLAUDE_GATE_RE or
+          # PROJECT_GATE_RE holds, a test weakened under TEST_HOLD_RE (the
+          # gate's selection, AM-8) and, after a docs-only merge, a file outside
+          # the docs. A listing of 300 files may be cut short: red as well.
+          HELD=0
+          NON_DOCS=0
+          if [ -n "$WROTE_PATHS" ]; then
+            HELD=$(grep -i -E -c -e "$CLAUDE_GATE_RE" -e "$PROJECT_GATE_RE" <<< "$WROTE_PATHS" || true)
+            if [ "$DOCS_ONLY" = "true" ]; then NON_DOCS=$(grep -E -v -c '(\.md$|^docs/|^LICENSE$|^\.gitignore$)' <<< "$WROTE_PATHS" || true); fi
+          fi
+          WROTE_SHRUNK=$(jq -r '.changes[] | select(.status != "added" and ((.status == "modified" and .deletions == 0 and .additions > 0) | not)) | .filename, (.previous_filename // empty)' <<< "$WROTE")
+          WEAKENED=0
+          if [ -n "$WROTE_SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$WROTE_SHRUNK" || true); fi
+          if [ "$WROTE_COUNT" -ge 300 ] || [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then
+            echo "::error::PR #${PR} was merged as ${MERGED:0:7}, which changed ${WROTE_COUNT} file(s) (at 300 the listing may be cut short): ${HELD} held by CLAUDE_GATE_RE or PROJECT_GATE_RE, ${WEAKENED} weakened under TEST_HOLD_RE, ${NON_DOCS} outside the docs after a docs-only merge. The gate judged none of this: read that commit and revert what nobody reviewed (docs/conventions/auto-merge-policy.md § Residual risks)."
+            exit 1
+          fi
+          echo "PR #${PR}: ${MERGED:0:7} changed ${WROTE_COUNT} file(s), none that the gate holds."
 
       # Same cleanup as in promote-from-ci (reasons and guards there); the two
       # jobs share no steps, exactly like the merge loop above.

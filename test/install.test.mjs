@@ -1143,7 +1143,7 @@ test("headroom: the gate goes red when a committed file routes sessions through 
   green("a workflow naming the API key and NO_PROXY, with a shell continuation and a colour escape", { ".github/workflows/ci.yml": wf("    env:\n      ANTHROPIC_API_KEY: ${{ secrets.KEY }}\n      NO_PROXY: localhost\n") + "      - run: |\n          printf '\\x1b[32mok\\x1b[0m\\n'\n          curl -s \\\n            https://example.com\n" });
 });
 
-test("auto-merge: AM-7 goes red when the gate stops judging GitHub's test merge, or reads the tip another way", async () => {
+test("auto-merge: AM-7 and AM-10 go red when the tip is not read again before a merge call, or what the merge wrote is not judged", async () => {
   if (!kit.modules.has("auto-merge")) return;
   const pristine = tmp();
   install(pristine, ["auto-merge"]);
@@ -1201,26 +1201,52 @@ test("auto-merge: AM-7 goes red when the gate stops judging GitHub's test merge,
     child.stderr.on("data", (d) => { stderr += d; });
     child.on("close", (status) => resolve({ label, status, stdout, stderr }));
   });
-  const tipOnly = "PATHS=$(tr '\\t' '\\n' <<< \"$ROWS\" | grep . || true)";
-  const parentCheck = 'if [ "$PARENTS" != "$TIP $HEAD_SHA" ]; then';
+  // Exactly one occurrence of `from` (with its newline) replaced by `to`.
+  const once = (text, from, to) => {
+    assert.equal(text.split(from).length, 2, `${JSON.stringify(from.slice(0, 60))}: once expected`);
+    return text.replace(from, () => to);
+  };
+  // The last occurrence of `from` replaced by `to`.
+  const last = (text, from, to) => {
+    const i = text.lastIndexOf(from);
+    assert.ok(i >= 0, `${JSON.stringify(from.slice(0, 60))}: not found`);
+    return text.slice(0, i) + to + text.slice(i + from.length);
+  };
+  const ind = (n, line) => " ".repeat(n) + line + "\n";
+  const checkName = ind(6, "- name: Check what the merge wrote") + ind(8, "id: check");
+  const checkIf = ind(8, "if: ${{ !cancelled() && steps.merge.outputs.merged == 'true' }}");
+  const shaLine = ind(16, "echo \"sha=$(jq -r '.sha // empty' <<< \"$OUT\")\" >> \"$GITHUB_OUTPUT\"");
+  const verdict = 'if [ "$WROTE_COUNT" -ge 300 ] || [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then';
+  const firstCheck = shipped.indexOf(checkName), slot = shipped.indexOf("      # Nothing is dispatched after the merge");
+  assert.ok(firstCheck > 0 && slot > firstCheck, "promote-from-ci's check step, then the dispatch slot");
   const cases = [
-    // The test merge.
-    ["the parent check removed", "AM-7", dropBlock(shipped, parentCheck, 2)],
-    ["the parents read in the other order", "AM-7", edit(shipped, parentCheck, 2, 'if [ "$PARENTS" != "$HEAD_SHA $TIP" ]; then')],
-    ["mergeable read once, not waited for", "AM-7", edit(shipped, "for delay in 0 3 3 3 3; do", 2, "for delay in 0; do")],
-    ["the test merge's listing dropped", "AM-7", edit(edit(edit(shipped, "MERGE_RANGE=$(gh api", 2, [], 1), "MERGE_ROWS=$(jq", 2, []), "PATHS=$(printf", 2, tipOnly)],
-    ["the gate patterns run on the tip's listing only", "AM-7", edit(shipped, "PATHS=$(printf", 2, tipOnly)],
-    ["a listing of the test merge without its files taken as empty", "AM-7", dropBlock(shipped, "<<< \"$MERGE_RANGE\")\" != \"array\" ]; then", 2)],
-    ["a failed read of the pull request merges", "AM-7", inBlock(shipped, 'if [ -z "$MERGEABILITY" ]; then', 2, "exit 1", ['echo "merge=true" >> "$GITHUB_OUTPUT"', "exit 0"])],
-    ["the merge ref read instead", "AM-7", edit(shipped, "MERGEABILITY=$(gh api", 2, "MERGEABILITY=$(gh api \"repos/${GITHUB_REPOSITORY}/git/ref/pull/${PR}/merge\" --jq '[\"true\", .object.sha] | @tsv') || MERGEABILITY=\"\"")],
-    ["the test merge's files read as an empty list", "AM-7", edit(shipped, "--jq '{listed:", 2, "--jq '{listed: (.files | type), files: [], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || MERGE_RANGE=\"\"")],
-    ["the gate step without errexit", "AM-7", (() => { const t = shipped.replace("          set -euo pipefail\n          # The gate judges", "          set -uo pipefail\n          # The gate judges"); assert.notEqual(t, shipped); return t; })()],
-    ["the docs-only count on the tip's listing only", "AM-7", edit(shipped, "NON_DOCS=$(grep", 1, "NON_DOCS=$(grep -E -v -c '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)' <<< \"$ROWS\" || true)")],
-    ["the tip not checked again before the merge call", "AM-7", dropBlock(shipped, 'if [ "$NOW_TIP" != "$GATE_TIP" ]; then', 1)],
-    ["weakened tests read on the tip's listing only", "AM-8", shipped.split('<<< "$RANGE$MERGE_RANGE" | LC_ALL=C sort -u)').join('<<< "$RANGE" | LC_ALL=C sort -u)')],
-    // The tip, on copies its own checks were written against.
+    // The tip, read again right before each merge call.
+    ["the tip not checked again before promote-from-ci's merge call", "AM-7", dropBlock(shipped, 'if [ "$NOW_TIP" != "$GATE_TIP" ]; then', 1)],
+    ["the tip not checked again before promote-docs' merge call", "AM-7", dropBlock(shipped, 'if [ "$NOW_TIP" != "$TIP" ]; then', 1)],
+    ["a failed read of the tip merges anyway", "AM-7", inBlock(shipped, 'if [ -z "$NOW_TIP" ]; then', 2, "exit 1", "true")],
+    ["a tip that moved only noticed", "AM-7", inBlock(shipped, 'if [ "$NOW_TIP" != "$GATE_TIP" ]; then', 1, "exit 0", "true")],
+    ["the tip judged taken from the event", "AM-7", edit(shipped, "GATE_TIP: ${{ steps.gate.outputs.tip }}", 1, "GATE_TIP: ${{ github.event.workflow_run.head_sha }}")],
+    ["the tip not handed over by the gate", "AM-7", edit(shipped, 'echo "tip=${TIP}" >> "$GITHUB_OUTPUT"', 1, [])],
+    // The tip, on copies the checks of the range were written against.
     ["the range from base.sha", "AM-7", shipped.split("compare/${TIP}...${HEAD_SHA}\"").join("compare/${BASE_SHA}...${HEAD_SHA}\"")],
     ["a listing of 300 files trusted when the counts agree", "AM-7", edit(shipped, 'if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then', 2, 'if [ "$LISTED" != "$CHANGED" ]; then')],
+    // What the merge wrote, judged again.
+    ["promote-from-ci without the check", "AM-10", shipped.slice(0, firstCheck) + shipped.slice(slot)],
+    ["a step between the merge and the check", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"), ind(6, "- name: Something else") + ind(8, "run: echo hi") + "\n" + checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"))],
+    ["the check skipped when a step before it failed", "AM-10", shipped.split(checkName + checkIf).join(checkName + ind(8, "if: steps.merge.outputs.merged == 'true'"))],
+    ["the docs rule off in the docs job", "AM-10", edit(shipped, "DOCS_ONLY: 'true'", 1, "DOCS_ONLY: 'false'")],
+    ["a held path only noticed", "AM-10", inBlock(shipped, verdict, 2, "exit 1", "exit 0")],
+    ["the held paths left out of the verdict", "AM-10", edit(shipped, verdict, 2, 'if [ "$WROTE_COUNT" -ge 300 ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then')],
+    ["a listing of 300 files trusted", "AM-10", edit(shipped, verdict, 2, 'if [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then')],
+    ["a listing without its files taken as empty", "AM-10", edit(shipped, `if [ -z "$WROTE" ] || [ "$(jq -r '.listed' <<< "$WROTE")" != "array" ]; then`, 2, 'if [ -z "$WROTE" ]; then')],
+    ["the listing of a range that is always empty", "AM-10", shipped.split("compare/${PARENT}...${MERGED}\"").join("compare/${PARENT}...${PARENT}\"")],
+    ["another selection of weakened files", "AM-10", edit(shipped, "WROTE_SHRUNK=$(jq -r", 2, "WROTE_SHRUNK=$(jq -r '.changes[] | select(.status == \"removed\") | .filename' <<< \"$WROTE\")")],
+    ["an unnamed merge commit passes", "AM-10", inBlock(shipped, 'if ! [[ "$MERGED" =~ ^[0-9a-f]{40,64}$ ]]; then', 2, "exit 1", "exit 0")],
+    ["an early exit 0", "AM-10", shipped.split(ind(10, "set -euo pipefail") + ind(10, "# The commit the merge created, listed against its first parent: the")).join(ind(10, "set -euo pipefail") + ind(10, "exit 0") + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a message that leaves", "AM-10", shipped.split(ind(10, "set -euo pipefail") + ind(10, "# The commit the merge created, listed against its first parent: the")).join(ind(10, "set -euo pipefail") + ind(10, 'echo "PR #${PR}: nothing to check" && exit 0') + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a message that runs a command", "AM-10", shipped.split(ind(10, "set -euo pipefail") + ind(10, "# The commit the merge created, listed against its first parent: the")).join(ind(10, "set -euo pipefail") + ind(10, 'echo "checked: $(true)"') + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["promote-docs keeps the merge commit to itself", "AM-10", last(shipped, shaLine, "")],
+    ["a failed check that lets the job go on", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ github.event.pull_request.number }}"), checkName + checkIf + ind(8, "continue-on-error: true") + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ github.event.pull_request.number }}"))],
   ];
   const [green, ...reds] = await Promise.all([guard("as shipped"), ...cases.map(([label, , text]) => guard(label, text))]);
   assert.equal(green.status, 0, `${green.stdout}\n${green.stderr}`);

@@ -1,0 +1,6 @@
+bump: minor
+
+- `auto-merge`: the merge step reads the base branch's tip again right before each merge call, retries included, and stops when it moved since the gate read it: a branch landed in between could move the merge base, and the merge would no longer write what the gate listed. The pull request stays ready and unmerged until the workflow is re-run or someone merges it by hand.
+- `auto-merge`: after each merge, a new step (`Check what the merge wrote`) lists the commit GitHub created against its first parent and runs the gate's rules on it — `CLAUDE_GATE_RE` and `PROJECT_GATE_RE`, the weakened tests under `TEST_HOLD_RE` and, in `promote-docs`, anything but documentation — and turns the run red when one of them matches, or when the listing reaches 300 files or cannot be read. The gate's listing is what GitHub's merge writes only while GitHub's merge starts from the merge base its compare names, which a live test with two merge bases observed and nothing documents. AM-10 pins that step; AM-7 pins the tip's hand-over and its re-read; AM-8 counts the per-file facts of both listings.
+
+By hand: a project that added a dispatch after the merge (`docs/conventions/auto-merge-policy.md` § After the merge) moves it after the new step and adds `&& steps.check.outcome == 'success'` to its `if`, so that nothing is dispatched after a red check.
