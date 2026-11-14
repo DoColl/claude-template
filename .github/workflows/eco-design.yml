@@ -1,0 +1,60 @@
+name: Eco-design
+
+# The eco-design audit of green-claude (rules drawn from RGESN and GR491) on
+# what each pull request changes: docs/conventions/eco-design.md. A finding the
+# pull request adds shows as an annotation and in the job summary; one the file
+# already had does not. Advisory until scripts/eco-design.config.json sets
+# fail_on. A manual run lists every finding of the branch instead.
+#
+# The audit is third-party code, run at the commit the project read
+# (scripts/eco-design.config.json) on files a pull request writes: the job
+# holds a read-only token and no secret, and keeps no credential on disk.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: eco-design-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Eco-design audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # On a pull request: the merge commit and its first parent, the base
+          # the audit compares with.
+          fetch-depth: 2
+
+      - name: Fetch green-claude at the commit the project read
+        run: |
+          set -euo pipefail
+          repo=$(jq -r '.repository' scripts/eco-design.config.json)
+          commit=$(jq -r '.commit' scripts/eco-design.config.json)
+          if ! [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::scripts/eco-design.config.json needs a repository (owner/name) and a full 40-character commit."
+            exit 1
+          fi
+          dest="$RUNNER_TEMP/green-claude"
+          git init -q "$dest"
+          git -C "$dest" fetch -q --depth 1 "https://github.com/$repo" "$commit"
+          git -C "$dest" -c advice.detachedHead=false checkout -q FETCH_HEAD
+          test "$(git -C "$dest" rev-parse HEAD)" = "$commit"
+
+      - name: Audit
+        run: |
+          set -euo pipefail
+          skill="$RUNNER_TEMP/green-claude/skills/green-claude"
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            node scripts/eco-design-audit.mjs --green-claude "$skill" --base HEAD^1
+          else
+            node scripts/eco-design-audit.mjs --green-claude "$skill" --all
+          fi

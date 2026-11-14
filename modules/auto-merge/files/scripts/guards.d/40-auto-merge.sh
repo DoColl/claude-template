@@ -88,6 +88,8 @@ else
            scripts/weekly-digest.config.mjs scripts/audit-gate.mjs \
            scripts/audit-gate.test.mjs scripts/audit-allowlist.json \
            scripts/parallel-sessions.sh Scripts/Audit-Allowlist.JSON \
+           scripts/eco-design-audit.mjs scripts/eco-design-audit.test.mjs \
+           scripts/eco-design.config.json Scripts/Eco-Design.Config.JSON \
            scripts/fetch-pinned-release.sh .gitleaks.toml .gitleaksignore \
            .github/zizmor.yml .github/zizmor.yaml scripts/auto-merge-paths.txt \
            SECURITY_REVIEW.md SECURITY_REVIEW_2026-11.md security_review.md \
@@ -105,6 +107,8 @@ else
            scripts/weekly-digest-notes.md scripts/weekly-digest.mjs.md \
            scripts/audit-gate.md scripts/audit-allowlist.json.example \
            scripts/parallel-sessions.md src/scripts/audit-gate.mjs \
+           scripts/eco-design-audit.md scripts/eco-design.config.json.example \
+           src/scripts/eco-design-audit.mjs scripts/eco-design-audit-notes.md \
            src/.gitleaks.toml .gitleaks.toml.md docs/zizmor.yml .github/zizmor.md \
            scripts/auto-merge-paths.txt.md SECURITY.md docs/SECURITY_REVIEW.md \
            SECURITY_REVIEW.md.txt; do

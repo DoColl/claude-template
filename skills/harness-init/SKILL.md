@@ -1,6 +1,6 @@
 ---
 name: harness-init
-description: Install or extend the claude-template harness in the current project — choose the modules (instruction files, session settings, sub-agents and their Bash allowlist, git hooks, security workflow, a CI skeleton, auto-merge, weekly digest, Claude in CI, OpenSpec, eco-design rules through a pinned plugin, the Headroom proxy per machine), run the installer, then fill in what only the project knows. Use when the user asks to initialise, set up or add a module of the Claude Code harness in a repository.
+description: Install or extend the claude-template harness in the current project — choose the modules (instruction files, session settings, sub-agents and their Bash allowlist, git hooks, security workflow, a CI skeleton, auto-merge, weekly digest, Claude in CI, OpenSpec, an eco-design audit of pull requests, the Headroom proxy per machine), run the installer, then fill in what only the project knows. Use when the user asks to initialise, set up or add a module of the Claude Code harness in a repository.
 ---
 
 # Initialise a project with claude-template
@@ -56,6 +56,7 @@ The installer prints "Next steps" and counts the `TODO(harness)` markers; `statu
 - `.claude/skills/project-security-review/SKILL.md` (security-review module) — the same sensitive areas, and the invariants.
 - `.claude/settings.json` (session-settings module) — a `Read(…)` deny rule for each place the codebase shows secrets are kept; drop the `.env` example carve-outs the project does not use. Never add an allow rule here on your own.
 - `.worktreeinclude` (parallel-sessions module) — the ignored files a fresh worktree needs to build and run, as the codebase shows them (a local environment file, a local configuration). Nothing that must differ between two sessions; leave it empty when there is none.
+- `scripts/eco-design.config.json` (eco-design module) — nothing to fill: leave `fail_on` at `none` until the team has read a few runs, and never put there a commit nobody has read.
 
 **Stay inside the gaps.** This session fills `TODO(harness)` markers. It does not write an ADR, a convention page, a runbook, a guard or a finding unless the user asks for one: those record decisions and incidents the project has not had yet, and each one written now is a file someone must review.
 

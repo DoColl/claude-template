@@ -84,9 +84,9 @@ node /path/to/claude-template/bin/harness.mjs show . scripts/security-checks.sh 
 | `claude-rework` | pull-request flow | when the review holds a pull request, a read-and-edit-only Claude session proposes a fix of its blocking findings as a pull request into the held one, pushed by a job without Claude; two attempts, then `needs-human` |
 | `ready-on-green` | pull-request flow, without `auto-merge` | a draft pull request is marked ready for review once its CI run is green; nothing is merged |
 | `weekly-digest` | pull-request flow | one issue a week listing what waits on a human |
+| `eco-design` | pull-request flow | the green-claude audit (eco-design rules drawn from RGESN and GR491) of what each pull request changes, at a pinned commit: annotations and a job summary for the findings it adds, a failing check past a level you set |
 | `claude-ci` | on demand | `@claude` on plain issues of a private repository, with the job token only |
 | `openspec` | on demand | the OpenSpec convention (specs for current behaviour, changes for work in flight) and its validation guard |
-| `eco-design` | on demand | the convention for using the `green-claude` plugin (eco-design rules, RGESN / GR491) at a reviewed commit: precedence, findings as candidates, recorded decisions. Copies nothing from the plugin |
 | `headroom` | on demand | how to run the Headroom compression proxy on one machine (pinned install, a launch script with a clean environment and the egress switches), and a guard that keeps proxy routing, Headroom wiring and its local state out of git |
 
 `node bin/harness.mjs list` prints the same with each module's requirements.
@@ -113,7 +113,7 @@ Each module's convention page says where its piece comes from and what has actua
 | `claude-rework` | Run once live, in a throwaway private repository: a hold led to a rework pull request into the held branch, merged by a human, then a pass and an unattended merge. The run found two defects, both fixed since (a missing permission; a second attempt on a re-run review). The `needs-human` hand-over and the held-path refusals were not exercised. |
 | `claude-ci` | Not exercised end to end; only its push hook was replayed locally, against the push wrapper of the pinned action. For private repositories only. |
 | `openspec` guard | Its validation command was run against OpenSpec CLI 1.10.0 in one installed project (an empty project, a scaffolded change, a valid change, a spec alone), and the guard itself in a scratch project (a change with no delta stays red until it declares `skip_specs: true`). Not run in CI: the kit installs no CLI there. |
-| `eco-design` | Written from a partial reading of the plugin's repository at one commit. Never run live: the plugin was not installed and its audit was not executed. Its page has a live check. |
+| `eco-design` | Ran once live, on the kit's own pull request that added it: green-claude fetched at the pinned commit, the 8 changed files of covered kinds audited, 12 new findings reported as annotations and in the log, ECO-HEB-06 left out, the check green with `fail_on: none`. A first run had stopped on the shape of the real rule catalogues, fixed since. The script is unit-tested against a stand-in of the audit. The inventory, a blocking level and a required check have not run. |
 | `headroom` | Written from Headroom 0.44.0's source, read and never executed. Its launch script ran once against a stand-in `headroom` (environment, arguments, refusals); the real proxy was not started and no session went through it. The guard is tested on tables, and was reviewed adversarially four times: each pass found bypasses the previous one had missed, until the guard was changed to read every committed file rather than model what Claude Code loads; the fourth pass confirmed its findings by running Claude Code with a stand-in `headroom`. What it still does not see is listed on the page. Its page lists what is unknown and has a live check. |
 
 Treat anything marked "has not run", and every part of a piece this table does not say has run, as a draft until you have watched it work once.
@@ -134,7 +134,7 @@ Most of the kit is distilled from one production codebase, which stays unnamed. 
 | [arXiv:2607.04697](https://arxiv.org/abs/2607.04697), Xu, Subramanian and Karthik | — | 2026-11-13 (abstract) | The rates of conflict between pull requests written by agents, quoted on the `parallel-sessions` page. |
 | ["When Agents Collide"](https://codex.danielvaughan.com/2026/07/28/agent-pr-merge-conflicts-concurrent-coding-agents-codex-cli-worktree-isolation-coordination-defence/), D. Vaughan | none stated | 2026-11-13 | For `parallel-sessions`: forecasting a conflict between two agents' branches with `git merge-tree`, one set of files per agent, making what an agent holds visible to the others. Ideas only. |
 | [obra/superpowers](https://github.com/obra/superpowers) | MIT | `22f0b46` (2026-11-13) | For `parallel-sessions`: the run of the project's checks in a fresh worktree before any change, and the check that the worktree directory is ignored, which PS-1 makes a guard. Ideas only, no text copied. |
-| [Institut-du-Numerique-Responsable/green-claude](https://github.com/Institut-du-Numerique-Responsable/green-claude) | Apache-2.0 (code), CC BY 4.0 (rules, documentation) | `bc2a1cf` (2026-11-13) | What the `eco-design` convention says of the plugin: its behaviour, its verdict vocabulary and the format of its decisions file, restated (`docs/conventions/eco-design.md` § Sources). No text, rule or script copied. |
+| [Institut-du-Numerique-Responsable/green-claude](https://github.com/Institut-du-Numerique-Responsable/green-claude) | Apache-2.0 (code), CC BY 4.0 (rules, documentation) | `bc2a1cf` (2026-11-13) | The audit `eco-design.yml` fetches at that commit and runs, not copied; its rule titles and recommendations appear in the job summary with their credit (`docs/conventions/eco-design.md` § Sources). |
 | [headroomlabs-ai/headroom](https://github.com/headroomlabs-ai/headroom) | Apache-2.0 | `headroom-ai` 0.44.0 (`b21479e`) and `9f2cc01`, 2026-11-13 | The commands, flags, environment variables and behaviour the `headroom` page describes, read in its code (`docs/conventions/headroom.md` § Sources). No text or code copied. |
 | [Claude Code environment variables](https://code.claude.com/docs/en/env-vars), [MCP tool search](https://code.claude.com/docs/en/mcp) | — | 2026-11-13 | The variables that move a session's API traffic, which the `headroom` guard refuses in committed files, and tool search behind a gateway (`docs/conventions/headroom.md` § Sources). |
 
@@ -157,7 +157,7 @@ SECURITY_REVIEW.md                 the findings catalogue (yours)
   harness.json                     what the installer did
 .githooks/                         pre-commit, pre-push
 .github/
-  workflows/                       ci.yml (yours), security.yml, auto-merge.yml, ready-on-green.yml, weekly-digest.yml, claude.yml, claude-review.yml
+  workflows/                       ci.yml (yours), security.yml, auto-merge.yml, ready-on-green.yml, weekly-digest.yml, eco-design.yml, claude.yml, claude-review.yml
   dependabot.yml, zizmor.yml
 docs/
   conventions/                     one page per rule: the detail behind CLAUDE.md
@@ -215,7 +215,7 @@ node bin/release.mjs --dry-run  # the next release, from the changelog fragments
 
 No workflow commits the version or opens the release pull request: a bot that writes to `main` without a pull request is a privilege the kit refuses itself, such a commit would start no CI, and a ruleset that forbids direct pushes would stop it; a pull request opened with a job's own token starts no CI either. The level sits in the fragment rather than in a label, so that it is in the diff, reviewed and checked by the tests.
 
-The kit installs part of itself at its root — `core`, `ci-security`, `weekly-digest`, `ready-on-green` and `parallel-sessions` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
+The kit installs part of itself at its root — `core`, `parallel-sessions`, `ci-security`, `ready-on-green`, `weekly-digest` and `eco-design` — so `scripts/`, `docs/conventions/` and most of `.github/` here are installed copies of what `modules/` ships, recorded in `.claude/harness.json`. Change the module, then run `node bin/harness.mjs update .`. The statuses in "What has been exercised" change only once a piece has been watched working here.
 
 ## License and security
 

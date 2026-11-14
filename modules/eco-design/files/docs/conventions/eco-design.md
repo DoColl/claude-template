@@ -1,103 +1,118 @@
 # Eco-design
 
-**Rule (CLAUDE.md § Key conventions):** the `green-claude` plugin is pinned at a reviewed commit like every plugin. Its rules never outrank `CLAUDE.md`, security or what was asked: state the trade-off in one sentence, then deliver. An audit hit is a candidate, confirmed in context before it is reported; a dismissed one is recorded in `.green-claude/decisions.md` by a human, with its reason.
+**Rule (CLAUDE.md § Key conventions):** every pull request is audited by `eco-design.yml` against the green-claude rules, at the commit pinned in `scripts/eco-design.config.json`. A finding is a candidate: fix it, or record a decision in `.green-claude/decisions.md` with its reason, reviewed like a derogation. The rules never outrank `CLAUDE.md`, security or what was asked.
 
 ## Status
 
-Written for the kit from a reading of the plugin's repository at the commit named under Sources. **Never run live by the kit's authors**: the plugin was not installed, its audit script was not executed, and no session was observed with the skill loaded. What this page says the plugin does is what its files say at that commit.
-
-The reading covered the skill file, the hook scripts, the plugin and marketplace manifests and the licence files. It did not cover the audit script, its detectors or the rule catalogues. It is therefore not the review the plugin rule asks for: the project does its own, in full.
+- `scripts/eco-design-audit.mjs` is unit-tested (ED-2), against a stand-in written in the output format of green-claude's audit: which files are audited, what a change is charged with, the detectors left out, the report and the exit code.
+- The workflow **ran live** on the kit's own repository, on the pull request that added it. Its first run stopped in the script, on the shape of the real rule catalogues; fixed, and the tests' stand-in now has that shape. Its second run fetched green-claude at the pinned commit, audited the 8 changed files of covered kinds, reported 12 new findings — 10 as annotations, all 12 in the log — named ECO-HEB-06 as not audited, and stayed green with `fail_on: none`. None of the 12 held in context (a nested iteration over a few small catalogues, a command-line tool's own output, small files read whole, an `exit` inside a string taken for dead code): candidates, as this page says. The log and the annotations were read; the job summary was not read back.
+- Not exercised: the manual inventory, a blocking `fail_on` on a real finding, a decision that silences one, a required check holding a merge, a pull request from a fork.
+- The reading, at the commit named under Sources: the audit script, its helpers, every detector and inspector, the skill file, the hook scripts, the plugin manifests and the licence files, in full. The rule catalogues were read as data: their patterns go to `grep`, their text to the report.
 
 ## Why
 
-Code an assistant writes runs for years after the session that produced it: a query in a loop, a payload without pagination, a library imported for one function. A rule set that names those patterns, with the public reference behind each one, catches them while the code is being written rather than in production.
+Code runs for years after the change that wrote it: a query in a loop, a payload without pagination, a library imported for one function. green-claude names those patterns, with the public reference behind each one (RGESN, GR491), and ships a deterministic audit that finds them.
 
-The kit copies none of it. The rule catalogues and the audit script change with each release of the plugin, and a copy in the kit would be behind the day after it was made. The harness already has the place for third-party session code: a plugin, read at a fixed commit and pinned there (`security-review.md` § Plugins). This module adds only what is specific to this plugin.
+As a skill, it applies when the model loads it: often, not always. As a check in CI, it applies to every pull request, whoever or whatever wrote it, and its result is on the pull request for the reviewer. The kit copies none of it: the workflow fetches the audit at a commit the project has read, so a new release of the rules is a one-line bump, after a reading.
 
 ## Details
 
-### What the plugin is
+### What runs
 
-One skill, `green-claude`, from the repository under Sources. At the commit read:
+On every pull request, `eco-design.yml`:
 
-- rule catalogues in JSON, in English: cross-cutting rules mapped to RGESN and GR491, rules per language and framework, practices for the session itself and token-sobriety rules;
-- `scripts/eco-audit.sh`, a deterministic audit in Bash and awk that needs `jq`; it prints candidates, and `--rules <family or file>` prints the rules for one language without loading the catalogues into the session;
-- the marketplace entry declares the repository root as the plugin directory, so reading "the plugin's directory in full" means reading the repository.
+1. checks out the merge commit and its first parent, the base, and keeps no credential;
+2. fetches green-claude by commit from the repository named in `scripts/eco-design.config.json`, and checks that what it got is that commit;
+3. runs `scripts/eco-design-audit.mjs`, which runs green-claude's `eco-audit.sh` on the files the pull request adds, modifies, copies or renames — those of a kind the rules cover: code, markup, stylesheets, YAML; not Markdown or JSON, as the plugin's own hooks do — once as the pull request leaves them and once as they were, and keeps what is new.
 
-### What it changes in a session
+A manual run (`workflow_dispatch`) audits every tracked file of the branch instead: the inventory of the debt already there. It fails on nothing.
 
-The skill is written to load whenever code is written or reviewed, without being asked. Once loaded it tells the session to:
+The job holds `contents: read` and no secret: the audit is third-party code running on files a pull request wrote.
 
-- apply the rules unprompted, and stay quiet about the ones it honoured;
-- question a request before writing: the assumption that would reshape the work, the least code that solves the problem, and — when the request names a model or an AI approach — whether a smaller one would do;
-- follow writing rules for its replies, and end a task that ran tools with a short report.
+### What counts as new
 
-These are instructions of a third party arriving in every coding session. They are why the pin matters, and why the order of precedence is a rule: a convention of `CLAUDE.md`, a security requirement or an explicit request wins. The skill says the same of itself — state the trade-off in one sentence, then deliver what was asked.
+A rule that fires on a file after the change and did not fire on that file before it. A renamed file is compared with its old path; an added one has no before. A rule the file already broke is not charged to the change, even when the change adds a second occurrence: that debt shows in the inventory, not in every pull request that touches the file. The comparison under-reports on purpose: an audit that blames a change for what it did not do teaches people to skip it.
 
-### Findings are candidates
+### What it reports
 
-The audit matches patterns. A hit says where to look, not that there is a defect. Before a finding is reported, read the code around it; the skill's own vocabulary is the one to use:
+- An annotation per new finding, ten at most, on the file and, for the rules that have one, the line. Most rules match a pattern anywhere in the file and give no line.
+- A job summary: the new findings, what each rule recommends, the rules not audited, the findings hidden by decisions, and a line when the pull request edits `.green-claude/`.
+- The plain report in the log, printed with workflow commands off, so that no line of an audited file can become one.
 
-- `FAIL` — confirmed in context;
-- `REVIEW` — the pattern matched and the context does not settle it; say what would;
-- `PASS` — checked and correct, stated only for a rule that was asked about.
+The summary credits the rules' source, as their licence asks.
 
-No number of grams, joules or litres is derived from a token count or from an audit score. The plugin refuses that conversion too.
+### Blocking
 
-### Recorded decisions
+Advisory by default (`fail_on: none`): the check is green whatever the audit finds, and red only when the audit could not run — an audit that fails in silence reads like a clean one.
 
-`.green-claude/decisions.md`, at the repository root, is read by the audit: a line marked `ACCEPTED` silences one rule for one file, a line marked `TODO` keeps the finding visible. It is a derogation list, so it is handled like one:
+With `fail_on` set to `high`, `medium` or `low`, a new finding of that impact or above fails the check. A failing check holds a merge only once it is required: add `Eco-design audit` to the required checks of the default branch's ruleset.
 
-- the file is tracked and changes to it are reviewed;
-- a line is written by a human, or proposed by the session and accepted by one — never added silently;
-- each `ACCEPTED` line carries its reason.
+Start advisory, read a few runs, record the decisions the team takes, then raise the level. The plugin's authors advise against an audit that blocks, because its findings are candidates; a level with reviewed decisions is the middle way.
 
-### Hooks
+### Decisions and exclusions
 
-At the commit read, the plugin's manifest declares no hook: installing the plugin wires none. The repository ships hook scripts apart, with an installer that copies them under the user's home directory and registers them in the user's settings. Among them:
+Two files of green-claude's own format, at the repository root, read by its audit:
 
-- an audit after every file write, which hands its findings back to the session;
-- a reminder before a prompt that asks for code;
-- a local response cache, opt-in per request.
+- `.green-claude/decisions.md` — a line `ECO-CONT-01  docs/index.html  ACCEPTED  <reason>` silences one rule for one file; `TODO` in place of `ACCEPTED` keeps the finding visible. The rest of the file is free prose.
+- `.green-claude/ignore` — one extended regular expression per line, matched against paths: what is out of scope (test fixtures, rule catalogues, generated code).
 
-They are per person and outside the repository: the project cannot review them in a pull request, and PL-1 does not compare them with anything. A project that wants them decides it once, for everyone, and says so here; whoever installs them reads them at the pinned commit first. The first two add text to the session on many turns, and the audit hook also runs on what a sub-agent writes.
+Both silence findings, so both are derogations: tracked, changed in a reviewed pull request, a reason on every line, accepted by a person. A session may propose a line; it does not add one on its own. The summary says when a pull request edits either file.
 
-### Setting it up
+### The detector left out
 
-1. Read the repository at one commit, in full (`security-review.md` § Plugins): the skill file, every script under the skill, the hook scripts, the installer.
-2. Register the marketplace and install the plugin by hand. Do not enable auto-update for it, and do not declare it in `.claude/settings.json` with auto-update on: an update is a new review.
-3. Record `green-claude@green-claude` in `scripts/reviewed-plugins.json` with the commit read and the commit installed, then run the gate: PL-1 compares the two.
-4. Install `jq` where the audit runs.
+At the commit read, one detector of green-claude, `detect-broken-links.awk` — rule ECO-HEB-06, a local link to a file that does not exist, in HTML, Vue, Svelte and stylesheets — tests each link with a shell command it builds from the link's text, inside double quotes. A link written `href="$(…)"` in an audited file therefore runs a command on the machine that audits. In CI on a pull request, that is code its author could run anyway: a pull request can change the workflow it triggers. On a developer's machine, or in a hook that audits what a session wrote, it is not.
 
-A project that reads the plugin and decides against it records it as `rejected`, with the reason, and removes this module's bullet from `CLAUDE.md`.
+`eco-design-audit.mjs` runs the audit from a copy of green-claude's scripts and rules without any awk detector that can run a command or open a file by name (`system()`, `getline`, a pipe or a redirection after `print`), and names the rules left unaudited in the summary. At the commit read, that is ECO-HEB-06 alone. The test is on the detector's code, not on its name: a detector added later with such a call is left out too. Symbolic links are not audited either: they could point outside the checkout.
+
+### Bumping the pin
+
+1. Read green-claude at the new commit: `skills/green-claude/scripts/` in full, and what changed in the rule catalogues.
+2. Put the commit and the date in `scripts/eco-design.config.json`, in a pull request of its own: its run is the first at the new commit.
+3. Run the workflow by hand on the default branch: a rule the new version adds fires on old code there, not in the next pull requests.
+
+Never a branch or a tag: the workflow runs what the file names, and a branch would change what runs without anyone reading it. ED-1 refuses anything but a full commit.
+
+### The plugin in sessions
+
+The same rules exist as a Claude Code skill, `green-claude`, which applies them while a session writes code. Installing it is a separate decision. It is third-party code that loads in every session: read it at a commit and pin it, as any plugin. When it is installed, its rules never outrank `CLAUDE.md`, security or what was asked: state the trade-off in one sentence, then deliver.
+
+Do not wire the plugin's optional hooks as they stand. Its audit hook runs green-claude's audit, detectors included, outside the Bash sandbox, on what a session has just written — content a prompt injection can choose. The CI audit covers what that hook would catch, without that exposure.
 
 ### Live check
 
-In a fresh session, after the plugin is installed and recorded:
+On the first pull request that changes a file of a covered kind:
 
-1. `./scripts/security-checks.sh --offline` — PL-1 passes on the recorded commit.
-2. Ask for the eco-design rules of one language the project uses. The session must run the audit script with `--rules`, not read a catalogue whole.
-3. Ask for an audit of one file with a known pattern (a `SELECT *`, a query in a loop). The finding must come back with a verdict, after the session read the code around it.
-4. Add an `ACCEPTED` line for that rule and that file, audit again: the finding is hidden and the audit says that it hid one.
+1. The `Eco-design audit` check ran. Its log names the commit fetched; with `fail_on: none` it is green.
+2. Its summary lists the files audited and, for each new finding, the rule, the file and the recommendation.
+3. In a scratch pull request, add `SELECT * FROM t;` to a `.sql` file: ECO-SQL-01 appears as an annotation on that file. Close the pull request.
+4. Run the workflow by hand on the default branch: the inventory lists the debt already there, and the check stays green.
 
-If one of these does not hold, this page is wrong for the version installed: correct it before relying on it.
+If one of these does not hold, this page is wrong for the version in use: correct it before relying on the check.
 
 ### Limits
 
-- Loading a skill is the model's choice: the rules apply often, not always. Nothing in the gate or in CI runs the audit.
-- The plugin's version moves faster than this page. The names of files, flags and verdicts above are those of the commit read.
-- The rule sets cover the web and common back-end languages; a file in a language without rules gets the cross-cutting ones only.
+- Most rules match a pattern somewhere in the file: a finding says where to look, not that there is a defect.
+- New means new rule on the file, not new occurrence (§ What counts as new).
+- A pull request with a merge conflict gets no run: GitHub builds no merge commit for it.
+- The inventory runs every rule on every file: on a repository with thousands of files of covered kinds it can reach the job's 30-minute limit.
+- The rules cover the web and the common back-end languages; a file in another language is not audited.
+- The commit identifies what runs, on the repository named next to it. A commit of a fork of that repository may be reachable through it by the same identifier, as for actions pinned by commit: read the commit on the repository itself.
 
 ## Checks
 
-- **PL-1** (`scripts/guards.d/25-plugin-pins.sh`, local only) — once recorded, the plugin is installed at its reviewed commit; recorded as `rejected`, it is not installed.
+`scripts/guards.d/49-eco-design.sh`:
 
-Nothing checks that the plugin is recorded at all, that its rules were applied to a change, or who wrote a line of `.green-claude/decisions.md`: the first is a post-install step, the last two are for the review of the pull request.
+- **ED-1** — `scripts/eco-design.config.json` names a repository (`owner/name`), a full 40-character commit and a `fail_on` among none, low, medium and high.
+- **ED-2** — `node --test scripts/eco-design-audit.test.mjs` passes.
+- **ED-3** — `.github/workflows/eco-design.yml` keeps `pull_request` and `workflow_dispatch` as its only triggers and `contents: read` as its one permission under `permissions: {}`, reads no secret, and its checkout keeps no credential.
+
+Nothing checks that a finding was read, or who wrote a line of `.green-claude/decisions.md`: that is the review of the pull request.
 
 ## Sources
 
-- [Institut-du-Numerique-Responsable/green-claude](https://github.com/Institut-du-Numerique-Responsable/green-claude) — Apache-2.0 for code, CC BY 4.0 for rules and documentation — read at `bc2a1cf` (2026-11-13). Taken: the description of what the plugin does, its verdict vocabulary and the format of its decisions file, restated. No text, rule or script copied.
+- [Institut-du-Numerique-Responsable/green-claude](https://github.com/Institut-du-Numerique-Responsable/green-claude) — Apache-2.0 for code, CC BY 4.0 for rules and documentation — read at `bc2a1cf` (2026-11-13). Nothing is copied: the workflow fetches its audit at the pinned commit and runs it, and the job summary shows the titles and recommendations of its rules, with the credit line their licence asks for. This page restates the format of its decisions and ignore files, and what its hooks and its broken-links detector do.
 
 ## History
 
-- Installed with the kit.
+- 0.8.0 — the convention for the plugin in sessions, pinned as a plugin.
+- 0.9.0 — the audit runs in CI on every pull request; the plugin is no longer needed for it; the detector that runs a command is left out. First live run on the kit's own pull request.
