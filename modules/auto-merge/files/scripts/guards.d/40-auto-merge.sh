@@ -725,7 +725,9 @@ fi
 # its count check; the bounded wait on `mergeable` (a read every 3 s, five at
 # most, null keeps waiting); the hold unless GitHub built a test merge; the
 # read of its parents and the hold unless they are the tip and the head; its
-# listing and the hold at 300 files; the paths of both listings; the gate.
+# listing, the hold when it comes back without its files (an empty or a null
+# answer would read as a merge that changes nothing), and the hold at 300
+# files; the paths of both listings; the gate.
 order=(
   '          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '"'"'.object.sha'"'"') || TIP=""'
   '          RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${HEAD_SHA}" \'
@@ -741,6 +743,7 @@ order=(
   '          PARENTS=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${TEST_MERGE}" --jq '"'"'[.parents[].sha] | join(" ")'"'"') || PARENTS=""'
   '          if [ "$PARENTS" != "$TIP $HEAD_SHA" ]; then'
   '          MERGE_RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${TEST_MERGE}" \'
+  '          if [ "$(jq -r '"'"'.listed'"'"' <<< "$MERGE_RANGE")" != "array" ]; then'
   "          MERGE_ROWS=\$(jq -r '.files[] | @tsv' <<< \"\$MERGE_RANGE\")"
   '          MERGE_LISTED=$(grep -c . <<< "$MERGE_ROWS" || true)'
   '          if [ "$MERGE_LISTED" -ge 300 ]; then'
@@ -784,6 +787,7 @@ for cond in 'if [ -z "$MERGEABILITY" ]; then' 'if [ -z "$PARENTS" ]; then'; do
 done
 for cond in 'if [ "$MERGEABLE" != "true" ] || ! [[ "$TEST_MERGE" =~ ^[0-9a-f]{40,64}$ ]]; then' \
             'if [ "$PARENTS" != "$TIP $HEAD_SHA" ]; then' \
+            'if [ "$(jq -r '"'"'.listed'"'"' <<< "$MERGE_RANGE")" != "array" ]; then' \
             'if [ "$MERGE_LISTED" -ge 300 ]; then'; do
   n=$(block_ends "$cond" 'exit 0')
   [ "$n" = "$merging" ] || bad 7 "$merging merging job(s) but $n hold (report, exit 0, nothing merged) under '$cond'"
