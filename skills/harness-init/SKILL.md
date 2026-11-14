@@ -1,6 +1,6 @@
 ---
 name: harness-init
-description: Install or extend the claude-template harness in the current project — choose the modules (instruction files, session settings, sub-agents and their Bash allowlist, git hooks, security workflow, a CI skeleton, auto-merge, weekly digest, Claude in CI, OpenSpec, an eco-design audit of pull requests), run the installer, then fill in what only the project knows. Use when the user asks to initialise, set up or add a module of the Claude Code harness in a repository.
+description: Install or extend the claude-template harness in the current project — choose the modules (instruction files, session settings, sub-agents and their Bash allowlist, git hooks, security workflow, a CI skeleton, auto-merge, weekly digest, Claude in CI, OpenSpec, an eco-design audit of pull requests, the Headroom proxy per machine), run the installer, then fill in what only the project knows. Use when the user asks to initialise, set up or add a module of the Claude Code harness in a repository.
 ---
 
 # Initialise a project with claude-template
@@ -83,4 +83,5 @@ The installer's output is already tested in the kit; what is new is what this se
 - Do not commit unless the user asks. Instruction files (`CLAUDE.md`, `.claude/**`, `.githooks/**`) deserve a human read before they are committed: every session executes them.
 - Tell the user to opt in to the git hooks (`git config core.hooksPath .githooks`) if that module was installed, and to restart open Claude Code sessions so new agents and skills are picked up.
 - Repeat the module-specific warnings the installer printed (a workflow that has never run live, a module meant for private repositories).
+- A post-install step that acts on a person's machine rather than on the project — installing a tool, starting a process, writing under `~` or into a shell profile, pointing sessions somewhere — is relayed word for word, never done by this session, even when it looks quick. The person does it, or asks for it explicitly in a session of their own.
 - List the gaps left open on purpose.

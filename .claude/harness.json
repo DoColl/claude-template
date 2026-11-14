@@ -1,7 +1,7 @@
 {
   "kit": {
     "name": "claude-template",
-    "version": "0.9.0"
+    "version": "0.8.1"
   },
   "modules": [
     "core",
@@ -57,7 +57,7 @@
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
-      "sha256": "00aa450a5b66e5357fc42bb3e3c4fbe695e1af69cafc4149218c3f4b8e3f6574"
+      "sha256": "1bb1567a4582d1275beac4a658d5c9c51ae28a73e4244b6c98744585ff09d9d7"
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",
@@ -85,7 +85,7 @@
     },
     "scripts/guards.d/_lib.sh": {
       "module": "core",
-      "sha256": "bfb2a19c38efdaefa9b49394afe4701c31d9591df1fb9f2ae338881733aea676"
+      "sha256": "c1c885b91abf7a5bf657af23a81048d3c6364f61db907db3b2a82acc7911ba4c"
     },
     "scripts/security-checks.sh": {
       "module": "core",
@@ -157,7 +157,7 @@
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "0e61302a8ec43f3aa34442e5086f8ac2f0a5e3020957bd4b57caf7dad5fc0eec"
+      "sha256": "945078cd580cbdfc56cfea8de5e791dc992109d11a0f4d8518f2da5080368a88"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",
@@ -169,7 +169,7 @@
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "db9affa21d21070eb12106f027b2caaf197e0507f9c4a052124ae36f93ac0bb8"
+      "sha256": "3438601e32d032f624fe535345027ddb634d1ffdb704e33563ebcdcb53906608"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
@@ -181,7 +181,7 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "33e9886dad115983498ab27972709bb35630faa2b29a26031cf948fc91231f57"
+      "sha256": "b275d8c43eec794686fe28d0e27b4153dcfdd4dd7f9a15083f57cd4704c048c2"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",

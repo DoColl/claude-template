@@ -1,6 +1,6 @@
 {
   "name": "claude-template",
-  "version": "0.9.0",
+  "version": "0.8.1",
   "private": true,
   "license": "MIT",
   "description": "A modular Claude Code harness for a project: instruction files, sub-agents, hooks, a local gate and CI, installed module by module.",

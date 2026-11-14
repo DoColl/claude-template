@@ -2,12 +2,15 @@ name: CI
 
 # The kit's own checks: the installer's tests (which install every module into
 # a scratch project and run its gate), then zizmor on every workflow the kit
-# ships, rendered as a project would get them, and on this file.
+# ships, rendered as a project would get them, and on this file. On a pull
+# request, last, the changelog fragment that a change to modules/, lib/ or
+# bin/ brings.
 #
 # The first job calls security.yml: gitleaks, then the kit's own gate
 # (scripts/security-checks.sh), since the kit installs part of itself at its
 # root. The documentation set is skipped, and what the tests read or the kit
-# ships is taken back: a Markdown file under modules/ is shipped content.
+# ships is taken back: a Markdown file under modules/ is shipped content, and
+# the tests read CHANGELOG.md and the fragments under changes/.
 on:
   push:
     branches: [main]
@@ -25,6 +28,8 @@ on:
       - 'skills/**'
       - 'README.md'
       - 'docs/module-authoring.md'
+      - 'CHANGELOG.md'
+      - 'changes/**'
   pull_request:
     branches: [main]
     # `edited` too: a pull request retargeted to main is then tested against it
@@ -44,6 +49,8 @@ on:
       - 'skills/**'
       - 'README.md'
       - 'docs/module-authoring.md'
+      - 'CHANGELOG.md'
+      - 'changes/**'
 
 permissions: {}
 
@@ -72,6 +79,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The parents of the commit checked out: on a pull request, the last
+          # step compares the merge commit with the base it was built on.
+          fetch-depth: 2
 
       # The test files are named, never the directory: an older Node takes a
       # bare directory argument for a module to run and fails.
@@ -100,3 +110,38 @@ jobs:
         run: |
           pipx run --spec 'zizmor==1.31.1' zizmor --offline "$RUNNER_TEMP/rendered/.github/workflows/"
           pipx run --spec 'zizmor==1.31.1' zizmor --offline .github/workflows/
+
+      # A pull request that changes what the kit ships or runs (modules/, lib/,
+      # bin/) adds its changelog fragment, changes/<slug>.md, which
+      # bin/release.mjs turns into the next CHANGELOG.md entry. The tests check
+      # the format of every fragment; this checks that the pull request adds
+      # one. The commit checked out is the merge commit GitHub builds for the
+      # pull request: compared with its first parent, the base it was built
+      # on, it is what merging would bring, and no value of the event enters
+      # the script. File names are printed indented, never at the start of a
+      # line, where the runner reads its commands. Runs even when a step above
+      # failed, so that a missing fragment shows in the same run.
+      # test/install.test.mjs runs this script on a table of pull requests.
+      - name: Changelog fragment — a change to modules/, lib/ or bin/ adds one under changes/
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        run: |
+          set -euo pipefail
+          if ! git rev-parse -q --verify 'HEAD^2' >/dev/null; then
+            echo "::error::HEAD is not the merge commit of a pull request, or its parents were not fetched (fetch-depth: 2)"
+            exit 1
+          fi
+          code=$(git diff --no-renames --name-only 'HEAD^1' HEAD -- modules lib bin)
+          if [ -z "$code" ]; then
+            echo "Nothing changes under modules/, lib/ or bin/: no fragment required."
+            exit 0
+          fi
+          echo "Changes under modules/, lib/ or bin/:"
+          printf '%s\n' "$code" | sed 's/^/  /'
+          added=$(git diff --no-renames --name-only --diff-filter=A 'HEAD^1' HEAD -- changes)
+          if [ -n "$added" ]; then
+            echo "Changelog fragment(s) added:"
+            printf '%s\n' "$added" | sed 's/^/  /'
+            exit 0
+          fi
+          echo "::error::This pull request changes modules/, lib/ or bin/ and adds no changelog fragment. Add changes/<slug>.md: 'bump: patch', 'bump: minor' or 'bump: major' on its first line, a blank line, the lines of the entry, then a paragraph that starts with 'By hand:' ('By hand: nothing.' when there is nothing to do). The top of CHANGELOG.md gives the format."
+          exit 1

@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { entries as changelogEntries, byHandBetween } from "../lib/changelog.mjs";
+import { nextVersion } from "../lib/release.mjs";
 import { loadKit, listModules, KIT_ROOT } from "../lib/kit.mjs";
 import { buildPlan, applyPlan, summarize, readManifest, drift, walk, MANIFEST } from "../lib/install.mjs";
 
@@ -15,9 +16,9 @@ const CLI = path.join(KIT_ROOT, "bin/harness.mjs");
 const ALL = listModules(kit).map((m) => m.id);
 const tmp = (prefix = "harness-e2e-") => fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 // Under `node --test`, NODE_TEST_CONTEXT is set, and a `node --test` started with it in its environment exits 0
-// whatever its tests do. The gate runs the modules' self-tests that way (AG-1, PL-1, WD-1…): without this, a
-// broken self-test would pass here and fail in every project.
-const ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "NODE_TEST_CONTEXT"));
+// whatever its tests do. The gate runs the modules' self-tests that way (AG-1, PL-1, WD-1…), so the guards clear it
+// (_lib.sh). gate() below starts the gate with it set, however this suite is run: as a project's own tests would.
+const ENV = process.env;
 const run = (cwd, cmd, args, opts = {}) => spawnSync(cmd, args, { cwd, encoding: "utf8", env: ENV, ...opts });
 const cli = (...args) => spawnSync(process.execPath, [CLI, ...args], { encoding: "utf8", input: "" });
 const read = (dir, rel) => fs.readFileSync(path.join(dir, rel), "utf8");
@@ -28,7 +29,7 @@ const install = (target, moduleIds, extra = {}) => { const plan = buildPlan({ ki
 function gate(dir, ...args) {
   assert.equal(run(dir, "git", ["init", "-q", "-b", "main"]).status, 0, "git init");
   assert.equal(run(dir, "git", ["add", "-A"]).status, 0, "git add");
-  return run(dir, "bash", ["scripts/security-checks.sh", ...(args.length ? args : ["--offline"])], { env: { ...ENV, CI: "" } });
+  return run(dir, "bash", ["scripts/security-checks.sh", ...(args.length ? args : ["--offline"])], { env: { ...ENV, CI: "", NODE_TEST_CONTEXT: "child-v8" } });
 }
 const output = (r) => `${r.stdout}\n${r.stderr}`;
 
@@ -411,11 +412,98 @@ test("the manifest names the commit of the kit's checkout, and versions agree ac
   if (head) assert.ok(readManifest(dir).kit.commit.startsWith(head), "the commit installed from");
   assert.equal(readManifest(KIT_ROOT)?.kit.commit, undefined, "the kit's own root records no commit: it cannot name itself");
   assert.equal(loadKit(kitCopy()).commit, undefined, "a copy that is not a checkout has none, whatever repository sits above it");
-  assert.equal(JSON.parse(read(KIT_ROOT, "package.json")).version, kit.version);
-  assert.match(read(KIT_ROOT, "CHANGELOG.md"), new RegExp(`^## ${kit.version.replaceAll(".", "\\.")}( |$)`, "m"), "the current version has its entry in CHANGELOG.md");
-  assert.equal(read(KIT_ROOT, "CHANGELOG.md").match(/^## (\d+\.\d+\.\d+)/m)[1], kit.version, "and it is the first one");
-  for (const block of read(KIT_ROOT, "CHANGELOG.md").split(/^(?=## \d)/m).slice(1)) assert.equal((block.match(/^By hand\b/gm) ?? []).length, 1, `CHANGELOG.md: one "By hand" part per entry — a second one is an entry that lost its heading:\n${block.slice(0, 80)}`);
-  for (const e of changelogEntries(KIT_ROOT)) assert.notEqual(e.byHand, null, `CHANGELOG.md § ${e.version} has no "By hand" part ("By hand: nothing." when there is none)`);
+  versionsAgree(KIT_ROOT);
+});
+
+// kit.json, package.json, the kit's own installation and the first entry of CHANGELOG.md name one version, and every
+// entry has its one "By hand" part. Held for the kit as it is, and below for a release just cut by bin/release.mjs.
+function versionsAgree(root) {
+  const { version } = loadKit(root), changelog = read(root, "CHANGELOG.md");
+  assert.equal(JSON.parse(read(root, "package.json")).version, version);
+  const own = readManifest(root);
+  if (own) assert.equal(own.kit.version, version, "the kit's own installation records the current version: `node bin/harness.mjs update .`");
+  assert.match(changelog, new RegExp(`^## ${version.replaceAll(".", "\\.")}( |$)`, "m"), "the current version has its entry in CHANGELOG.md");
+  assert.equal(changelog.match(/^## (\d+\.\d+\.\d+)/m)[1], version, "and it is the first one");
+  for (const block of changelog.split(/^(?=## \d)/m).slice(1)) assert.equal((block.match(/^By hand\b/gm) ?? []).length, 1, `CHANGELOG.md: one "By hand" part per entry — a second one is an entry that lost its heading:\n${block.slice(0, 80)}`);
+  for (const e of changelogEntries(root)) assert.notEqual(e.byHand, null, `CHANGELOG.md § ${e.version} has no "By hand" part ("By hand: nothing." when there is none)`);
+}
+
+// A release of the kit (bin/release.mjs): the fragments under changes/ become the next version, written everywhere
+// versionsAgree reads it, and one entry at the top of CHANGELOG.md. It runs on a committed tree only, so that a
+// release holds the fragments as merged and nothing else.
+test("release: two fragments become the next version and one entry, the fragments go, the root manifest follows", () => {
+  if (!readManifest(KIT_ROOT)) return; // a copy of the kit without its own harness: no root manifest to follow
+  const root = tmp("harness-release-");
+  const skip = [".git", ".claude/worktrees", "changes", "node_modules"].map((rel) => path.join(KIT_ROOT, rel));
+  fs.cpSync(KIT_ROOT, root, { recursive: true, filter: (src) => !skip.includes(src) });
+  const git = (...args) => { const r = run(root, "git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args]); assert.equal(r.status, 0, output(r)); return r.stdout; };
+  const release = (...args) => run(root, process.execPath, [path.join(root, "bin/release.mjs"), ...args], { input: "" });
+  git("init", "-q", "-b", "main"); git("add", "-A"); git("commit", "-qm", "the kit");
+  const from = loadKit(root).version, to = nextVersion(from, "minor");
+
+  const none = release(); assert.equal(none.status, 1); assert.match(none.stderr, /nothing to release: changes\/ holds no fragment/);
+  write(root, "changes/small-fix.md", "bump: patch\n\n- A fix.\n\nBy hand: nothing. A remark.\n");
+  write(root, "changes/new-thing.md", "bump: minor\n\n- A new thing.\n- Its second line.\n\nBy hand: add the line\nto the skeleton.\n");
+  const uncommitted = release(); assert.equal(uncommitted.status, 1, output(uncommitted));
+  assert.match(uncommitted.stderr, /uncommitted changes/, "a fragment never committed stays out of a release");
+  git("add", "-A"); git("commit", "-qm", "two fragments");
+
+  const dry = release("--dry-run"); assert.equal(dry.status, 0, output(dry));
+  assert.ok(dry.stdout.includes(`${from} → ${to} (minor)`), dry.stdout);
+  assert.equal(git("status", "--porcelain"), "", "--dry-run writes nothing");
+
+  const done = release(); assert.equal(done.status, 0, output(done));
+  assert.deepEqual(git("status", "--porcelain").trimEnd().split("\n").sort(), [" D changes/new-thing.md", " D changes/small-fix.md", " M .claude/harness.json", " M CHANGELOG.md", " M kit.json", " M package.json"], "what a release writes, and nothing else");
+  assert.equal(loadKit(root).version, to);
+  versionsAgree(root);
+  assert.ok(read(root, "CHANGELOG.md").includes(`\n\n## ${to}\n\n- A new thing.\n- Its second line.\n- A fix.\n\nBy hand: add the line\nto the skeleton.\n\nA remark.\n\n## ${from}\n`), "the higher level first, one list, one By hand part, above the previous entry");
+  assert.equal(changelogEntries(root)[0].byHand, "By hand: add the line\nto the skeleton.\n\nA remark.", "the step `update` will list for the version");
+  const check = run(root, process.execPath, [path.join(root, "bin/harness.mjs"), "update", ".", "--check"], { input: "" });
+  assert.equal(check.status, 0, output(check));
+  assert.match(release().stderr, /nothing to release/, "the fragments are spent");
+});
+
+// The CI check of the kit's own pull requests (.github/workflows/ci.yml): one that changes modules/, lib/ or bin/
+// adds a changelog fragment. The step's script runs here as on the runner, on the merge commit of a pull request
+// whose first parent is the base — the allows, and the nearby forms that must stay red.
+test("CI: a pull request that changes modules/, lib/ or bin/ adds a changelog fragment under changes/", () => {
+  const step = /\n      - name: Changelog fragment[^\n]*\n(?: {8}(?!run: \|)[^\n]*\n)* {8}run: \|\n((?: {10}[^\n]*\n|\n)+)/.exec(read(KIT_ROOT, ".github/workflows/ci.yml"));
+  assert.ok(step, "the step is in ci.yml");
+  const script = step[1].replace(/^ {10}/gm, "");
+  assert.doesNotMatch(script, /\$\{\{/, "no expression in the script");
+  const pr = (change, mainMoves) => {
+    const dir = tmp("harness-ci-fragment-");
+    const git = (...args) => { const r = run(dir, "git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args]); assert.equal(r.status, 0, output(r)); };
+    write(dir, "lib/a.mjs", "a\n"); write(dir, "docs/a.md", "a\n"); write(dir, "changes/waiting.md", "a\n");
+    git("init", "-q", "-b", "main"); git("add", "-A"); git("commit", "-qm", "base");
+    git("checkout", "-qb", "topic"); change(dir); git("add", "-A"); git("commit", "-qm", "the pull request");
+    git("checkout", "-q", "main");
+    if (mainMoves) { mainMoves(dir); git("add", "-A"); git("commit", "-qm", "main moves"); }
+    git("merge", "-q", "--no-ff", "-m", "merge", "topic"); // as GitHub builds it: the base first, the pull request second
+    return run(dir, "bash", ["-c", script]);
+  };
+  const cases = [
+    ["lib/ and a new fragment", 0, (d) => { write(d, "lib/a.mjs", "b\n"); write(d, "changes/a-fix.md", "x\n"); }],
+    ["a new module and a new fragment", 0, (d) => { write(d, "modules/x/module.json", "{}\n"); write(d, "changes/x.md", "x\n"); }],
+    ["documentation only", 0, (d) => write(d, "docs/a.md", "b\n")],
+    ["a fragment only", 0, (d) => write(d, "changes/note.md", "x\n")],
+    ["lib/ without a fragment", 1, (d) => write(d, "lib/a.mjs", "b\n")],
+    ["bin/ without a fragment", 1, (d) => write(d, "bin/new.mjs", "x\n")],
+    ["a file of lib/ deleted, no fragment", 1, (d) => fs.unlinkSync(path.join(d, "lib/a.mjs"))],
+    ["lib/ and an edit of a fragment already waiting", 1, (d) => { write(d, "lib/a.mjs", "b\n"); write(d, "changes/waiting.md", "b\n"); }],
+    ["lib/, while main gains a fragment of its own", 1, (d) => write(d, "lib/a.mjs", "b\n"), (d) => write(d, "changes/other.md", "x\n")],
+  ];
+  for (const [what, status, change, mainMoves] of cases) {
+    const r = pr(change, mainMoves);
+    assert.equal(r.status, status, `${what}:\n${output(r)}`);
+    if (status) assert.match(r.stdout, /^::error::This pull request changes modules\/, lib\/ or bin\/ and adds no changelog fragment/m, what);
+  }
+  assert.match(pr((d) => write(d, "lib/::warning::x.mjs", "x\n")).stdout, /^ {2}lib\/::warning::x\.mjs$/m, "a file name is printed indented, never where the runner reads a command");
+  const single = tmp("harness-ci-fragment-");
+  write(single, "a.txt", "a\n");
+  for (const args of [["init", "-q", "-b", "main"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "one"]]) assert.equal(run(single, "git", args).status, 0);
+  const lone = run(single, "bash", ["-c", script]);
+  assert.equal(lone.status, 1); assert.match(lone.stdout, /::error::HEAD is not the merge commit of a pull request/, "anything but a merge commit is refused, not passed");
 });
 
 // Seeds never follow the kit: what a version asks to report by hand is in the changelog, and `update` shows it.
@@ -517,10 +605,12 @@ test("nothing is written through a symlink that leaves the project", () => {
 test("the gate: a failing guard fails it, a skipped one does not, an empty one is an error", () => {
   const dir = tmp();
   install(dir, []);
-  // a self-test run with `node --test` that fails must fail the gate from inside this test run too
+  // A self-test run with `node --test` that fails must fail the gate, also when the gate is started from a Node test
+  // run (gate() sets NODE_TEST_CONTEXT as one does), and a guard started on its own from one.
   write(dir, "scripts/red.test.mjs", 'import { test } from "node:test";\nimport assert from "node:assert/strict";\ntest("red", () => assert.equal(1, 2));\n');
   write(dir, "scripts/guards.d/96-self-test.sh", '#!/usr/bin/env bash\n. "$(dirname "$0")/_lib.sh"\nif node --test scripts/red.test.mjs >/dev/null 2>&1; then ok "self-test"; else fail "self-test"; fi\nfinish\n', 0o755);
   let nested = gate(dir); assert.equal(nested.status, 1, "a nested test run reports its failures"); assert.match(nested.stderr, /FAILED: 96-self-test/);
+  for (const context of ["child-v8", "child"]) assert.equal(run(dir, "bash", ["scripts/guards.d/96-self-test.sh"], { env: { ...ENV, NODE_TEST_CONTEXT: context } }).status, 1, `a guard started on its own, NODE_TEST_CONTEXT=${context}`);
   fs.rmSync(path.join(dir, "scripts/guards.d/96-self-test.sh"));
   write(dir, "scripts/guards.d/97-skipped.sh", "#!/usr/bin/env bash\nexit 77\n", 0o755);
   let r = gate(dir); assert.equal(r.status, 0, output(r)); assert.match(r.stdout, /skipped: 97-skipped/);
@@ -790,4 +880,140 @@ test("parallel-sessions: without a remote, a commit or a repository, the report 
   assert.equal(r.status, 0); assert.equal(output(r), "\n");
   r = report(dir, "--fetch-harder");
   assert.equal(r.status, 2); assert.match(r.stderr, /^usage: /);
+});
+
+test("headroom: the gate goes red when a committed file routes sessions through a proxy or keeps Headroom's state", () => {
+  if (!kit.modules.has("headroom")) return;
+  // The kit is often installed by a session: the steps meant for a person's machine say so first.
+  assert.match(listModules(kit).find((m) => m.id === "headroom").postInstall[0], /^For a person, to relay — the session that installs or updates the kit does none of these steps/);
+  const pristine = tmp();
+  install(pristine, ["headroom"]);
+  // Each row starts from a fresh copy of the installed project. `links` maps a path to its symlink target.
+  const project = (files = {}, forced = [], links = {}, before, after) => {
+    const dir = tmp();
+    fs.cpSync(pristine, dir, { recursive: true });
+    for (const [rel, text] of Object.entries(files)) write(dir, rel, typeof text === "string" ? text : `${JSON.stringify(text, null, 2)}\n`);
+    for (const [rel, target] of Object.entries(links)) { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.symlinkSync(target, path.join(dir, rel)); }
+    assert.equal(run(dir, "git", ["init", "-q", "-b", "main"]).status, 0);
+    if (before) before(dir);
+    assert.equal(run(dir, "git", ["add", "-A"]).status, 0);
+    if (forced.length) assert.equal(run(dir, "git", ["add", "-f", ...forced]).status, 0);
+    if (after) after(dir);
+    return run(dir, "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "" } });
+  };
+  const red = (label, id, files, forced, links, before, after) => {
+    const r = project(files, forced, links, before, after);
+    assert.equal(r.status, 1, `${label}: the gate must fail\n${output(r)}`);
+    assert.match(r.stderr, new RegExp(`FAIL\\s+${id}:`), `${label}\n${output(r)}`);
+    return r;
+  };
+  const green = (label, files, forced, links) => {
+    const r = project(files, forced, links);
+    assert.equal(r.status, 0, `${label}: the gate must pass\n${output(r)}`);
+    assert.doesNotMatch(output(r), /(FAIL|skip)\s+HR-\d:|HR-\d: [^\n]*not checked/, label);
+    return r;
+  };
+  const S = ".claude/settings.json";
+  const env = (e) => ({ [S]: { env: e } });
+  const wf = (body) => `on: push\njobs:\n  a:\n    runs-on: ubuntu-latest\n${body}    steps:\n      - run: true\n`;
+
+  green("core and headroom alone", {});
+  // HR-1, settings: any committed base URL or proxy, whatever the host or the provider.
+  for (const url of ["http://127.0.0.1:8787", "http://localhost:8787", "http://[::1]:8787", "https://gateway.example.com"]) red(`ANTHROPIC_BASE_URL=${url}`, "HR-1", env({ ANTHROPIC_BASE_URL: url }));
+  for (const k of ["ANTHROPIC_VERTEX_BASE_URL", "ANTHROPIC_FOUNDRY_BASE_URL", "ANTHROPIC_BEDROCK_BASE_URL", "ANTHROPIC_AWS_BASE_URL", "HTTPS_PROXY", "http_proxy", "ALL_PROXY"]) red(k, "HR-1", env({ [k]: "http://127.0.0.1:8787" }));
+  red("a Headroom session header", "HR-1", env({ ANTHROPIC_CUSTOM_HEADERS: "X-Headroom-Project: demo" }));
+  red("a nested settings file", "HR-1", { "packages/api/.claude/settings.json": { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8787" } } });
+  red("a settings file spelled with capitals, which macOS and Windows open as settings.json", "HR-1", { ".claude/Settings.json": { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8787" } } }, [".claude/Settings.json"]);
+  red("a session-start hook running headroom", "HR-1", { [S]: { hooks: { SessionStart: [{ hooks: [{ type: "command", command: "/usr/local/bin/headroom init hook ensure" }] }] } } });
+  for (const host of ["localhost", "127.1", "[0:0:0:0:0:0:0:1]", "devbox"]) red(`an http hook on ${host}:8787`, "HR-1", { [S]: { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "http", url: `http://${host}:8787/hook` }] }] } } });
+  red("a status line polling the proxy", "HR-1", { [S]: { statusLine: { type: "command", command: "curl -s http://127.0.0.1:8787/stats" } } });
+  red("a key helper going through headroom", "HR-1", { [S]: { apiKeyHelper: "headroom key" } });
+  red("an MCP server in the settings file", "HR-1", { [S]: { mcpServers: { ctx: { type: "http", url: "http://127.0.0.1:8787/mcp" } } } });
+  red("the headroom plugin enabled", "HR-1", { [S]: { enabledPlugins: { "headroom@headroom-marketplace": true } } });
+  red("its marketplace declared", "HR-1", { [S]: { extraKnownMarketplaces: { tools: { source: { source: "github", repo: "headroomlabs-ai/headroom" } } } } });
+  red("a settings file that is not JSON", "HR-1", { [S]: "{ not json\n" });
+  // HR-1, .mcp.json and plugins committed in the repository.
+  red("a project MCP server running headroom", "HR-1", { ".mcp.json": { mcpServers: { compress: { command: "headroom", args: ["mcp", "serve"] } } } });
+  red("a project MCP server on the proxy's port", "HR-1", { "tools/.mcp.json": { mcpServers: { ctx: { type: "http", url: "http://127.0.0.1:8787/mcp" } } } });
+  red(".mcp.json spelled with capitals", "HR-1", { ".MCP.json": { mcpServers: { compress: { command: "headroom", args: ["mcp", "serve"] } } } });
+  red("a plugin of an in-repository marketplace with a headroom hook", "HR-1", { [S]: { enabledPlugins: { "compress@local": true } }, "plugins/compress/hooks/hooks.json": { hooks: { SessionStart: [{ hooks: [{ type: "command", command: "headroom init hook ensure" }] }] } } });
+  // HR-1, symlinks: git lists the link and never what is behind it.
+  red("a .claude directory committed as a symlink", "HR-1", { "tooling/claude/settings.json": { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8787" } } }, [], { "packages/api/.claude": "../../tooling/claude" });
+  red(".mcp.json committed as a symlink", "HR-1", { "tooling/servers.json": { mcpServers: {} } }, [], { ".mcp.json": "tooling/servers.json" });
+  // HR-1, workflows and composite actions.
+  red("a workflow setting the base URL", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      ANTHROPIC_BASE_URL: http://127.0.0.1:8787\n") });
+  red("a workflow naming the headers, even in a comment", "HR-1", { ".github/workflows/agent.yaml": "on: push\n# ANTHROPIC_CUSTOM_HEADERS: X-Headroom-Project\njobs: {}\n" });
+  red("a workflow whose name is not ASCII", "HR-1", { ".github/workflows/déploiement.yml": wf("    env:\n      ANTHROPIC_BASE_URL: http://127.0.0.1:8787\n") });
+  red("a composite action", "HR-1", { ".github/actions/claude/action.yml": "runs:\n  using: composite\n  steps:\n    - run: echo \"ANTHROPIC_BASE_URL=http://127.0.0.1:8787\" >> \"$GITHUB_ENV\"\n      shell: bash\n" });
+  red("a name spelled with a YAML escape", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      \"ANTHROPIC\\x5FBASE_URL\": http://127.0.0.1:8787\n") });
+  red("a name split across an escaped line break", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      ? \"HTTPS_\\\n        PROXY\"\n      : http://127.0.0.1:8787\n") });
+  const r = red("a proxy for a job with no Claude session", "HR-1", { ".github/workflows/ci.yml": wf("    env:\n      HTTPS_PROXY: http://proxy.internal:3128\n") });
+  assert.match(r.stderr, /refused in every workflow and action, whatever the job/);
+  // HR-1, what a second adversarial pass found.
+  red("a name split over three continued lines in a run block", "HR-1", { ".github/workflows/agent.yml": wf("") + "      - run: |\n          echo ANTHROPIC\\\n          _BASE\\\n          _URL=http://x >> \"$GITHUB_ENV\"\n" });
+  red("a name split over three lines of a double-quoted scalar", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      V: \"ANTHROPIC\\\n        _BASE\\\n        _URL=http://x\"\n") });
+  red("a continued name in a CRLF workflow", "HR-1", { ".github/workflows/agent.yml": wf("").replace(/\n/g, "\r\n") + "      - run: echo ANTHROPIC_BASE\\\r\n          _URL=http://x >> \"$GITHUB_ENV\"\r\n" });
+  red("a composite action under a directory holding '='", "HR-1", { "act=x/action.yml": "runs:\n  using: composite\n  steps:\n    - run: echo \"HTTPS_PROXY=http://x\" >> \"$GITHUB_ENV\"\n      shell: bash\n" });
+  red("a name spelled with shell octal escapes", "HR-1", { ".github/workflows/agent.yml": wf("") + "      - run: echo $'ANTHROPIC\\137BASE\\137URL=http://x' >> \"$GITHUB_ENV\"\n" });
+  red("a workflow running headroom wrap", "HR-1", { ".github/workflows/agent.yml": wf("") + "      - run: pipx install 'headroom-ai[proxy]' && headroom wrap claude -- -p fix\n" });
+  red("a port written with a leading zero", "HR-1", { ".mcp.json": { mcpServers: { ctx: { type: "http", url: "http://127.0.0.1:08787/mcp" } } } });
+  red("a settings key the check did not list", "HR-1", { [S]: { fileSuggestion: { type: "command", command: "headroom wrap claude" } } });
+  red("a plugin manifest pointing its hooks at another file", "HR-1", { "plugins/c/.claude-plugin/plugin.json": { name: "c", hooks: "./config/h.json" }, "plugins/c/config/h.json": { hooks: { SessionStart: [{ hooks: [{ type: "command", command: "./bin/start.sh" }] }] } }, "plugins/c/bin/start.sh": "#!/bin/sh\nexec headroom proxy --port 8787\n" });
+  red("a settings file named with U+017F", "HR-1", { ".claude/ſettings.json": { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8787" } } }, [".claude/ſettings.json"]);
+  red(".mcp.json named with U+017F", "HR-1", { ".mcp.jſon": { mcpServers: { compress: { command: "headroom" } } } });
+  red("a submodule mounted at a .claude directory", "HR-1", {}, [], {}, undefined, (dir) => assert.equal(run(dir, "git", ["update-index", "--add", "--cacheinfo", `160000,${"1".repeat(40)},packages/api/.claude`]).status, 0));
+  green("a symlink named hooks outside a plugin, and a CRLF .gitignore", { ".gitignore": read(pristine, ".gitignore").replace(/\n/g, "\r\n"), "lib/x.js": "export {};\n" }, [], { "src/hooks": "../lib" });
+  // HR-1, what a third adversarial pass found: every committed file is read, as committed.
+  const hook = (cmd) => ({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: cmd }] }] } });
+  red("a plugin script under node_modules", "HR-1", { "plugins/p/.claude-plugin/plugin.json": { name: "p" }, "plugins/p/hooks/hooks.json": hook("${CLAUDE_PLUGIN_ROOT}/node_modules/.bin/start"), "plugins/p/node_modules/.bin/start": "#!/bin/sh\nexec headroom proxy\n" }, ["plugins/p/node_modules/.bin/start"]);
+  red("a plugin script holding a NUL byte", "HR-1", { "plugins/p/.claude-plugin/plugin.json": { name: "p" }, "plugins/p/bin/start.sh": "#!/bin/sh\nheadroom proxy\n# \0\n" });
+  red("a JSON file spelling the name with \\u escapes", "HR-1", { "plugins/p/cfg/h.json": "{\"command\": \"\\u0068eadroom proxy\"}\n" });
+  red("a root plugin's monitor", "HR-1", { ".claude-plugin/plugin.json": { name: "root" }, "monitors/monitors.json": { monitors: [{ command: "headroom proxy --port 8787" }] } });
+  red("an .envrc starting the proxy", "HR-1", { ".envrc": "headroom proxy &\n" });
+  red("a Makefile reaching the port without a colon", "HR-1", { Makefile: "probe:\n\tnc 127.0.0.1 8787\n" });
+  red("a hook reaching the port through /dev/tcp", "HR-1", { "scripts/probe.sh": "exec 3<>/dev/tcp/127.0.0.1/8787\n" });
+  red("permissions.allow pre-approving the proxy", "HR-1", { [S]: { permissions: { allow: ["Bash(headroom proxy:*)"] } } });
+  red("an agent whose frontmatter declares a hook", "HR-1", { ".claude/agents/fast.md": "---\nname: fast\nhooks:\n  SessionStart:\n    - command: headroom proxy\n---\n\nAn agent.\n" });
+  red("a workflow saved as UTF-16", "HR-1", {}, [], {}, (dir) => { fs.mkdirSync(path.join(dir, ".github/workflows"), { recursive: true }); fs.writeFileSync(path.join(dir, ".github/workflows/ci.yml"), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(wf("    env:\n      ANTHROPIC_BASE_URL: http://127.0.0.1:8787\n"), "utf16le")])); });
+  red("a name joined across U+2028", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      ? \"ANTHROPIC_BASE\\         _URL\"\n      : http://x\n") });
+  red("what is committed, not what is on the disk", "HR-1", { ".github/workflows/agent.yml": wf("    env:\n      ANTHROPIC_BASE_URL: http://127.0.0.1:8787\n") }, [], {}, undefined, (dir) => write(dir, ".github/workflows/agent.yml", wf("")));
+  {
+    // Installed in a sub-directory, the root's workflows and settings would go unchecked.
+    const repo = tmp();
+    write(repo, ".github/workflows/agent.yml", wf("    env:\n      ANTHROPIC_BASE_URL: http://127.0.0.1:8787\n"));
+    fs.cpSync(pristine, path.join(repo, "apps/tool"), { recursive: true });
+    assert.equal(run(repo, "git", ["init", "-q", "-b", "main"]).status, 0);
+    assert.equal(run(repo, "git", ["add", "-A"]).status, 0);
+    const r3 = run(path.join(repo, "apps/tool"), "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "" } });
+    assert.equal(r3.status, 1, output(r3));
+    assert.match(r3.stderr, /FAIL\s+HR-1: this project is apps\/tool\/ inside a larger repository/);
+  }
+  green("Markdown prose about Headroom, a lockfile hash holding 8787, a deny rule", { "docs/notes.md": "We run Headroom on our laptops: see docs/conventions/headroom.md.\n", "package-lock.json": "{\"integrity\": \"sha512-ab8787cd\"}\n", [S]: { permissions: { deny: ["Bash(headroom:*)"], ask: ["Bash(curl http://127.0.0.1:8787/*)"] } } });
+  // HR-1, what a fourth adversarial pass found (each run live against Claude Code with a stand-in headroom).
+  const bang = "!" + "`";
+  red("a command whose body runs dynamic shell context", "HR-1", { ".claude/commands/tidy.md": "---\ndescription: Tidy\nallowed-tools: Bash\n---\nStatus: " + bang + "headroom proxy`\n" });
+  red("a skill whose body holds a fenced block that runs", "HR-1", { ".claude/skills/tidy/SKILL.md": "---\nname: tidy\ndescription: Use for every task\n---\n```!\nheadroom proxy &\n```\n" });
+  red("a frontmatter closed by three dashes and a space", "HR-1", { ".claude/agents/helper.md": "---\nname: helper\nhooks:\n  PreToolUse:\n    - command: headroom proxy\n--- \nAn agent.\n" });
+  red("a frontmatter that is never closed", "HR-1", { ".claude/agents/open.md": "---\nname: open\nhooks:\n  PreToolUse:\n    - command: headroom proxy\n" });
+  red("a symlink whose target is the headroom binary", "HR-1", { [S]: hook("\"$CLAUDE_PROJECT_DIR\"/tools/compress proxy") }, [], { "tools/compress": "/usr/local/bin/headroom" });
+  red("the port as a call argument", "HR-1", { ".claude/hooks/warm.js": "require(\"net\").connect(8787, \"127.0.0.1\");\n" });
+  red("the port at the start of a line", "HR-1", { ".claude/hooks/probe.sh": "args=(\n127.0.0.1\n8787\n)\nexec nc -z \"${args[@]}\"\n" });
+  green("a Markdown body that only talks about Headroom, a version and a port inside a longer number", { "docs/howto.md": "---\ntitle: How we work\n---\nWe start Headroom by hand; `npm i lib@1.8787.0`.\n", "config/ports.json": "{\"dev\": 18787, \"build\": \"v1.8787\"}\n" });
+  // HR-2: one machine's files, force-added past .gitignore.
+  for (const rel of [".claude/settings.local.json", ".claude/.headroom_wrap_marker.json", ".headroom/memory.db", "services/web/.headroom/memory.db", ".Headroom/memory.db", "CLAUDE.local.md", "docs/CLAUDE.local.md", "packages/api/.claude/.headroom_wrap_owners.json"]) red(`${rel} tracked`, "HR-2", { [rel]: "{}\n" }, [rel]);
+  {
+    const without = read(pristine, ".gitignore").replace(/^\.headroom\/$/m, "");
+    const r2 = red("the .gitignore block removed, even when a local exclude file still lists .headroom/", "HR-2", { ".gitignore": without }, [], {}, (dir) => write(dir, ".git/info/exclude", ".headroom/\n"));
+    assert.match(r2.stderr, /HR-2: \.gitignore no longer holds the claude-template:headroom block/);
+  }
+  // HR-3: a learn block in any tracked file, the convention page included.
+  const block = "<!-- headroom:learn:start -->\n- prefer rg\n<!-- headroom:learn:end -->\n";
+  red("a learn block in CLAUDE.md", "HR-3", { "CLAUDE.md": block });
+  red("a learn block in another tracked file", "HR-3", { "docs/AGENTS.md": block });
+  red("a learn block appended to the convention page", "HR-3", { "docs/conventions/headroom.md": `${read(pristine, "docs/conventions/headroom.md")}\n${block}` });
+  // What stays green.
+  green("ENABLE_TOOL_SEARCH, NO_PROXY and a deny rule naming headroom", { [S]: { env: { ENABLE_TOOL_SEARCH: "true", NO_PROXY: "localhost" }, permissions: { deny: ["Bash(headroom:*)"] } } });
+  green("an unrelated MCP server on another port", { ".mcp.json": { mcpServers: { docs: { type: "http", url: "http://localhost:18787/mcp" } } } });
+  green("a learn block in the ignored CLAUDE.local.md", { "CLAUDE.local.md": block });
+  green("a workflow naming the API key and NO_PROXY, with a shell continuation and a colour escape", { ".github/workflows/ci.yml": wf("    env:\n      ANTHROPIC_API_KEY: ${{ secrets.KEY }}\n      NO_PROXY: localhost\n") + "      - run: |\n          printf '\\x1b[32mok\\x1b[0m\\n'\n          curl -s \\\n            https://example.com\n" });
 });

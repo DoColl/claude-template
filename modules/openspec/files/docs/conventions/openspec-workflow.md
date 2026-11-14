@@ -30,9 +30,26 @@ OpenSpec separates two things that plans mix. The **specs** describe what the sy
 - **Sync, then archive.** Archiving moves the change to `openspec/changes/archive/`. It offers to sync first, and lets you decline (`openspec archive --skip-specs` on the command line): the change is then filed away with its deltas never applied, and the specs describe the system as it was. Skip the sync only for a change that has no delta — tooling, infrastructure, documentation — and declare it with `skip_specs: true` in the change's `.openspec.yaml`: without that line `openspec validate` rejects a change with no delta, so OS-1 stays red while it is in flight. With it, the change has nothing to sync and archives without `--skip-specs`.
 - **`design.md` is a draft.** When a choice in it is durable — a technology, a pattern, a trade-off — it becomes a numbered ADR in `docs/adr/`, and `design.md` points at it.
 - **Generated files**: `.claude/commands/opsx/**` and `.claude/skills/openspec-*/**` come from `openspec init` and `openspec update`. They are committed so that a clone has the commands; they are never edited by hand: `openspec update` rewrites them once they come from another CLI version or the profile changed, `openspec update --force` at any time, and either silently undoes the edit.
-- **With the agents module**: a task group in `tasks.md` is the unit handed to `implementer`; add the validation command to the Bash guard's verification config so `verifier` can run it.
+- **With the agents module**: a task group in `tasks.md` is the unit handed to `implementer`. `verifier` validates the OpenSpec files by running the gate (`scripts/security-checks.sh --offline`), where OS-1 runs `openspec validate` with telemetry off. Do not add the command to the Bash guard's verification config: that config lists nothing that reaches the network, the bare command does (§ The CLI and the network), and the guard accepts no environment prefix that would turn it off.
 - **Behavioural conventions** in `docs/conventions/` are the natural source for the first capability specs. When a spec absorbs one, the convention file can go — after everything that names it has been repointed: its `CLAUDE.md` bullet (CM-2 fails on a path that no longer exists), its row in `docs/conventions/README.md`, and any other list of the project that holds the path (a table of files merged by hand, a guard, a review skill). Where the page is referenced from places you would rather not touch, keep it as a short page that states the rule in one line and points at the spec.
 - **Pin the CLI.** Install a fixed version, in CI as on laptops, and bump it deliberately: the generated commands change with it.
+
+### The CLI and the network
+
+At 1.10.0 every command sends a usage event — the command's name and the CLI's version — to the tool's telemetry endpoint, unless `OPENSPEC_TELEMETRY=0` or `DO_NOT_TRACK=1` is set, `CI` holds a true value, or the CLI's global configuration says `telemetry.enabled false`. `openspec update` also asks the npm registry for a newer version, under the same switches (and `OPENSPEC_NO_UPDATE_CHECK`). OS-1 runs `openspec validate` with `OPENSPEC_TELEMETRY=0`. To keep a laptop quiet, set one of the variables in the shell's profile or the setting in the CLI's configuration: both live outside the repository, and the kit cannot check them.
+
+### What the generated files pre-approve
+
+Each of the twelve generated files carries `allowed-tools: Bash(openspec:*)`, a constant of the CLI at 1.10.0. While one of them is active, a session runs **any** `openspec` subcommand without a permission prompt, not only the ones its workflow uses. Among them:
+
+- `feedback` opens an issue on the tool's public tracker with `gh`, under the account `gh` is signed in with (without `gh`, it prints a link);
+- `config` writes the CLI's global configuration;
+- `completion install` edits the shell's start-up file;
+- `init` and `update` rewrite the files under `.claude/` that the CLI generates.
+
+A deny rule written for one subcommand, `Bash(openspec feedback:*)`, matches the start of the command, and a global option placed before the subcommand changes that start (`openspec --no-color feedback …`). Editing the generated files does not either: `openspec update --force` puts the line back. The kit leaves this as it is, and a project takes the module knowing it: a session steered by what it read could post to a public tracker in one command. Narrowing it would take a `PreToolUse` hook on Bash that asks for every `openspec` command outside the shapes the workflows use — not shipped.
+
+Not checked: whether Claude Code applies the pre-approval when a session loads one of the skills by itself, without a typed command.
 
 ## Checks
 
@@ -40,7 +57,12 @@ OpenSpec separates two things that plans mix. The **specs** describe what the sy
 
 Neither the sync nor the archive has a mechanical check. A change left open after its work merged shows up as a directory under `openspec/changes/` that nobody is working on; a change archived without its sync shows up nowhere, except as specs that no longer match the code.
 
+## Sources
+
+- [Fission-AI/OpenSpec](https://github.com/Fission-AI/OpenSpec), MIT licence: the published npm package `@fission-ai/openspec` 1.10.0, read on 2026-11-13 without being run, for what § The CLI and the network and § What the generated files pre-approve say — the telemetry and update-check switches (`dist/telemetry/index.js`, `dist/core/version-check.js`), the `allowed-tools` value of the generated commands and skills (`dist/core/shared/allowed-tools.js`), and what `feedback`, `config` and `completion install` do. No text copied.
+
 ## History
 
 - Installed with the kit.
 - After the first installation in a project, with CLI 1.10.0: the page named four of the six generated commands, said that archiving merges the deltas (it can be done without) and that `openspec update` regenerates the generated files (only once they are out of date, or with `--force`), asked for an absorbed convention page to be deleted without a word on what else names it, and said the validation command had never been run on an empty project. All corrected from what was observed.
+- After a security review of an installed project: the next step that added `openspec validate` to the verifier's config would have put a call to the CLI's telemetry in that list; the verifier runs the gate instead. The pre-approval the generated files carry is stated. Both read in the CLI's package (§ Sources), not observed in a session.

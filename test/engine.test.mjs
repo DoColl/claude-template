@@ -1,5 +1,6 @@
-// node --test test/*.test.mjs — the installer's pure parts and the static rules every module must satisfy
-// (docs/module-authoring.md). The end-to-end installs are in install.test.mjs.
+// node --test test/*.test.mjs — the installer's pure parts, the static rules every module must satisfy
+// (docs/module-authoring.md) and the kit's changelog fragments. The end-to-end installs, and a release cut in a
+// copy of the kit, are in install.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -8,6 +9,8 @@ import path from "node:path";
 import { loadKit, resolveSelection, listModules, PHASES } from "../lib/kit.mjs";
 import { walk } from "../lib/install.mjs";
 import { render, tokensIn, insertAtSlot, slotsIn, appendBlock } from "../lib/render.mjs";
+import { parseEntries } from "../lib/changelog.mjs";
+import { LEVELS, parseFragment, readFragments, highestLevel, nextVersion, composeEntry, insertEntry, setVersion } from "../lib/release.mjs";
 
 const kit = loadKit();
 const read = (...p) => fs.readFileSync(path.join(...p), "utf8");
@@ -264,6 +267,16 @@ test("the docs paths agree across the shipped workflows, and CI re-includes only
   for (const p of back) assert.match(p.replaceAll("**/", "sub/").replaceAll("**", "agents/x.md"), gate, `${p} is re-included by CI, so the merge gate must hold it`);
 });
 
+// What the kit ships under scripts/ is what its guards and workflows run or read: the gate's verdict in CI, a
+// scheduled job with a write token, the pre-push hook. A pull request that changes one is judged by a CI that
+// runs the changed file, so the merge gate holds every one of them, whichever module ships it — the next one too.
+test("the merge gate holds every file a module ships under scripts/", () => {
+  const gate = new RegExp(/^  CLAUDE_GATE_RE: '(.*)'$/m.exec(read(kit.modules.get("auto-merge").dir, "files/.github/workflows/auto-merge.yml"))[1], "i");
+  const shipped = [...kit.modules.values()].flatMap((mod) => walk(path.join(mod.dir, "files")).filter((rel) => rel.startsWith("scripts/")).map((rel) => `${mod.id}: ${rel}`));
+  assert.ok(shipped.length >= 10, "the scan found the kit's scripts");
+  assert.deepEqual(shipped.filter((entry) => !gate.test(entry.split(": ")[1])), [], "add these paths to CLAUDE_GATE_RE in auto-merge.yml, with AM-1 rows, and to DEFAULT_GATE_RE in weekly-digest.mjs");
+});
+
 // Without auto-merge.yml the digest falls back to its own copy of the kit's gate pattern: one list, two files.
 test("the weekly digest's built-in gate pattern is the one auto-merge ships", () => {
   const shipped = /^  CLAUDE_GATE_RE: '(.*)'$/m.exec(read(kit.modules.get("auto-merge").dir, "files/.github/workflows/auto-merge.yml"))[1];
@@ -295,4 +308,112 @@ test("every post-install line and summary is one line of plain text", () => {
     assert.ok(!m.summary.includes("\n") && m.summary.length <= 320, `${m.id}: summary`);
     for (const line of m.postInstall ?? []) assert.ok(line.trim() && !line.includes("\n"), `${m.id}: postInstall`);
   }
+});
+
+// ── the kit's releases (bin/release.mjs) ────────────────────────────────────
+// A pull request adds changes/<slug>.md; a release turns the fragments into the next version and its entry.
+test("every changelog fragment waiting in changes/ is well formed, and together they make the next entry", () => {
+  let fragments;
+  assert.doesNotThrow(() => { fragments = readFragments(kit.root); }, "changes/<slug>.md: `bump: patch|minor|major`, a blank line, the lines of the entry, then a paragraph that starts with `By hand:` (the top of CHANGELOG.md)");
+  for (const f of fragments) {
+    assert.ok(LEVELS.includes(f.level), `${f.file}: level`);
+    assert.match(f.byHand, /^By hand: \S/, `${f.file}: its "By hand" part`);
+  }
+  if (!fragments.length) return;
+  const version = nextVersion(kit.version, highestLevel(fragments));
+  const changelog = insertEntry(read(kit.root, "CHANGELOG.md"), composeEntry(version, fragments), kit.version);
+  assert.equal(parseEntries(changelog)[0].version, version, "the release can put them on top of CHANGELOG.md today");
+});
+
+test("parseFragment reads a level, the lines of the entry and the By hand part", () => {
+  assert.deepEqual(parseFragment("bump: minor\n\nIntro.\n\n- One.\n- Two.\n\nBy hand: nothing. To take the module: add it.\n"),
+    { level: "minor", body: "Intro.\n\n- One.\n- Two.", byHand: "By hand: nothing. To take the module: add it.", nothing: true, step: "", remark: "To take the module: add it." });
+  const step = parseFragment("bump: patch\r\n\r\n- One.\r\n\r\nBy hand: delete the line\r\nfrom the skeleton.\r\n\r\nThen check it.\r\n");
+  assert.deepEqual([step.level, step.nothing, step.step], ["patch", false, "delete the line\nfrom the skeleton.\n\nThen check it."], "CRLF reads as LF, and the part runs to the end of the file");
+  assert.equal(parseFragment("bump: major\n\n```bash\n# a comment, not a heading\n```\n\nBy hand: nothing.\n").level, "major", "a # line inside a code fence is code");
+});
+
+test("parseFragment refuses what a release could not turn into an entry", () => {
+  const bad = {
+    "": /first line/,
+    "bump: huge\n\n- x\n\nBy hand: nothing.\n": /first line/,
+    "Bump: patch\n\n- x\n\nBy hand: nothing.\n": /first line/,
+    "- x\n\nbump: patch\n\nBy hand: nothing.\n": /first line/,
+    "bump: patch\n- x\n\nBy hand: nothing.\n": /a blank line follows the bump line/,
+    "bump: patch\n\n- x\n": /last paragraph starts with "By hand:"/,
+    "bump: patch\n\n- x\n\nBy hand, for an installed project: do it.\n": /starts with "By hand: " and a sentence on the same line/,
+    "bump: patch\n\n- x\n\nBy hand:\n\n- do it.\n": /starts with "By hand: " and a sentence on the same line/,
+    "bump: patch\n\n- x\nBy hand: nothing.\n": /a blank line comes before/,
+    "bump: patch\n\nBy hand: nothing.\n": /the lines of the entry go between/,
+    "bump: patch\n\n- x\n\nBy hand: nothing.\n\nBy hand: again.\n": /lines 5, 7 start with "By hand"/,
+    "bump: patch\n\nBy hand is how it is done.\n\nBy hand: nothing.\n": /lines 3, 5 start with "By hand"/,
+    "bump: patch\n\n## 1.2.3\n\n- x\n\nBy hand: nothing.\n": /line 3: no heading/,
+    "bump: patch\n\n# Notes\n\n- x\n\nBy hand: nothing.\n": /line 3: no heading/,
+    "bump: patch\n\n```\n## 1.2.3\n```\n\nBy hand: nothing.\n": /line 4: no heading/, // CHANGELOG.md is split there, fence or not
+  };
+  for (const [text, why] of Object.entries(bad)) assert.throws(() => parseFragment(text), why, JSON.stringify(text));
+});
+
+test("readFragments: every file of changes/ is a fragment, in the order of the entry", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "harness-changes-"));
+  assert.deepEqual(readFragments(root), [], "no changes/ directory: nothing waits");
+  const put = (name, text) => { fs.mkdirSync(path.join(root, "changes"), { recursive: true }); fs.writeFileSync(path.join(root, "changes", name), text); };
+  const fragment = (level) => `bump: ${level}\n\n- A change.\n\nBy hand: nothing.\n`;
+  put("c-fix.md", fragment("patch")); put("a-fix.md", fragment("patch")); put("b-module.md", fragment("major")); put(".DS_Store", "");
+  assert.deepEqual(readFragments(root).map((f) => [f.file, f.level]), [["changes/b-module.md", "major"], ["changes/a-fix.md", "patch"], ["changes/c-fix.md", "patch"]], "the highest level first, then by name");
+  put("Notes.txt", "x"); put("d-bad.md", "bump: later\n"); fs.mkdirSync(path.join(root, "changes", "sub"));
+  assert.throws(() => readFragments(root), (e) => ["changes/Notes.txt: not a fragment", "changes/d-bad.md: the first line", "changes/sub: not a fragment"].every((s) => e.message.includes(s)), "every problem, one line each");
+});
+
+test("the next version is the highest level among the fragments", () => {
+  assert.deepEqual(LEVELS.map((level) => nextVersion("0.8.3", level)), ["0.8.4", "0.9.0", "1.0.0"]);
+  assert.equal(nextVersion("1.9.9", "minor"), "1.10.0");
+  assert.throws(() => nextVersion("1.0", "patch"));
+  assert.throws(() => nextVersion("1.0.0", "huge"));
+  assert.equal(highestLevel([{ level: "patch" }, { level: "minor" }, { level: "patch" }]), "minor");
+  assert.equal(highestLevel([{ level: "major" }, { level: "minor" }]), "major");
+  assert.equal(highestLevel([{ level: "patch" }]), "patch");
+});
+
+// What `update` shows comes from the entry: the steps read back as steps, and a release with none lists none.
+test("composeEntry: the fragments' lines, then one By hand part that lib/changelog.mjs reads back", () => {
+  const f = (level, body, byHand) => parseFragment(`bump: ${level}\n\n${body}\n\n${byHand}\n`);
+  const module = f("minor", "- New module.", "By hand: nothing. To take the module: `add . --modules x`.");
+  const fix = f("patch", "- A fix.\n- Another.", "By hand: nothing.");
+  const intro = f("patch", "Installer only.\n\n- A change.", "By hand: nothing.");
+  const remark = f("patch", "- A third.", "By hand: nothing. A remark.");
+  const skeleton = f("patch", "- Skeleton change.", "By hand: add the bullet\nto the skeleton.");
+  const rename = f("patch", "- A rename.", "By hand: rename the file.");
+  const cases = [
+    [[fix], "- A fix.\n- Another.\n\nBy hand: nothing.", ""],
+    [[module, fix], "- New module.\n- A fix.\n- Another.\n\nBy hand: nothing. To take the module: `add . --modules x`.", ""],
+    [[fix, intro], "- A fix.\n- Another.\n\nInstaller only.\n\n- A change.\n\nBy hand: nothing.", ""],
+    [[module, remark], "- New module.\n- A third.\n\nBy hand: nothing. To take the module: `add . --modules x`.\n\nA remark.", ""],
+    [[module, skeleton], "- New module.\n- Skeleton change.\n\nBy hand: add the bullet\nto the skeleton.\n\nTo take the module: `add . --modules x`.", "By hand: add the bullet\nto the skeleton.\n\nTo take the module: `add . --modules x`."],
+    [[skeleton, rename], "- Skeleton change.\n- A rename.\n\nBy hand:\n\n- add the bullet\n  to the skeleton.\n- rename the file.", "By hand:\n\n- add the bullet\n  to the skeleton.\n- rename the file."],
+  ];
+  for (const [fragments, text, byHand] of cases) {
+    const entry = composeEntry("1.0.0", fragments);
+    assert.equal(entry, `## 1.0.0\n\n${text}\n`);
+    assert.deepEqual(parseEntries(`# Changelog\n\n${entry}`), [{ version: "1.0.0", byHand }], `read back as one entry:\n${entry}`);
+    assert.equal((entry.match(/^By hand\b/gm) ?? []).length, 1, "one line starts with By hand");
+  }
+  assert.throws(() => composeEntry("1.0.0", []));
+});
+
+test("insertEntry puts the entry on top, under the header, and refuses a changelog out of step", () => {
+  const log = "# Changelog\n\nHeader.\n\n## 0.8.0\n\n- Old.\n\nBy hand: nothing.\n";
+  const entry = "## 0.9.0\n\n- New.\n\nBy hand: nothing.\n";
+  assert.equal(insertEntry(log, entry, "0.8.0"), "# Changelog\n\nHeader.\n\n## 0.9.0\n\n- New.\n\nBy hand: nothing.\n\n## 0.8.0\n\n- Old.\n\nBy hand: nothing.\n");
+  assert.throws(() => insertEntry(log, entry, "0.7.0"), /starts with 0\.8\.0 and kit\.json says 0\.7\.0/);
+  assert.throws(() => insertEntry("# Changelog\n", entry, "0.8.0"), /no entry yet/);
+  assert.throws(() => insertEntry(log, "## 0.9.0\n\n- New.\n", "0.8.0"), /would not read back/, "an entry without its By hand part");
+  assert.throws(() => insertEntry(log, "## 0.9.0\n\nBy hand: nothing.\n\nBy hand: again.\n", "0.8.0"), /would not read back/);
+});
+
+test("setVersion changes the version alone and keeps the file's layout", () => {
+  const pkg = '{\n  "name": "x",\n  "version": "0.8.0",\n  "bin": { "harness": "bin/harness.mjs" }\n}\n';
+  assert.equal(setVersion(pkg, "0.8.0", "0.9.0", "package.json"), pkg.replace("0.8.0", "0.9.0"));
+  assert.throws(() => setVersion(pkg, "0.7.0", "0.9.0", "package.json"), /package\.json says version 0\.8\.0/);
+  assert.throws(() => setVersion('{ "engines": { "version": "0.8.0" }, "version": "0.8.0" }', "0.8.0", "0.9.0", "x.json"), /could not be changed alone/, "the first match is not the top-level key");
 });

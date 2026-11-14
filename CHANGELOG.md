@@ -2,16 +2,27 @@
 
 What changed in the kit, newest first. A release is a commit of `main` tagged `v<version>` (from 0.3.1 on, by `.github/workflows/release.yml`; earlier versions carry no tag); `kit.json` carries the same version, and a project's `.claude/harness.json` records the version and the commit it was installed from.
 
+Entries are no longer written into this file directly. A pull request that changes the kit adds a fragment, `changes/<slug>.md` (the slug in lower case, digits and hyphens), and leaves this file and the version alone:
+
+```markdown
+bump: minor
+
+- What changed, as the entry will read.
+
+By hand: nothing.
+```
+
+The first line is the level, `patch`, `minor` or `major`. After a blank line come the lines of the entry, then, last, a paragraph that starts with `By hand:` and says on the same line what an installed project does beyond `update`: `By hand: nothing.` when there is nothing, which may go on with a remark. No other line starts with "By hand", and a fragment has no heading. It speaks of its own change only, never of the release as a whole: it lands in one entry beside the others. `node bin/release.mjs` cuts a release, in a pull request of its own: the highest level among the fragments gives the next version, written to `kit.json` and `package.json`; the entry goes on top of this file, with the fragments' lines (the highest level first) and one "By hand" part, which holds the steps of the fragments that have one, then the remarks of the others; the fragments are removed, and `node bin/harness.mjs update .` records the version in the kit's own installation. The entries up to 0.8.0 were written directly.
+
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
-## 0.9.0
+## 0.8.1
 
-- `eco-design` audits every pull request in CI. `eco-design.yml` fetches green-claude at the commit pinned in a new seed, `scripts/eco-design.config.json`, and `scripts/eco-design-audit.mjs` runs its audit on the files the pull request changes, as they were and as they are: a finding the pull request adds becomes an annotation and a row of the job summary, one the file already had does not. A manual run lists every finding of the branch. Advisory until the project sets `fail_on`; red when the audit could not run. The guard ED-1..3 pins the configuration, runs the script's tests and keeps the workflow at `contents: read` with no secret.
-- green-claude's detector of broken local links builds a shell command from the links of the audited file. The audit runs from a copy without it, or any awk detector that can run a command, and names the rule left out.
-- The module no longer requires `security-review`: the plugin in sessions is a separate decision, and its page says not to wire the plugin's hooks as they stand.
-- The kit's own repository installs it.
+- How the kit itself is released; no module changes with it. A pull request no longer writes the version or its `CHANGELOG.md` entry: it adds a fragment, `changes/<slug>.md`, with its level (`patch`, `minor` or `major`), the lines of its entry and its "By hand" part, so that pull requests written in parallel stop conflicting on the same lines. The format is at the top of `CHANGELOG.md`.
+- `node bin/release.mjs` cuts a release, in a pull request of its own: the highest level among the fragments gives the next version, written to `kit.json` and `package.json`; the entry goes on top of `CHANGELOG.md` with one "By hand" part; the fragments are removed and `update .` records the version in the kit's own installation. `--dry-run` writes nothing. `.github/workflows/release.yml` still tags the merge.
+- The tests check every fragment, and the kit's CI fails a pull request that changes `modules/`, `lib/` or `bin/` without adding one. A change to `CHANGELOG.md` or `changes/` now starts that CI.
 
-By hand, for a project that installed `eco-design` at 0.8.0: `update` brings the workflow, the script and its test, the guard, the page and the new configuration seed. Replace the **Eco-design** bullet of `CLAUDE.md` and the `eco-design.md` row of `docs/conventions/README.md` with the module's fragments (`fragments/CLAUDE.md/conventions.frag`, `fragments/docs/conventions/README.md/conventions-index.frag`), then do the live check of `docs/conventions/eco-design.md` on the first pull request.
+By hand: nothing.
 
 ## 0.8.0
 

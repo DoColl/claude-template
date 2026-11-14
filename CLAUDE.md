@@ -8,9 +8,9 @@ Guidance for Claude Code when working **on the kit itself**. (The `CLAUDE.md` a 
 
 `claude-template` is a modular Claude Code harness: instruction files, sub-agents, hooks, a local gate and CI workflows, installed into a project module by module by `bin/harness.mjs`. Read `README.md` for the idea and `docs/module-authoring.md` for the contract every module follows.
 
-- `bin/harness.mjs` — the CLI (`list`, `init`, `add`, `status`, `update`). `lib/` — its logic: `kit.mjs` (manifests, dependency resolution), `render.mjs` (placeholders, slots, appended blocks), `install.mjs` (plan, apply, manifest).
+- `bin/harness.mjs` — the CLI (`list`, `init`, `add`, `status`, `update`). `bin/release.mjs` — cuts a release from the changelog fragments in `changes/`. `lib/` — their logic: `kit.mjs` (manifests, dependency resolution), `render.mjs` (placeholders, slots, appended blocks), `install.mjs` (plan, apply, manifest), `release.mjs` (fragments, next version, changelog entry).
 - `modules/<id>/` — `module.json`, `files/` (copied as is), `fragments/` (inserted at slots of seed files), `append/`.
-- `test/` — `engine.test.mjs` (pure functions and the static rules on every module), `install.test.mjs` (installs every module into a scratch project and runs its gate).
+- `test/` — `engine.test.mjs` (pure functions, the static rules on every module, the changelog fragments), `install.test.mjs` (installs every module into a scratch project and runs its gate; cuts a release in a copy of the kit).
 - `skills/harness-init/` — a skill to run the installer from a Claude Code session.
 
 ## Commands
@@ -20,6 +20,7 @@ node --test test/*.test.mjs                     # everything; needs git and bash
 node bin/harness.mjs list             # the modules
 node bin/harness.mjs init /tmp/try --modules <id>   # then, in /tmp/try: git init -q && git add -A && ./scripts/security-checks.sh --offline
 pipx run --spec 'zizmor==1.31.1' zizmor --offline <rendered project>/.github/workflows/
+node bin/release.mjs --dry-run        # the next release, from changes/; without --dry-run it writes it
 ```
 
 ## Rules
@@ -33,7 +34,8 @@ pipx run --spec 'zizmor==1.31.1' zizmor --offline <rendered project>/.github/wor
 - **Credit public sources.** A piece drawn from a public source (a skill collection, a vendor's documentation or code) names it on its convention page — repository or URL, licence, the commit or date read, what was taken — and in `README.md` § Sources and credits. Copied text keeps its licence notice.
 - **Say what was exercised.** A module's convention page states whether the piece has run in production, is unit-tested only, or has never run live. Do not upgrade that statement without having run it.
 - **Security-sensitive pieces** — the Bash allowlist (`modules/agents/files/.claude/hooks/`), `auto-merge`, `claude-ci`, `claude-review`: when a generalisation would loosen a condition, keep the stricter form. Every allowlist change comes with rows in its test table (the allow, and the nearby form that must stay blocked).
-- The installer has no dependency beyond Node (>= 20). Keep it that way.
+- **A changelog fragment, never a version.** A pull request adds `changes/<slug>.md`: `bump: patch|minor|major`, a blank line, the lines of its entry, then a paragraph that starts with `By hand:` (`By hand: nothing.` when there is nothing to do). It leaves `kit.json`, `package.json`, the version in `.claude/harness.json` and `CHANGELOG.md` alone; CI requires a fragment when `modules/`, `lib/` or `bin/` change. A release is `node bin/release.mjs` in a pull request of its own (`README.md` § Working on the kit).
+- The installer and the release command have no dependency beyond Node (>= 20). Keep it that way.
 
 ## The kit's own harness
 
@@ -43,7 +45,7 @@ The kit installs part of itself at its root (`.claude/harness.json`): `core`, `c
 - **The gate**: `./scripts/security-checks.sh` runs every guard in `scripts/guards.d/`, here and in CI. → `docs/conventions/local-gate.md`
 - **This file is budgeted**: what a session loads of it stays under its `harness:budget` line (CM-1), and every `docs/` path it names exists (CM-2). A rule about some files only is a path-scoped file in `.claude/rules/`, as the GitHub Actions and Dependabot rules are. → `docs/conventions/claude-md.md`
 - **Weekly digest**: `weekly-digest.yml` opens one `weekly-digest` issue a week, assigned to the repository owner, listing what waits on a human. Every `schedule:` workflow is watched automatically; it copies **titles only**, never PR or issue bodies. A dated follow-up is an issue labelled `deadline` with a `Due: YYYY-MM-DD` line, never a Markdown list. → `docs/conventions/weekly-digest.md`
-- **Parallel sessions**: several sessions work here. Run `./scripts/parallel-sessions.sh` when you start and before you push. Before a pull request, rebase on `origin/main` (merge it if the branch is pushed), then renumber the version and the changelog entry: edit them last. When another branch holds the same files, the user orders the merges. → `docs/conventions/parallel-sessions.md`
+- **Parallel sessions**: several sessions work here. Run `./scripts/parallel-sessions.sh` when you start and before you push. Before a pull request, rebase on `origin/main` (merge it if the branch is pushed). When another branch holds the same files, the user orders the merges. → `docs/conventions/parallel-sessions.md`
 - **Eco-design**: `eco-design.yml` audits every pull request with green-claude at the commit pinned in `scripts/eco-design.config.json` (ED-1..3). A finding is a candidate: fix it, or record it in `.green-claude/decisions.md` with its reason, reviewed like a derogation. The rules never outrank this file, security or the request. → `docs/conventions/eco-design.md`
 <!-- harness:rows conventions -->
 

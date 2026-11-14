@@ -6,7 +6,7 @@ Files: `.github/workflows/ready-on-green.yml`, `scripts/guards.d/41-ready-on-gre
 
 ## Status
 
-**Run once live, and it failed; the fix has not run yet.** On the first draft pull request after the workflow reached a default branch, the job took the green run and skipped the cancelled one, found the pull request and its head — and GitHub refused the call: `markPullRequestReadyForReview` is not accessible to a job token that holds `pull-requests: write` alone. `auto-merge.yml`, which lifts drafts, holds `contents: write` as well; the job now holds both. That it is the missing permission is inferred from that comparison, not yet seen: the next draft pull request is the test.
+**Run live on the kit's own repository: it failed once, then the fix worked.** On the first draft pull request after the workflow reached a default branch, the job took the green run and skipped the cancelled one, found the pull request and its head — and GitHub refused the call: `markPullRequestReadyForReview` is not accessible to a job token that holds `pull-requests: write` alone. `auto-merge.yml`, which lifts drafts, holds `contents: write` as well; the job now holds both. On 2026-11-13, with both, the run that a green CI run started found the draft pull request whose head was the commit CI had validated and marked it ready for review. Not exercised: a head that moved after CI, a branch written by a CI Claude session, two open pull requests on one commit.
 
 ## Why
 
@@ -44,3 +44,4 @@ GitHub reads a `workflow_run` workflow from the default branch, whatever the pul
 
 - Written for the kit from the draft-lifting steps of `auto-merge.yml`, for repositories that do not install that module.
 - First live run: the call was refused with `pull-requests: write` alone. `contents: write` added, RG-2 changed with it.
+- Second live run, with both permissions: the draft was lifted.
