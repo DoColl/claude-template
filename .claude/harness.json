@@ -181,7 +181,7 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "b275d8c43eec794686fe28d0e27b4153dcfdd4dd7f9a15083f57cd4704c048c2"
+      "sha256": "ba37953718d6a88b19602099e1cdc81003b371ce651c4ac26cf671e672fd24d1"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",
@@ -193,7 +193,7 @@
     },
     "docs/conventions/eco-design.md": {
       "module": "eco-design",
-      "sha256": "315a02d4381e2a4902296244352619120c81951b4efa6d6dc6ae5a3c37989ecb"
+      "sha256": "4aef2994f303f33bb0bf971e55e41c6b4d5805f02d5b617291b7a750a3e41b36"
     },
     "scripts/eco-design-audit.mjs": {
       "module": "eco-design",
@@ -207,7 +207,7 @@
       "module": "eco-design",
       "seed": true
     },
-    "scripts/guards.d/48-eco-design.sh": {
+    "scripts/guards.d/49-eco-design.sh": {
       "module": "eco-design",
       "sha256": "87c70df1844980c458c69d5afe968a3dbb40be18e3eeeb41966fd8ae69b4d5f4"
     }

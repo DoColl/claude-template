@@ -100,7 +100,7 @@ If one of these does not hold, this page is wrong for the version in use: correc
 
 ## Checks
 
-`scripts/guards.d/48-eco-design.sh`:
+`scripts/guards.d/49-eco-design.sh`:
 
 - **ED-1** — `scripts/eco-design.config.json` names a repository (`owner/name`), a full 40-character commit and a `fail_on` among none, low, medium and high.
 - **ED-2** — `node --test scripts/eco-design-audit.test.mjs` passes.
