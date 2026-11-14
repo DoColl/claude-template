@@ -1,0 +1,9 @@
+bump: minor
+
+- `eco-design` audits every pull request in CI. `eco-design.yml` fetches green-claude at the commit pinned in a new seed, `scripts/eco-design.config.json`, and `scripts/eco-design-audit.mjs` runs its audit on the files the pull request changes, as they were and as they are: a finding the pull request adds becomes an annotation and a row of the job summary, one the file already had does not. A manual run lists every finding of the branch. Advisory until the project sets `fail_on`; red when the audit could not run. The guard ED-1..3 pins the configuration, runs the script's tests and keeps the workflow at `contents: read` with no secret.
+- green-claude's detector of broken local links builds a shell command from the links of the audited file. The audit runs from a copy without it, or any awk detector that can run a command, and names the rule left out.
+- The module no longer requires `security-review`: the plugin in sessions is a separate decision, and its page says not to wire the plugin's hooks as they stand.
+- The kit's own repository installs it.
+- `auto-merge`: `CLAUDE_GATE_RE` holds `scripts/eco-design-audit.mjs`, its test and `scripts/eco-design.config.json`, which names the commit of the code the workflow fetches and runs; AM-1 has a row for each and neighbours that keep merging, and the weekly digest's built-in copy of the pattern follows.
+
+By hand: for a project that installed `eco-design` at 0.8.0, `update` brings the workflow, the script and its test, the guard, the page and the new configuration seed. Replace the **Eco-design** bullet of `CLAUDE.md` and the `eco-design.md` row of `docs/conventions/README.md` with the module's fragments (`fragments/CLAUDE.md/conventions.frag`, `fragments/docs/conventions/README.md/conventions-index.frag`), then do the live check of `docs/conventions/eco-design.md` on the first pull request.
