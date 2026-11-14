@@ -88,6 +88,8 @@ else
            scripts/weekly-digest.config.mjs scripts/audit-gate.mjs \
            scripts/audit-gate.test.mjs scripts/audit-allowlist.json \
            scripts/parallel-sessions.sh Scripts/Audit-Allowlist.JSON \
+           scripts/eco-design-audit.mjs scripts/eco-design-audit.test.mjs \
+           scripts/eco-design.config.json Scripts/Eco-Design.Config.JSON \
            scripts/fetch-pinned-release.sh .gitleaks.toml .gitleaksignore \
            .gitleaks.json .GITLEAKS.JSON zizmor.yml zizmor.yaml \
            .npmrc packages/api/.npmrc \
@@ -107,6 +109,8 @@ else
            scripts/weekly-digest-notes.md scripts/weekly-digest.mjs.md \
            scripts/audit-gate.md scripts/audit-allowlist.json.example \
            scripts/parallel-sessions.md src/scripts/audit-gate.mjs \
+           scripts/eco-design-audit.md scripts/eco-design.config.json.example \
+           src/scripts/eco-design-audit.mjs scripts/eco-design-audit-notes.md \
            src/.gitleaks.toml .gitleaks.toml.md docs/zizmor.yml .github/zizmor.md \
            src/.gitleaks.json .gitleaks.json.md src/zizmor.yml zizmor.yml.md \
            .npmrc.example docs/npmrc.md \

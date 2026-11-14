@@ -1,14 +1,15 @@
 {
   "id": "eco-design",
-  "title": "Eco-design rules through a pinned plugin",
-  "summary": "The convention for using the green-claude plugin (sobriety rules from RGESN and GR491, with a deterministic audit) as a plugin pinned at a reviewed commit: what it changes in a session, how its findings are reported and where a dismissed one is recorded. Nothing is copied from the plugin.",
-  "phase": "on-demand",
+  "title": "Eco-design audit of every pull request",
+  "summary": "A workflow that runs the audit of green-claude (eco-design rules drawn from RGESN and GR491) at a pinned commit on what each pull request changes, reports the findings it adds as annotations and in the job summary, and fails only past a level the project sets. Nothing is copied from the plugin.",
+  "phase": "pr-flow",
   "order": 48,
-  "requires": ["core", "security-review"],
+  "requires": ["core"],
+  "seed": ["scripts/eco-design.config.json"],
   "postInstall": [
-    "Read the green-claude repository in full at one commit, then install the plugin and record `green-claude@green-claude` in scripts/reviewed-plugins.json (docs/conventions/eco-design.md § Setting it up). Until then the module installs a rule and nothing that applies it.",
-    "The plugin's audit script needs jq on each machine that runs it.",
-    "Decide once whether the project takes the plugin's optional hooks: they are wired per person, outside the repository, and PL-1 does not see them (docs/conventions/eco-design.md § Hooks).",
-    "This convention has never been run live by the kit's authors: do the live check of the page once."
+    "The workflow fetches green-claude at the commit in scripts/eco-design.config.json and runs it on every pull request: the kit's authors read it at that commit; read it yourself, or put a commit you have read there (docs/conventions/eco-design.md § Bumping the pin).",
+    "Advisory until fail_on is set in scripts/eco-design.config.json; a failing check holds a merge only once Eco-design audit is a required check of the default branch's ruleset.",
+    "Run the workflow once by hand on the default branch: it lists the findings already there, which pull requests are not charged with.",
+    "The workflow has run once live, on the kit's own repository: do the live check of docs/conventions/eco-design.md on your first pull request."
   ]
 }

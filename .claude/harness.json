@@ -8,7 +8,8 @@
     "parallel-sessions",
     "ci-security",
     "ready-on-green",
-    "weekly-digest"
+    "weekly-digest",
+    "eco-design"
   ],
   "values": {
     "PROJECT_NAME": "claude-template",
@@ -180,16 +181,42 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "8ee032867320410af858b6bfe57c8040c796be33fb9abae0e22d16578c658048"
+      "sha256": "8dc9c83d605820a8620f9b63b6a45f819ab50de82e0b954db7916fe29512523e"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",
       "sha256": "dad990e4e14feb4ae4b306d45de7120921d80103f8ea1dc9c357d692f71d66b6"
+    },
+    ".github/workflows/eco-design.yml": {
+      "module": "eco-design",
+      "sha256": "f0bf50f3caf9590da6270745e938781c68ed0bf9d7d8076153b234a3f26dd129"
+    },
+    "docs/conventions/eco-design.md": {
+      "module": "eco-design",
+      "sha256": "4aef2994f303f33bb0bf971e55e41c6b4d5805f02d5b617291b7a750a3e41b36"
+    },
+    "scripts/eco-design-audit.mjs": {
+      "module": "eco-design",
+      "sha256": "5177d18122b6d237ddebda85d627b050f81fc46615c19bd097de3717ce4fc023"
+    },
+    "scripts/eco-design-audit.test.mjs": {
+      "module": "eco-design",
+      "sha256": "78546552c0ffa70e6b3e1ac67c0f3516ffdd5977dc14a88131242a039d77d096"
+    },
+    "scripts/eco-design.config.json": {
+      "module": "eco-design",
+      "seed": true
+    },
+    "scripts/guards.d/49-eco-design.sh": {
+      "module": "eco-design",
+      "sha256": "87c70df1844980c458c69d5afe968a3dbb40be18e3eeeb41966fd8ae69b4d5f4"
     }
   },
   "fragments": [
     "ci-security:CLAUDE.md#security-workflow",
     "ci-security:docs/conventions/README.md#conventions-index",
+    "eco-design:CLAUDE.md#conventions",
+    "eco-design:docs/conventions/README.md#conventions-index",
     "parallel-sessions:docs/conventions/README.md#conventions-index",
     "ready-on-green:docs/conventions/README.md#conventions-index",
     "weekly-digest:CLAUDE.md#conventions",

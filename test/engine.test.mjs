@@ -278,6 +278,7 @@ const NOT_HELD_BY_MERGE_GATE = new Map([
   [".github/workflows/security.yml", "a workflow that calls the gate: auto-merge-policy.md § Residual risks"],
   [".github/workflows/weekly-digest.yml", "a workflow outside the kit's list: auto-merge-policy.md § Residual risks"],
   [".github/workflows/ready-on-green.yml", "a workflow outside the kit's list, and never installed with auto-merge"],
+  [".github/workflows/eco-design.yml", "a workflow outside the kit's list, its shape pinned by ED-3; the code it fetches and runs is named in scripts/, which is held"],
   [".github/dependabot.yml", "a file AM-5 checks, not one that configures a check"],
 ]);
 const NOT_HELD_BY_EITHER = new Map([

@@ -1,0 +1,13 @@
+{
+  "_comment": [
+    "The eco-design audit in CI (docs/conventions/eco-design.md). eco-design.yml fetches green-claude",
+    "from `repository` at `commit` and runs its audit on every pull request. It is third-party code:",
+    "`commit` is one someone read in full (audit script, detectors, inspectors), never a branch, and",
+    "`read` the date of that reading. A bump is a new reading (§ Bumping the pin).",
+    "`fail_on`: none (report only), or high, medium, low — a new finding of that impact or above fails the check."
+  ],
+  "repository": "Institut-du-Numerique-Responsable/green-claude",
+  "commit": "bc2a1cf2c543434ce3678b2d2bc07ffb85c15e1e",
+  "read": "2026-11-13",
+  "fail_on": "none"
+}
