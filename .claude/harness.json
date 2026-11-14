@@ -157,7 +157,7 @@
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "9dae728b59ce57dd0b237097c2564cfd1363b659d2289c1215a56efcc2a45bf3"
+      "sha256": "fd4633620c1b38b34bff4c36117d654dab680e092f559e77e0470c8abea6edd8"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",
@@ -169,7 +169,7 @@
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "b8cafdf6087ae709ea00c718355bb2ef8442b34aa604d319c5fa1567644ebc3d"
+      "sha256": "f5f44d5e55e4afcc12a2eee01c4af66286e618f07916982016172646b2c223d9"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
@@ -181,11 +181,11 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "8dc9c83d605820a8620f9b63b6a45f819ab50de82e0b954db7916fe29512523e"
+      "sha256": "23e9cd0c2e49e3f71a0f4d917a9bc54e12cd3e7ee349fb110ca6b15a108ed002"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",
-      "sha256": "dad990e4e14feb4ae4b306d45de7120921d80103f8ea1dc9c357d692f71d66b6"
+      "sha256": "8526d6d5e42831ad82bba713407171ed500cbdfa7a36f897444d315c5e470423"
     },
     ".github/workflows/eco-design.yml": {
       "module": "eco-design",

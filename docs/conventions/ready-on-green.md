@@ -26,7 +26,13 @@ A session opens its pull requests as drafts, so that nothing takes one for merge
 
 A session opens its pull request early, so that the other sessions see what it holds, and may still have work to do on it: a review running, a commit to come. Green CI on its first commit is not that work done, and a lifted draft reads as mergeable. A pull request was once merged while the session that wrote it was still reviewing it.
 
-Such a session labels its pull request `session-active` when it opens it, and the workflow leaves the draft alone whatever CI says, with a notice in its log. When its work is done, the session removes the label and lifts the draft itself (`gh pr ready`): the workflow acts when a CI run ends, so a label removed alone lifts nothing until the next push. A person can use the label the same way.
+Such a session labels its pull request `session-active` when it opens it, and the workflow leaves the draft alone whatever CI says, with a notice in its log. When its work is done — its last commit pushed, its own checks over —, the session removes the label, and then:
+
+- if CI is still running on the head, nothing more: the workflow lifts the draft when the run ends green;
+- if CI has already ended green on the head, the session lifts the draft itself (`gh pr ready`), since the workflow acts only when a CI run ends;
+- it never lifts the draft before CI is green on the head: that is the one thing a draft still says here.
+
+A session that ends without removing the label — its context spent, a crash — leaves the pull request a draft, which GitHub does not merge: the safe side. Whoever finds it removes the label and lifts the draft by hand once CI is green. A person can use the label the same way.
 
 Create the label once: `gh label create session-active --description "A session is still at work on this pull request"`. The label is read when the run ends, with the pull request; one added in the seconds between that read and the call does not hold the draft.
 
