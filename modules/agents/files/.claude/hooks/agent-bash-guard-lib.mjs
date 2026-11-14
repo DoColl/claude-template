@@ -171,7 +171,8 @@ function words(segment) {
 // ---- shapes ----------------------------------------------------------------
 // Paths are relative to the project root, as written. "$CLAUDE_PROJECT_DIR"/x is not one: Claude Code sets that
 // variable for hooks, not for the Bash tool's shell, where it is /x. Nor is the hook's own root as an absolute path:
-// in a worktree session it is not the worktree the session works in.
+// in a worktree session it can be another checkout than the worktree the session works in (a worktree session
+// started from the desktop application, or a session that entered a worktree after it started).
 
 // Shared option walker: literal flags, value options, clusters; returns the positional args or an error string.
 // git reads the value of -U only attached (-U5): its value is optional, so a bare -U is a whole option and the
@@ -271,7 +272,7 @@ export function decide(command, profile, config = EMPTY_CONFIG) {
       if (i === 0 && profile === "verify" && argv[0] === "cd") { // the only accepted cd: first, to a configured directory, then && one of its commands
         // Read from the segment as written, never from its words: one exact text, anchored at both ends, so that no
         // quoting or escape has to be modelled. Some variants name another directory (`./x\ ` is `./x `,
-        // `./x'/..'` is the project root), others the same one (`'./x'`, `./x/`): all are refused.
+        // `./x'/..'` is x's parent), others the same one (`'./x'`, `./x/`): all are refused.
         // `./` keeps CDPATH out of it, which the shell consults first for a bare name.
         const dir = /^cd \.\/([A-Za-z0-9._\/-]+)$/.exec(segs[0].text)?.[1];
         if (!(dir !== undefined && cfg.byDir.has(dir) && segs[1]?.op === "&&")) return { allow: false, reason: CD_RULE };

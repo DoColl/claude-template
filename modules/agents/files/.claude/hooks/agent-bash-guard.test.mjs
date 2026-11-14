@@ -19,7 +19,7 @@ const payload = (command) => JSON.stringify({ tool_name: "Bash", tool_input: { c
 // A fixture config for the tables: the project's real one is checked further down.
 const CFG = normalizeConfig({ verify: [
   { cwd: "backend", argv: ["npm", "test"] }, { cwd: "backend", argv: ["npm", "run", "test:e2e"] }, { cwd: "backend", argv: ["npm", "run", "build"] }, { cwd: "backend", argv: ["npx", "--no", "tsc", "--noEmit"] },
-  { cwd: "frontend", argv: ["npx", "--no", "tsc", "--noEmit"] }, { cwd: "services/api", argv: ["make", "test"] },
+  { cwd: "frontend", argv: ["npx", "--no", "tsc", "--noEmit"] }, { cwd: "services/api", argv: ["make", "test"] }, { cwd: "pkg/web-app_2.x", argv: ["npm", "test"] },
   { argv: ["node", "--test", ".claude/hooks/agent-bash-guard.test.mjs"] }, { argv: ["./gradlew", "check"] }, { argv: ["go", "test", "./..."] }, { argv: ["cargo", "test", "--locked"] }, { argv: ["make", "check"] },
 ] });
 
@@ -96,15 +96,15 @@ const BLOCK_RO = [
   "./scripts/security-checks.sh --offline\r", "grep -e 'a\u00a0b' f", "git log -1 --format='%h\u3000%s'",
   // the Bash tool's shell has no CLAUDE_PROJECT_DIR: "$CLAUDE_PROJECT_DIR"/x is /x there. A path is written relative to the root
   "\"$CLAUDE_PROJECT_DIR\"/scripts/security-checks.sh --offline", "cat \"$CLAUDE_PROJECT_DIR\"/CLAUDE.md | wc -l", "cat \"$CLAUDE_PROJECT_DIR\"/etc/passwd", "grep -rn -e x \"$CLAUDE_PROJECT_DIR\"/src", "git log -1 -- \"$CLAUDE_PROJECT_DIR\"/src",
-  // a NUL: read here as part of an escape, dropped by some shells, which then read the next quote as live
-  "git status\u0000", "cat a\u0000b", "grep -e \\\u0000'; touch PWNED; \"'\\\u0000\"\" f",
+  // a NUL: read here as part of an escape, dropped by some shells, which then read the next quote as live; refused anywhere
+  "git status\u0000", "cat a\u0000b", "grep -e \\\u0000'; touch PWNED; \"'\\\u0000\"\" f", "grep -e 'a\u0000b' f",
   // a backslash at the end of a segment, or before the blanks that end it: this check dropped the escaped blank, the shell keeps it
   "git status\\ ", "git status\\", "git log --oneline\\ | head -n 5", "scripts/security-checks.sh --offline\\ ", "cat CLAUDE.md\\\t", "git status\\ ; ls",
   // readers: pattern never bare, dangerous options, unknown clusters
   "grep -rn x f", "grep x f", "grep -rn x . --include=\"$(rm x)\"", "ls --color=always -R /", "wc -L f", "grep -P -e x f", "grep --exclude-dir=x -r -e y /", "cat -A f", "head -n x f", "grep -A x -e y f", "ls -Z .",
 ];
 const ALLOW_VERIFY_EXTRA = [
-  "cd ./backend && npm test", "cd ./backend && npm test 2>&1 | tail -40", "cd ./backend && npm run test:e2e", "cd ./backend && npm run build", "cd ./backend && npx --no tsc --noEmit", "cd ./frontend && npx --no tsc --noEmit 2>&1 | tail -20", "cd ./services/api && make test",
+  "cd ./backend && npm test", "cd ./backend && npm test 2>&1 | tail -40", "cd ./backend && npm run test:e2e", "cd ./backend && npm run build", "cd ./backend && npx --no tsc --noEmit", "cd ./frontend && npx --no tsc --noEmit 2>&1 | tail -20", "cd ./services/api && make test", "cd ./pkg/web-app_2.x && npm test",
   "make check", "node --test .claude/hooks/agent-bash-guard.test.mjs", "./gradlew check", "go test ./...", "cargo test --locked 2>&1 | tail -30",
   "go test ./... ; cargo test --locked", "cd ./backend && npm test ; git status --short",
 ];
@@ -120,14 +120,20 @@ const BLOCK_VERIFY = [
   "cargo test --locked\r", "go test\v./...", "cd ./backend && npm test\u00a0", "cd ./backend\f&& npm test", "make\u3000check", "LC_ALL=C\u3000cd backend && npm test",
   // the cd is written `cd ./<cwd> && ` exactly. bash looks a bare name up in CDPATH first; the Bash tool's shell has no
   // CLAUDE_PROJECT_DIR, so "$CLAUDE_PROJECT_DIR"/backend is /backend there (and /lib, /tmp for such a cwd). The text is
-  // matched as written so that no quoting or escape is modelled: an escaped blank or a quoted suffix names another
-  // directory (`./backend\ ` is `./backend `, `./backend'/../..'` the project's parent), a quoted or trailing-slash
-  // form the same one, and every variant is refused
+  // matched as written so that no quoting or escape is modelled: an escaped blank or a non-empty quoted suffix names
+  // another directory (`./backend\ ` is `./backend `, `./backend'/../..'` the project's parent), a quoted or
+  // trailing-slash form the same one, and every variant is refused. `cd backend\ ` records what the guard allowed before
   "cd backend && npm test", "cd services/api && make test", "cd backend\\ && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/backend && npm test", "cd \"$CLAUDE_PROJECT_DIR\"/services/api && make test 2>&1 | tail -20",
   "cd \"$CLAUDE_PROJECT_DIR/backend\" && npm test", "cd $CLAUDE_PROJECT_DIR/backend && npm test", "cd '$CLAUDE_PROJECT_DIR'/backend && npm test", "cd \\$CLAUDE_PROJECT_DIR/backend && npm test",
   "cd './backend' && npm test", "cd \"./backend\" && npm test", "cd ./backend\\ && npm test", "cd ./backend\\\t&& npm test", "cd ./backend/ && npm test", "cd  ./backend && npm test", "cd ./backend/../backend && npm test", "cd ./ backend && npm test",
   // the match is anchored at both ends: nothing after `./<cwd>` in the same word, and no other word before it
   "cd ./backend'/../..' && npm test", "cd ./backend\"\" && npm test", "cd ./backend$X && npm test", "cd cd ./backend && npm test", "cd ../.. cd ./backend && npm test",
+  // `./` is a literal dot and a literal slash, each required
+  "cd ~/backend && npm test", "cd x/backend && npm test", "cd //backend && npm test", "cd /backend && npm test", "cd .backend && npm test",
+  // the directory is one the config names: `./` alone keeps no path inside the project
+  "cd ./.. && ls", "cd ./nowhere && cat f", "cd ./backend/../.. && git status",
+  // only the first segment may be a cd, and only `&&` follows it
+  "cd ./backend && cd /etc && cat passwd", "cd ./backend && cd ..", "cd ./backend || npm test", "cd ./backend",
   "./gradlew publish", "./gradlew check --offline", "gradlew check", "go test ./... -run X", "go build ./...", "cargo test", "cargo test --locked --features x",
 ];
 
@@ -154,8 +160,8 @@ test("the config accepts exact argv entries only", () => {
   assert.deepEqual(normalizeConfig({}).root, []);
 });
 
-// In a worktree session, the hook's CLAUDE_PROJECT_DIR is not the worktree the session works in: an absolute path
-// under it is another checkout's file, never a project-relative path.
+// In a worktree session, the hook's CLAUDE_PROJECT_DIR can be another checkout than the worktree the session works
+// in: an absolute path under it is then another checkout's file, never a project-relative path.
 test("an absolute path under the hook's CLAUDE_PROJECT_DIR is refused like any other", () => {
   const saved = process.env.CLAUDE_PROJECT_DIR;
   process.env.CLAUDE_PROJECT_DIR = "/main/checkout";
