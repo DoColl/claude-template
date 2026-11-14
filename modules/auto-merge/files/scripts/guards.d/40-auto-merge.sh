@@ -11,7 +11,8 @@
 #         scripts/auto-merge-paths.txt are run on the two patterns together.
 #   AM-7  the gate judges the range that is merged: files and commits come
 #         from one compare/<base branch's tip>...<validated head> per merging
-#         job, the tip read by its full ref and used nowhere else, never from
+#         job, the tip read by its full ref and named only on its pinned
+#         lines, never from
 #         the pull request's current state nor from its stored base.sha; a
 #         listing of 300 files holds whatever the count. Before each merge
 #         call, retries included, the pull request, the tip and, when the tip
@@ -925,36 +926,60 @@ pass 8 "a pull request that deletes, renames or rewrites lines of an existing fi
 # merge base anyway. So right after each merge step, a step lists the commit
 # the merge created against its first parent and runs the gate's rules on it.
 # The merge is done: its job is to turn the run red, never to pass quietly.
-# Nothing in the file may let a failing step pass, change the shell or the
-# environment of a later step, or put an expression into a script: GitHub
-# expands `${{ }}` inside a `run:` block before the shell reads it, comments
-# included, so the text pinned below would not be what runs.
-forbidden=$(grep -cE '^ *(continue-on-error|defaults|shell):|GITHUB_ENV|GITHUB_PATH' "$AM" || true)
-if [ "$forbidden" != "0" ]; then
-  bad 10 "$forbidden line(s) set continue-on-error, defaults or a shell, or write GITHUB_ENV or GITHUB_PATH — none belongs in this workflow"
+# These pins read the file as text. Nothing in it may make what GitHub runs
+# differ from that text, let a failing step pass, or change the environment,
+# the shell or the commands of a later step. Refused anywhere in the file:
+# - a carriage return or a NEL (U+0085): YAML breaks a line there, the text
+#   tools below do not, so a line could hide behind a comment;
+# - continue-on-error, BASH_ENV (bash sources it before each step's script),
+#   GITHUB_ENV, GITHUB_PATH, an indirect expansion ${!…}, sudo, a PATH or
+#   HOME assignment, a jq library file (.jq), a `defaults` or `shell` key
+#   however quoted or spaced, an explicit `?` key;
+# - a function other than the three the workflow defines, an alias, enable,
+#   shopt or unset; an empty pair of quotes inside a word (`mer""ge`); a line
+#   continuation that does not go on with an option, `&&` or `||`; a PUT
+#   beyond the merge calls;
+# - a ${{ }} anywhere but in the value of an `if`, a `group` or an upper-case
+#   env key, and inside any block scalar (`run: |`, `- run: >`, `run: &a |`):
+#   GitHub expands it before the shell reads the script, comments included.
+# A deliberate rewrite can still find another way: these catch a regression
+# and the simple ways round the pins. The workflow is a held path, merged by
+# hand, and the ruleset of the policy page stands against the rest.
+breaks=$(LC_ALL=C grep -cE $'\r|\xc2\x85' "$AM" || true)
+FORBIDDEN_RE='continue-on-error|BASH_ENV|GITHUB_ENV|GITHUB_PATH|[$][{]!|sudo|(^|[^A-Za-z0-9_])(PATH|HOME)[[:space:]]*[:=]|[.]jq([^A-Za-z0-9_]|$)|(^|[[:space:]'"'"'"])(defaults|shell)['"'"'"]?[[:space:]]*:|^[[:space:]]*(-[[:space:]]+)?[?]([[:space:]]|$)'
+forbidden=$(grep -cE "$FORBIDDEN_RE" "$AM" || true)
+quotes=$(grep -cE '[A-Za-z0-9_](""|'"''"')[A-Za-z0-9_]' "$AM" || true)
+defs=$(grep -cE '\(\)[[:space:]]*\{|(^|[^A-Za-z0-9_.-])function[[:space:]]' <<< "$jobs_code" || true)
+known_defs=$(grep -cE '^ *(signoff_state|dependabot_verdict|bump_level)\(\) \{$' "$AM" || true)
+builtins=$(grep -cE '(^|[;&|[:space:]])(alias|enable|shopt|unset)[[:space:]]' <<< "$jobs_code" || true)
+continued=$(awk 'held { line = $0; sub(/^ */, "", line); if (line !~ /^(-|&&|[|][|])/) bad++; held = 0 } /\\$/ { held = 1 } END { print bad + 0 }' "$AM")
+puts=$(grep -cE '(^|[^A-Za-z0-9_])PUT([^A-Za-z0-9_]|$)' <<< "$jobs_code" || true)
+if [ "$breaks" != "0" ] || [ "$forbidden" != "0" ] || [ "$quotes" != "0" ] || [ "$defs" != "3" ] || [ "$known_defs" != "3" ] \
+   || [ "$builtins" != "0" ] || [ "$continued" != "0" ] || [ "$puts" != "$merging" ]; then
+  bad 10 "the workflow must hold nothing that makes what runs differ from its text or lets a check pass (found: line breaks $breaks, refused words or keys $forbidden, empty quotes in a word $quotes, function definitions $defs (3 known: $known_defs), alias/enable/shopt/unset $builtins, continuations not followed by an option $continued, PUT calls $puts for $merging merge call(s))"
 fi
-expressions=$(awk '/^ *run: [|>]/ { inrun = 1; key = index($0, "run:"); next }
-  inrun && /^[[:space:]]*$/ { next }
-  inrun { match($0, /^ */); if (RLENGTH < key) inrun = 0 }
-  inrun && index($0, "${{") { n++ }
-  /^ *(- )?run: [^|>]/ && index($0, "${{") { n++ }
+expressions=$(awk '
+  inblock && /^[[:space:]]*$/ { next }
+  inblock { match($0, /^ */); if (RLENGTH > keycol) { if (index($0, "${{")) n++; next } inblock = 0 }
+  index($0, "${{") && $0 !~ /^ +(if|group|[A-Z][A-Z0-9_]*): / { n++ }
+  /:[[:space:]]+([&!][^[:space:]]*[[:space:]]+)*[|>][-+0-9]*[[:space:]]*(#.*)?$/ { match($0, /^[ -]*/); keycol = RLENGTH; inblock = 1 }
   END { print n + 0 }' "$AM")
 if [ "$expressions" != "0" ]; then
-  bad 10 "$expressions line(s) of a run: script carry \${{ }}, comments included — pass values through env:"
+  bad 10 "$expressions line(s) carry \${{ }} outside the value of an if, a group or an upper-case env key, or inside a block scalar (a run: script, comments included) — pass values through env:"
 fi
 # Every line of the jobs, tagged with its job and its step (a step starts at any
 # `- ` item of a job's steps, named or not).
 steps_tsv=$(awk '/^jobs:$/ { on = 1; next }
   !on { next }
   /^  [A-Za-z0-9_-]+:$/ { job = $1; sub(/:$/, "", job); step = "-"; next }
-  /^      - / { n++; step = n }
+  /^      -([[:space:]]|$)/ { n++; step = n }
   { print job "\t" step "\t" $0 }' "$AM")
 CHECK='Check what the merge wrote'
 NAME="      - name: $CHECK"
 checks=$(awk -F'\t' -v c="$NAME" '$3 == c' <<< "$steps_tsv" | grep -c . || true)
 # The step right after the one whose id is `merge`, in each merging job: its
 # first line is the check's name.
-after_merge=$(awk -F'\t' -v c="$NAME" '$3 ~ /^      - / { if (want != "") { if ($1 == want && $3 == c) good++; else other++ } want = "" }
+after_merge=$(awk -F'\t' -v c="$NAME" '$3 ~ /^      -([[:space:]]|$)/ { if (want != "") { if ($1 == want && $3 == c) good++; else other++ } want = "" }
   $3 == "        id: merge" { want = $1 }
   END { print good + 0, other + 0 }' <<< "$steps_tsv")
 if [ "$checks" != "$merging" ] || [ "$after_merge" != "$merging 0" ]; then
@@ -1017,7 +1042,7 @@ HELD=0
 NON_DOCS=0
 if [ -n "$WROTE_PATHS" ]; then
 HELD=$(grep -i -E -c -e "$CLAUDE_GATE_RE" -e "$PROJECT_GATE_RE" <<< "$WROTE_PATHS" || true)
-if [ "$DOCS_ONLY" = "true" ]; then NON_DOCS=$(grep -E -v -c '(\.md$|^docs/|^LICENSE$|^\.gitignore$)' <<< "$WROTE_PATHS" || true); fi
+DOCS_RULE@@
 fi
 WROTE_SHRUNK=@@
 WEAKENED=0
@@ -1027,15 +1052,21 @@ exit 1
 fi
 RUN
 expected_run=${expected_run%$'\n'}
-# The selection line is compared as a string, apart: it must be the gate's.
+# The selection line and the docs rule are compared as strings, apart: each
+# must be the gate's, whatever the project made of the documentation set.
 shrunk_line="WROTE_SHRUNK=\$(jq -r '$gate_filter' <<< \"\$WROTE\")"
+docs_set=$(sed -n "s/^ *NON_DOCS=\$(grep -E -v -c '\(.*\)' <<< \"\$PATHS\" || true)$/\1/p" "$AM")
+docs_line="if [ \"\$DOCS_ONLY\" = \"true\" ]; then NON_DOCS=\$(grep -E -v -c '$docs_set' <<< \"\$WROTE_PATHS\" || true); fi"
 for job in promote-from-ci promote-docs; do
   run=$(run_of "$(step_of "$job")")
   if [ -z "$gate_filter" ] || [ "$(grep -c . <<< "$gate_filter")" != "1" ] \
      || [ "$(grep -c '^WROTE_SHRUNK=' <<< "$run")" != "1" ] \
      || [ "$(grep '^WROTE_SHRUNK=' <<< "$run")" != "$shrunk_line" ] \
-     || [ "$(sed 's/^WROTE_SHRUNK=.*/WROTE_SHRUNK=@@/' <<< "$run")" != "$expected_run" ]; then
-    bad 10 "$job: the run block of '$CHECK' changed — comments and messages aside, it must read the merge commit's first parent, list compare/\${PARENT}...\${MERGED} whole, run the gate's patterns, its selection of weakened files and (docs job) the docs rule on it, and exit 1 on anything found or unreadable"
+     || [ -z "$docs_set" ] || [ "$(grep -c . <<< "$docs_set")" != "1" ] \
+     || [ "$(grep -c '^if \[ "\$DOCS_ONLY" = "true" \]; then ' <<< "$run")" != "1" ] \
+     || [ "$(grep '^if \[ "\$DOCS_ONLY" = "true" \]; then ' <<< "$run")" != "$docs_line" ] \
+     || [ "$(sed -e 's/^WROTE_SHRUNK=.*/WROTE_SHRUNK=@@/' -e 's/^if \[ "\$DOCS_ONLY" = "true" \]; then .*/DOCS_RULE@@/' <<< "$run")" != "$expected_run" ]; then
+    bad 10 "$job: the run block of '$CHECK' changed — comments and messages aside, it must read the merge commit's first parent, list compare/\${PARENT}...\${MERGED} whole, run the gate's patterns, its selection of weakened files and (docs job) promote-docs' own docs rule on it, and exit 1 on anything found or unreadable"
   fi
 done
 # The merge steps hand it the commit GitHub created, or the one a merge already
@@ -1049,6 +1080,29 @@ handover=$(awk '$0 ~ /^ +echo "merged=true" >> "\$GITHUB_OUTPUT"$/ { armed = 1; 
 shas=$(grep -E '(^|[^A-Za-z0-9_])sha=' <<< "$jobs_code" | grep -c 'GITHUB_OUTPUT' || true)
 if [ "$handover" != "$((3 * merging)) $merging $((2 * merging))" ] || [ "$shas" != "$((3 * merging))" ]; then
   bad 10 "each merge step must write sha=<the merge commit> right after each merged=true, on the two pinned lines, and nowhere else (found: merged=true lines, made, found = $handover; lines writing sha= = $shas)"
+fi
+# The merge call and what follows its success, in each merge loop: comments
+# and plain messages aside, exactly this — the hand-over is reached, and
+# nothing leaves before it.
+put_block=$(awk '/^ *if OUT=\$\(gh api --method PUT / { on = 1; print "@@" }
+  on { line = $0; sub(/^ */, "", line); print line }
+  on && /^              fi$/ { on = 0 }' "$AM" \
+  | grep -vE '^(#|$)' | grep -vE '^echo "([^"$`\\]|\$\{[A-Za-z_][A-Za-z0-9_]*(:[0-9]+:[0-9]+)?\})*"$' || true)
+merge_call=$(printf '%s\n' '@@' 'if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \' \
+  '-f merge_method="$method" -f sha="$HEAD_SHA" 2>&1); then' 'echo "$OUT"' \
+  'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=$(jq -r '"'"'.sha // empty'"'"' <<< "$OUT")" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi')
+if [ "$put_block" != "$(printf '%s\n%s' "$merge_call" "$merge_call")" ]; then
+  bad 10 "each merge call must, on success, print its answer, write merged=true and the merge commit's sha, and exit 0 — nothing else, nothing before the hand-over"
+fi
+# What the merge steps write to their outputs: the hand-over lines only.
+merge_outputs=$(awk -F'\t' '{ job[NR] = $1; step[NR] = $2; text[NR] = $3 }
+  $3 == "        id: merge" { merging_step[$1 "\t" $2] = 1 }
+  END { for (i = 1; i <= NR; i++) if ((job[i] "\t" step[i]) in merging_step && text[i] ~ /GITHUB_OUTPUT/ && text[i] !~ /^[[:space:]]*#/) { t = text[i]; sub(/^ */, "", t); print t } }' <<< "$steps_tsv" \
+  | sort | uniq -c | sed 's/^ *//' | sort)
+expected_outputs=$(printf '%s\n' "$((merging)) echo \"sha=\$(jq -r '.sha // empty' <<< \"\$OUT\")\" >> \"\$GITHUB_OUTPUT\"" \
+  "$((3 * merging)) echo \"merged=true\" >> \"\$GITHUB_OUTPUT\"" "$((2 * merging)) echo \"sha=\${NOW_COMMIT}\" >> \"\$GITHUB_OUTPUT\"" | sort)
+if [ "$merge_outputs" != "$expected_outputs" ]; then
+  bad 10 "the merge steps may write merged=true and sha= on their pinned hand-over lines only — found: $(tr '\n' ';' <<< "$merge_outputs")"
 fi
 pass 10 "what each merge wrote is listed and judged again by the gate's rules, right after the merge, and turns the run red"
 

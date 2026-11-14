@@ -1282,9 +1282,36 @@ test("auto-merge: AM-7 and AM-10 go red when the tip is not read again before a 
     ["a job that lets its failures go", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "continue-on-error: true"])],
     ["a job with another shell", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "defaults:", "  run:", "    shell: sh {0}"])],
     ["a step that sets the next ones' environment", "AM-10", edit(shipped, 'echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 1, ['echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 'echo "MERGED=${MB}" >> "$GITHUB_ENV"'])],
+    // What the text tools would not see as YAML or bash does.
+    ["a carriage return hides an exit in the check", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, "# read below\r          exit 0") + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a NEL hides an exit in the check", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, "# read below\u0085          exit 0") + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a quoted continue-on-error key", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", '"continue-on-error": true'])],
+    ["a spaced continue-on-error key", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "continue-on-error : true"])],
+    ["an explicit key", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "? continue-on-error", ": true"])],
+    ["a quoted defaults key", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "'defaults':", "  run:", "    shell: sh {0}"])],
+    ["a bare dash step between the merge and the check", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"), ind(6, "-") + ind(8, "name: Note") + ind(8, "run: echo hi") + "\n" + checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"))],
+    ["an anchored run block with an expression", "AM-10", once(once(shipped, ind(10, "GATE_MB: ${{ steps.gate.outputs.merge_base }}") + ind(8, "run: |"), ind(10, "GATE_MB: ${{ steps.gate.outputs.merge_base }}") + ind(8, "run: &m |")), ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, `# \${{ fromJSON('"x"') }}`) + loopHead)],
+    ["a run block opened after two spaces, with an expression", "AM-10", once(once(shipped, ind(10, "GATE_MB: ${{ steps.gate.outputs.merge_base }}") + ind(8, "run: |"), ind(10, "GATE_MB: ${{ steps.gate.outputs.merge_base }}") + ind(8, "run:  |")), ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, `# \${{ fromJSON('"x"') }}`) + loopHead)],
+    ["a run-first step with an expression", "AM-10", once(shipped, ind(6, "# Same cleanup as in promote-from-ci (reasons and guards there); the two"), ind(6, "- run: |") + ind(10, `# \${{ fromJSON('"x"') }}`) + ind(10, "echo hi") + ind(8, "name: Note") + "\n" + ind(6, "# Same cleanup as in promote-from-ci (reasons and guards there); the two"))],
+    ["BASH_ENV in a job's env", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "env:", "  BASH_ENV: /tmp/x"])],
+    ["an indirect write to the env file", "AM-10", edit(shipped, 'echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 1, ['echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 'f=GITHUB_; f+=ENV; printf "X=1\\n" >> "${!f}"'])],
+    ["a jq library file", "AM-10", edit(shipped, 'echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 1, ['echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', "echo 'def select(f): empty;' > ~/.jq"])],
+    ["exit shadowed before the loop", "AM-10", once(shipped, ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, 'exit() { builtin exit 0; }') + loopHead)],
+    ["a merge call spelled apart", "AM-10", edit(shipped, 'gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."', 2, ['gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."', 'gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/mer""ge" -f merge_method=squash -f sha="$HEAD_SHA" > /dev/null || true'])],
+    ["a merge path continued on the next line", "AM-10", edit(shipped, 'gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."', 2, ['gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."', 'gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/mer\\', 'ge" -f merge_method=squash -f sha="$HEAD_SHA" > /dev/null || true'])],
+    ["the tip judged read again under a split name", "AM-10", once(shipped, ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, 'read -r GATE_T""IP < <(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq \'.object.sha\')') + loopHead)],
+    ["leaving before the hand-over", "AM-10", (() => { const from = ind(16, 'echo "$OUT"') + ind(16, 'echo "merged via ${method}"'); assert.equal(shipped.split(from).length, 3); return shipped.split(from).join(ind(16, 'echo "$OUT"') + ind(16, '[ -n "$OUT" ] && exit 0') + ind(16, 'echo "merged via ${method}"')); })()],
+    ["merged=false written after the hand-over", "AM-10", last(shipped, shaLine, shaLine + ind(16, 'echo "merged=false" >> "$GITHUB_OUTPUT"'))],
+    ["a sha written under a split name", "AM-10", last(shipped, shaLine, shaLine + ind(16, 'echo "s""ha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"'))],
+    ["the check's docs rule left behind a wider docs set", "AM-10", edit(shipped, "NON_DOCS=$(grep -E -v -c '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)' <<< \"$PATHS\" || true)", 1, "NON_DOCS=$(grep -E -v -c '(\\.md$|^docs/|^site/|^LICENSE$|^\\.gitignore$)' <<< \"$PATHS\" || true)")],
+    ["a stop on any moved tip", "AM-7", edit(shipped, 'NOW_MB=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${NOW_TIP}...${HEAD_SHA}"', 2, "exit 0")],
   ];
-  const [green, ...reds] = await bounded([() => guard("as shipped"), ...cases.map(([label, , text]) => () => guard(label, text))]);
+  // A project may widen its documentation set (auto-merge-policy.md § Setting it up): in every copy, the check's included.
+  const widened = shipped.split("'(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)'").join("'(\\.md$|^docs/|^site/|^LICENSE$|^\\.gitignore$)'");
+  assert.notEqual(widened, shipped);
+  const [green, wide, ...reds] = await bounded([() => guard("as shipped"), () => guard("a docs set widened everywhere", widened), ...cases.map(([label, , text]) => () => guard(label, text))]);
   assert.equal(green.status, 0, `${green.stdout}\n${green.stderr}`);
+  assert.equal(wide.status, 0, `${wide.label}\n${wide.stdout}\n${wide.stderr}`);
   for (const [i, r] of reds.entries()) {
     assert.equal(r.status, 1, `${r.label}: the guard must fail\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, new RegExp(`FAIL\\s+${cases[i][1]}:`), `${r.label}\n${r.stdout}\n${r.stderr}`);
