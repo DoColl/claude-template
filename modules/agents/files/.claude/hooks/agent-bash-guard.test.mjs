@@ -96,6 +96,8 @@ const BLOCK_RO = [
   "./scripts/security-checks.sh --offline\r", "grep -e 'a\u00a0b' f", "git log -1 --format='%h\u3000%s'",
   // the Bash tool's shell has no CLAUDE_PROJECT_DIR: "$CLAUDE_PROJECT_DIR"/x is /x there. A path is written relative to the root
   "\"$CLAUDE_PROJECT_DIR\"/scripts/security-checks.sh --offline", "cat \"$CLAUDE_PROJECT_DIR\"/CLAUDE.md | wc -l", "cat \"$CLAUDE_PROJECT_DIR\"/etc/passwd", "grep -rn -e x \"$CLAUDE_PROJECT_DIR\"/src", "git log -1 -- \"$CLAUDE_PROJECT_DIR\"/src",
+  // a NUL: read here as part of an escape, dropped by some shells, which then read the next quote as live
+  "git status\u0000", "cat a\u0000b", "grep -e \\\u0000'; touch PWNED; \"'\\\u0000\"\" f",
   // a backslash at the end of a segment, or before the blanks that end it: this check dropped the escaped blank, the shell keeps it
   "git status\\ ", "git status\\", "git log --oneline\\ | head -n 5", "scripts/security-checks.sh --offline\\ ", "cat CLAUDE.md\\\t", "git status\\ ; ls",
   // readers: pattern never bare, dangerous options, unknown clusters

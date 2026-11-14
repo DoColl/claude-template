@@ -259,6 +259,8 @@ export function decide(command, profile, config = EMPTY_CONFIG) {
   // dozen other Unicode spaces. Read as a break here, `LC_ALL=C<VT>cat rm x` was a `cat` of two files, while the
   // shell read one assignment word, `LC_ALL=C<VT>cat`, and ran `rm x`. None of them belongs in a command the agents
   // run, quoted or not.
+  // A NUL: this check reads `\<NUL>` as an escape, a shell that drops the NUL reads the quote after it as live.
+  if (command.includes("\0")) return { allow: false, reason: "a NUL character is not allowed: a shell that drops it would read what follows differently" };
   if (/[^\S \t\n]/.test(command)) return { allow: false, reason: "whitespace other than a space, a tab or a newline is not allowed (a carriage return, a vertical tab, a form feed, a no-break or other Unicode space): the shell does not separate words on it, this check would" };
   const cfg = profile === "verify" ? config : EMPTY_CONFIG;
   try {
