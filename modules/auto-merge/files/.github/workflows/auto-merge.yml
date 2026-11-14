@@ -411,8 +411,8 @@ jobs:
           # The base the range is judged against: the merge step refuses a pull
           # request retargeted since.
           echo "base_ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
-          # And the tip it is judged against: the merge step stops when the
-          # branch moved since.
+          # And the tip it is judged against: before each merge call, the
+          # merge step compares it with the tip as it is then.
           echo "tip=${TIP}" >> "$GITHUB_OUTPUT"
           # Each file row carries `previous_filename` too, so a rename OUT of a
           # gated path (CLAUDE.md → docs/legacy.md) is still seen. The compare
@@ -421,7 +421,7 @@ jobs:
           # not prove a whole listing. A listing of 300 files holds whatever
           # the count, and so does any gap between the two.
           RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${HEAD_SHA}" \
-                    --jq '{total: .total_commits, commits: [.commits[] | {login: (.author.login // "unknown"), message: .commit.message}], files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
+                    --jq '{base: (.merge_base_commit.sha // ""), total: .total_commits, commits: [.commits[] | {login: (.author.login // "unknown"), message: .commit.message}], files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
           ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
           if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then
@@ -429,6 +429,15 @@ jobs:
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # The merge base the range was listed from: what the merge writes is
+          # the head's changes since it, so the merge step stops when it moved.
+          MB=$(jq -r '.base' <<< "$RANGE")
+          if ! [[ "$MB" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::notice::PR #${PR}: the range from the tip of ${BASE_REF} came back without its merge base — leaving it for a hand merge."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"
           PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
           # Per path segment and case-folded: on a case-insensitive file system
           # `.Claude/agents/x.md` lands in `.claude/agents/`; `(/|$)` also
@@ -606,18 +615,9 @@ jobs:
           HEAD_SHA: ${{ steps.event.outputs.head_sha }}
           BASE_REF: ${{ steps.gate.outputs.base_ref }}
           GATE_TIP: ${{ steps.gate.outputs.tip }}
+          GATE_MB: ${{ steps.gate.outputs.merge_base }}
         run: |
           set -euo pipefail
-          # The gate judged the range against the base it read. A pull request
-          # retargeted since would carry those changes somewhere the gate did
-          # not look at: stop. The API pins the head of a merge, not its base,
-          # so a retarget in the instant between this read and the call below
-          # cannot be excluded (docs/conventions/auto-merge-policy.md).
-          NOW_BASE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.base.ref')
-          if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
-            echo "::notice::PR #${PR}: its base branch changed since the gate — leaving it for a hand merge."
-            exit 0
-          fi
           # Server-side merge via REST API — no local git needed. Try
           # --squash first (cleanest linear history), fall back to a merge
           # commit if squash is disabled in the repository settings. Retry on
@@ -630,19 +630,47 @@ jobs:
           # post-merge dispatch would use.
           for attempt in 1 2 3 4 5; do
             for method in squash merge; do
-              # The gate judged the merge onto the tip it read (AM-7). A branch
-              # landed since can move what the merge writes, and the API pins
-              # the head of a merge, not its base: the tip is read again right
-              # before each call, retries included, and a tip that moved stops
-              # the merge. A re-run of this workflow judges the new tip.
+              # Before each call, retries included (AM-7). The pull request:
+              # merged already — by an earlier call that answered an error, or
+              # by hand — its merge commit goes to the check that follows;
+              # retargeted since the gate, it stops. Then the merge base: the
+              # tip moves with every merge, while what this merge writes is the
+              # head's changes since its merge base with the tip, which moves
+              # only when a commit of the head lands. Unchanged, the merge goes
+              # on; moved, it stops and a re-run judges it again. The API pins
+              # the head of a merge, not its base: the instant between these
+              # reads and the call stays open (docs/conventions/auto-merge-policy.md).
+              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // "")] | @tsv') || STATE=""
+              if [ -z "$STATE" ]; then
+                echo "::error::PR #${PR} could not be read again before a merge call — check whether an earlier call merged it, then re-run this job."
+                exit 1
+              fi
+              IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT <<< "$STATE"
+              if [ "$NOW_MERGED" = "true" ]; then
+                echo "::notice::PR #${PR} is merged already: an earlier call merged it and answered an error, or someone merged it by hand. Its merge commit is checked next."
+                echo "merged=true" >> "$GITHUB_OUTPUT"
+                echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
+                echo "::notice::PR #${PR}: its base branch changed since the gate — leaving it for a hand merge."
+                exit 0
+              fi
               NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || NOW_TIP=""
-              if [ -z "$NOW_TIP" ]; then
+              if ! [[ "$NOW_TIP" =~ ^[0-9a-f]{40,64}$ ]]; then
                 echo "::error::The tip of ${BASE_REF} could not be read again — nothing was merged. Re-run this job."
                 exit 1
               fi
               if [ "$NOW_TIP" != "$GATE_TIP" ]; then
-                echo "::notice::PR #${PR}: ${BASE_REF} moved since the gate judged it — not merged. Re-run this workflow to judge the new tip, or merge it by hand."
-                exit 0
+                NOW_MB=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${NOW_TIP}...${HEAD_SHA}" --jq '.merge_base_commit.sha // ""') || NOW_MB=""
+                if ! [[ "$NOW_MB" =~ ^[0-9a-f]{40,64}$ ]]; then
+                  echo "::error::The merge base of PR #${PR} with the tip of ${BASE_REF} could not be read — nothing was merged. Re-run this job."
+                  exit 1
+                fi
+                if [ "$NOW_MB" != "$GATE_MB" ]; then
+                  echo "::notice::PR #${PR}: ${BASE_REF} gained a commit of its head since the gate judged it, which changes what the merge would write — not merged. Re-run this workflow to judge it again, or merge it by hand."
+                  exit 0
+                fi
               fi
               if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \
                   -f merge_method="$method" -f sha="$HEAD_SHA" 2>&1); then
@@ -695,13 +723,25 @@ jobs:
             echo "::error::PR #${PR} was merged, but GitHub did not name the commit it created — read by hand what the merge changed on the base branch."
             exit 1
           fi
-          PARENT=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${MERGED}" --jq '.parents[0].sha // ""') || PARENT=""
+          # A commit just written can take a moment to be readable: three
+          # reads, five and ten seconds apart, before calling it unreadable.
+          PARENT=""
+          for delay in 0 5 10; do
+            sleep "$delay"
+            PARENT=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${MERGED}" --jq '.parents[0].sha // ""') || PARENT=""
+            if [[ "$PARENT" =~ ^[0-9a-f]{40,64}$ ]]; then break; fi
+          done
           if ! [[ "$PARENT" =~ ^[0-9a-f]{40,64}$ ]]; then
             echo "::error::The commit that merged PR #${PR} (${MERGED:0:7}) could not be read — read by hand what it changed."
             exit 1
           fi
-          WROTE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PARENT}...${MERGED}" \
-                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || WROTE=""
+          WROTE=""
+          for delay in 0 5 10; do
+            sleep "$delay"
+            WROTE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PARENT}...${MERGED}" \
+                      --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || WROTE=""
+            if [ -n "$WROTE" ] && [ "$(jq -r '.listed' <<< "$WROTE")" = "array" ]; then break; fi
+          done
           if [ -z "$WROTE" ] || [ "$(jq -r '.listed' <<< "$WROTE")" != "array" ]; then
             echo "::error::What ${MERGED:0:7} changed could not be listed — read by hand what the merge of PR #${PR} changed."
             exit 1
@@ -857,11 +897,17 @@ jobs:
             exit 1
           fi
           RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${HEAD_SHA}" \
-                    --jq '{files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
+                    --jq '{base: (.merge_base_commit.sha // ""), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
           ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
           if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then
             echo "::notice::PR #${PR}: ${LISTED} file(s) listed from the tip of ${BASE_REF}, ${CHANGED} counted on the pull request (a listing of 300 may be cut short; a gap is a merge base the tip moved) — leaving it for a hand merge."
+            exit 0
+          fi
+          # The merge base the range was listed from (see promote-from-ci).
+          MB=$(jq -r '.base' <<< "$RANGE")
+          if ! [[ "$MB" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::notice::PR #${PR}: the range from the tip of ${BASE_REF} came back without its merge base — leaving it for a hand merge."
             exit 0
           fi
           PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
@@ -893,12 +939,6 @@ jobs:
             exit 0
           fi
           gh pr ready "$PR" || true
-          # Retargeted since the range was read: stop (see promote-from-ci).
-          NOW_BASE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '.base.ref')
-          if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
-            echo "::notice::PR #${PR}: its base branch changed since the gate — leaving it for a hand merge."
-            exit 0
-          fi
           # `sha=` pins the merge to the head this event carries (a head pushed
           # since gets a 409 and its own run). `merged=true` only on an actual
           # merge: the deferral above and a failed merge leave it unset, so the
@@ -906,15 +946,39 @@ jobs:
           # commit, which the check reads.
           for attempt in 1 2 3 4 5; do
             for method in squash merge; do
-              # The tip, re-read right before each call (see promote-from-ci).
+              # The pull request and the merge base, read again before each
+              # call (see promote-from-ci).
+              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // "")] | @tsv') || STATE=""
+              if [ -z "$STATE" ]; then
+                echo "::error::PR #${PR} could not be read again before a merge call — check whether an earlier call merged it, then re-run this job."
+                exit 1
+              fi
+              IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT <<< "$STATE"
+              if [ "$NOW_MERGED" = "true" ]; then
+                echo "::notice::PR #${PR} is merged already: an earlier call merged it and answered an error, or someone merged it by hand. Its merge commit is checked next."
+                echo "merged=true" >> "$GITHUB_OUTPUT"
+                echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
+                echo "::notice::PR #${PR}: its base branch changed since the gate — leaving it for a hand merge."
+                exit 0
+              fi
               NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || NOW_TIP=""
-              if [ -z "$NOW_TIP" ]; then
+              if ! [[ "$NOW_TIP" =~ ^[0-9a-f]{40,64}$ ]]; then
                 echo "::error::The tip of ${BASE_REF} could not be read again — nothing was merged. Re-run this job."
                 exit 1
               fi
               if [ "$NOW_TIP" != "$TIP" ]; then
-                echo "::notice::PR #${PR}: ${BASE_REF} moved since the gate judged it — not merged. Re-run this workflow to judge the new tip, or merge it by hand."
-                exit 0
+                NOW_MB=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${NOW_TIP}...${HEAD_SHA}" --jq '.merge_base_commit.sha // ""') || NOW_MB=""
+                if ! [[ "$NOW_MB" =~ ^[0-9a-f]{40,64}$ ]]; then
+                  echo "::error::The merge base of PR #${PR} with the tip of ${BASE_REF} could not be read — nothing was merged. Re-run this job."
+                  exit 1
+                fi
+                if [ "$NOW_MB" != "$MB" ]; then
+                  echo "::notice::PR #${PR}: ${BASE_REF} gained a commit of its head since the gate judged it, which changes what the merge would write — not merged. Re-run this workflow to judge it again, or merge it by hand."
+                  exit 0
+                fi
               fi
               if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \
                   -f merge_method="$method" -f sha="$HEAD_SHA" 2>&1); then
@@ -959,13 +1023,25 @@ jobs:
             echo "::error::PR #${PR} was merged, but GitHub did not name the commit it created — read by hand what the merge changed on the base branch."
             exit 1
           fi
-          PARENT=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${MERGED}" --jq '.parents[0].sha // ""') || PARENT=""
+          # A commit just written can take a moment to be readable: three
+          # reads, five and ten seconds apart, before calling it unreadable.
+          PARENT=""
+          for delay in 0 5 10; do
+            sleep "$delay"
+            PARENT=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${MERGED}" --jq '.parents[0].sha // ""') || PARENT=""
+            if [[ "$PARENT" =~ ^[0-9a-f]{40,64}$ ]]; then break; fi
+          done
           if ! [[ "$PARENT" =~ ^[0-9a-f]{40,64}$ ]]; then
             echo "::error::The commit that merged PR #${PR} (${MERGED:0:7}) could not be read — read by hand what it changed."
             exit 1
           fi
-          WROTE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PARENT}...${MERGED}" \
-                    --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || WROTE=""
+          WROTE=""
+          for delay in 0 5 10; do
+            sleep "$delay"
+            WROTE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PARENT}...${MERGED}" \
+                      --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || WROTE=""
+            if [ -n "$WROTE" ] && [ "$(jq -r '.listed' <<< "$WROTE")" = "array" ]; then break; fi
+          done
           if [ -z "$WROTE" ] || [ "$(jq -r '.listed' <<< "$WROTE")" != "array" ]; then
             echo "::error::What ${MERGED:0:7} changed could not be listed — read by hand what the merge of PR #${PR} changed."
             exit 1

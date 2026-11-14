@@ -1231,20 +1231,30 @@ test("auto-merge: AM-7 and AM-10 go red when the tip is not read again before a 
   const verdict = 'if [ "$WROTE_COUNT" -ge 300 ] || [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then';
   const firstCheck = shipped.indexOf(checkName), slot = shipped.indexOf("      # Nothing is dispatched after the merge");
   assert.ok(firstCheck > 0 && slot > firstCheck, "promote-from-ci's check step, then the dispatch slot");
+  const loopHead = ind(10, "for attempt in 1 2 3 4 5; do");
+  const ciLoop = ind(10, "# post-merge dispatch would use.") + loopHead;
+  const checkRun = ind(10, "set -euo pipefail") + ind(10, "# The commit the merge created, listed against its first parent: the");
   const cases = [
-    // The tip, read again right before each merge call.
-    ["the tip not checked again before promote-from-ci's merge call", "AM-7", dropBlock(shipped, 'if [ "$NOW_TIP" != "$GATE_TIP" ]; then', 1)],
-    ["the tip not checked again before promote-docs' merge call", "AM-7", dropBlock(shipped, 'if [ "$NOW_TIP" != "$TIP" ]; then', 1)],
-    ["a failed read of the tip merges anyway", "AM-7", inBlock(shipped, 'if [ -z "$NOW_TIP" ]; then', 2, "exit 1", "true")],
-    ["a tip that moved only noticed", "AM-7", inBlock(shipped, 'if [ "$NOW_TIP" != "$GATE_TIP" ]; then', 1, "exit 0", "true")],
+    // Before each merge call: the pull request, the tip and the merge base, read again.
+    ["the merge base not compared when the tip moved", "AM-7", inBlock(shipped, 'if [ "$NOW_MB" != "$GATE_MB" ]; then', 1, "exit 0", "true")],
+    ["promote-docs' merge base check dropped", "AM-7", dropBlock(shipped, 'if [ "$NOW_MB" != "$MB" ]; then', 1)],
+    ["a failed read of the tip merges anyway", "AM-7", inBlock(shipped, 'if ! [[ "$NOW_TIP" =~ ^[0-9a-f]{40,64}$ ]]; then', 2, "exit 1", "true")],
+    ["an unreadable merge base taken as unchanged", "AM-7", inBlock(shipped, 'if ! [[ "$NOW_MB" =~ ^[0-9a-f]{40,64}$ ]]; then', 2, "exit 1", "true")],
+    ["a merge already made left unchecked", "AM-7", inBlock(shipped, 'if [ "$NOW_MERGED" = "true" ]; then', 2, 'echo "merged=true" >> "$GITHUB_OUTPUT"', [])],
+    ["a retarget not checked before each call", "AM-7", dropBlock(shipped, 'if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then', 2)],
     ["the tip judged taken from the event", "AM-7", edit(shipped, "GATE_TIP: ${{ steps.gate.outputs.tip }}", 1, "GATE_TIP: ${{ github.event.workflow_run.head_sha }}")],
+    ["the merge base judged taken from the event", "AM-7", edit(shipped, "GATE_MB: ${{ steps.gate.outputs.merge_base }}", 1, "GATE_MB: ${{ github.event.workflow_run.head_sha }}")],
     ["the tip not handed over by the gate", "AM-7", edit(shipped, 'echo "tip=${TIP}" >> "$GITHUB_OUTPUT"', 1, [])],
-    // The tip, on copies the checks of the range were written against.
+    ["the tip judged read again before the loop", "AM-7", once(shipped, ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, 'GATE_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq \'.object.sha\')') + loopHead)],
+    ["the gate's merge base not held when missing", "AM-7", inBlock(shipped, 'if ! [[ "$MB" =~ ^[0-9a-f]{40,64}$ ]]; then', 2, "exit 0", "true")],
+    ["a string left open around the stop", "AM-7", inBlock(shipped, 'if [ "$NOW_MB" != "$GATE_MB" ]; then', 1, "exit 0", ['echo "\\"', "exit 0", 'echo "\\"'])],
+    // The range, on copies the checks of the tip were written against.
     ["the range from base.sha", "AM-7", shipped.split("compare/${TIP}...${HEAD_SHA}\"").join("compare/${BASE_SHA}...${HEAD_SHA}\"")],
     ["a listing of 300 files trusted when the counts agree", "AM-7", edit(shipped, 'if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then', 2, 'if [ "$LISTED" != "$CHANGED" ]; then')],
     // What the merge wrote, judged again.
     ["promote-from-ci without the check", "AM-10", shipped.slice(0, firstCheck) + shipped.slice(slot)],
     ["a step between the merge and the check", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"), ind(6, "- name: Something else") + ind(8, "run: echo hi") + "\n" + checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"))],
+    ["an unnamed step between the merge and the check", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"), ind(6, "- run: echo hi") + "\n" + checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"))],
     ["the check skipped when a step before it failed", "AM-10", shipped.split(checkName + checkIf).join(checkName + ind(8, "if: steps.merge.outputs.merged == 'true'"))],
     ["the docs rule off in the docs job", "AM-10", edit(shipped, "DOCS_ONLY: 'true'", 1, "DOCS_ONLY: 'false'")],
     ["a held path only noticed", "AM-10", inBlock(shipped, verdict, 2, "exit 1", "exit 0")],
@@ -1254,11 +1264,19 @@ test("auto-merge: AM-7 and AM-10 go red when the tip is not read again before a 
     ["the listing of a range that is always empty", "AM-10", shipped.split("compare/${PARENT}...${MERGED}\"").join("compare/${PARENT}...${PARENT}\"")],
     ["another selection of weakened files", "AM-10", edit(shipped, "WROTE_SHRUNK=$(jq -r", 2, "WROTE_SHRUNK=$(jq -r '.changes[] | select(.status == \"removed\") | .filename' <<< \"$WROTE\")")],
     ["an unnamed merge commit passes", "AM-10", inBlock(shipped, 'if ! [[ "$MERGED" =~ ^[0-9a-f]{40,64}$ ]]; then', 2, "exit 1", "exit 0")],
-    ["an early exit 0", "AM-10", shipped.split(ind(10, "set -euo pipefail") + ind(10, "# The commit the merge created, listed against its first parent: the")).join(ind(10, "set -euo pipefail") + ind(10, "exit 0") + ind(10, "# The commit the merge created, listed against its first parent: the"))],
-    ["a message that leaves", "AM-10", shipped.split(ind(10, "set -euo pipefail") + ind(10, "# The commit the merge created, listed against its first parent: the")).join(ind(10, "set -euo pipefail") + ind(10, 'echo "PR #${PR}: nothing to check" && exit 0') + ind(10, "# The commit the merge created, listed against its first parent: the"))],
-    ["a message that runs a command", "AM-10", shipped.split(ind(10, "set -euo pipefail") + ind(10, "# The commit the merge created, listed against its first parent: the")).join(ind(10, "set -euo pipefail") + ind(10, 'echo "checked: $(true)"') + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a commit read once, without waiting", "AM-10", edit(shipped, "for delay in 0 5 10; do", 4, "for delay in 0; do")],
+    ["an early exit 0", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, "exit 0") + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a message that leaves", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, 'echo "PR #${PR}: nothing to check" && exit 0') + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a message that runs a command", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, 'echo "checked: $(true)"') + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a string left open around the verdict's exit", "AM-10", inBlock(shipped, verdict, 2, "exit 1", ['echo "\\"', "exit 1", 'echo "\\"'])],
+    ["an expression in a comment of the check", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, `# \${{ fromJSON('"x"') }}`) + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["an expression in a comment of the merge loop", "AM-10", once(shipped, ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, `# \${{ fromJSON('"x"') }}`) + loopHead)],
     ["promote-docs keeps the merge commit to itself", "AM-10", last(shipped, shaLine, "")],
+    ["a second sha written after the hand-over", "AM-10", last(shipped, shaLine, shaLine + ind(16, 'echo "sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"'))],
     ["a failed check that lets the job go on", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ github.event.pull_request.number }}"), checkName + checkIf + ind(8, "continue-on-error: true") + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ github.event.pull_request.number }}"))],
+    ["a job that lets its failures go", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "continue-on-error: true"])],
+    ["a job with another shell", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "defaults:", "  run:", "    shell: sh {0}"])],
+    ["a step that sets the next ones' environment", "AM-10", edit(shipped, 'echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 1, ['echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 'echo "MERGED=${MB}" >> "$GITHUB_ENV"'])],
   ];
   const [green, ...reds] = await bounded([() => guard("as shipped"), ...cases.map(([label, , text]) => () => guard(label, text))]);
   assert.equal(green.status, 0, `${green.stdout}\n${green.stderr}`);

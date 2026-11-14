@@ -13,9 +13,10 @@
 #         from one compare/<base branch's tip>...<validated head> per merging
 #         job, the tip read by its full ref and used nowhere else, never from
 #         the pull request's current state nor from its stored base.sha; a
-#         listing of 300 files holds whatever the count, and the base is
-#         re-read before each merge. The tip is read again right before each
-#         merge call, retries included, and a tip that moved stops the merge.
+#         listing of 300 files holds whatever the count. Before each merge
+#         call, retries included, the pull request, the tip and, when the tip
+#         moved, the merge base are read again: a merge already made goes to
+#         the check (AM-10), a retarget or a moved merge base stops the merge.
 #         A pull request that cannot be read fails the job instead of passing
 #         for a moved head.
 #   AM-4  marking a pull request ready never merges it. The two ready lines are
@@ -52,7 +53,9 @@
 #         runs the gate's rules on it (held paths, weakened tests, and outside
 #         the docs for the docs job): red when anything matches, when the
 #         listing is cut short or cannot be read. Its run block is pinned,
-#         the same in both jobs, and the merge steps hand it the commit.
+#         the same in both jobs, and the merge steps hand it the commit. No
+#         continue-on-error, defaults, shell, GITHUB_ENV or GITHUB_PATH in
+#         the file, and no ${{ }} inside a run: script (comments included).
 #
 # AM-2 and AM-3 are unused on purpose. In the workflow this guard was first
 # written for, they covered a post-merge deploy dispatch: whether the default
@@ -707,42 +710,75 @@ fi
 # project's values (--set), and may name anything. A message or a comment at
 # the end of a code line counts.
 jobs_code=$(sed -n '/^jobs:/,$p' "$AM" | grep -vE '^[[:space:]]*#')
-# Two compare calls per merging job: the gate's listing from the tip, and the
-# listing of what the merge wrote (AM-10, pinned there). The tip named on four
-# lines of each (its read, its check, the listing, and its hand-over to the
-# merge loop: the gate's output in promote-from-ci, the re-check before each
-# merge call in promote-docs; all pinned), so that no other line takes it
-# again — from the pull request's base object, an env value or another
-# variable; and the rows and their count assigned on their pinned lines only.
+# Three compare calls per merging job: the gate's listing from the tip, the
+# merge base read again before a merge call when the tip moved, and the listing
+# of what the merge wrote (AM-10, pinned there). The tip named on four lines of
+# each (its read, its check, the listing, and its hand-over to the merge loop:
+# the gate's output in promote-from-ci, the comparison before each merge call
+# in promote-docs; all pinned), so that no other line takes it again — from the
+# pull request's base object, an env value or another variable; and the rows
+# and their count assigned on their pinned lines only.
 compares=$(grep -o 'compare/' <<< "$jobs_code" | grep -c . || true)
-if [ "$compares" != "$((2 * merging))" ]; then
-  bad 7 "$compares compare call(s) in the jobs for $merging merging job(s) — one listing per job from the tip, and one of what the merge wrote (AM-10)"
+if [ "$compares" != "$((3 * merging))" ]; then
+  bad 7 "$compares compare call(s) in the jobs for $merging merging job(s) — per job, one listing from the tip, one read of the merge base before a merge call, one listing of what the merge wrote (AM-10)"
 fi
 tip_lines=$(grep -cE '(^|[^A-Za-z0-9_])TIP([^A-Za-z0-9_]|$)' <<< "$jobs_code" || true)
 if [ "$tip_lines" != "$((4 * merging))" ]; then
   bad 7 "$tip_lines code line(s) of the jobs name TIP, $((4 * merging)) expected — the tip is read once per merging job, by its full ref, and named only by its check, the listing and its hand-over to the merge loop (a message or a comment on a code line counts)"
 fi
-handed=$(grep -cxF '          echo "tip=${TIP}" >> "$GITHUB_OUTPUT"' <<< "$jobs_code" || true)
-received=$(grep -cE '^ +[A-Z_]*TIP: ' "$AM" || true)
-if [ "$handed" != "1" ] || [ "$received" != "1" ] || ! grep -qxF '          GATE_TIP: ${{ steps.gate.outputs.tip }}' "$AM"; then
-  bad 7 "the gate hands the tip it judged to the merge step on one pinned line each (echo "tip=\${TIP}" >> "\$GITHUB_OUTPUT"; GATE_TIP: \${{ steps.gate.outputs.tip }}), and no other env value names a tip — found $handed and $received"
+# The gate hands the tip and the merge base it judged to the merge step, each on
+# one pinned line; the merge step receives them on one pinned env line each, and
+# names them nowhere but in its comparisons — no line takes them again. The same
+# for the merge base in the gates, and for the values read before each call.
+names() { grep -cE "(^|[^A-Za-z0-9_])$1([^A-Za-z0-9_]|\$)" <<< "$jobs_code" || true; }
+if [ "$(grep -cxF '          echo "tip=${TIP}" >> "$GITHUB_OUTPUT"' <<< "$jobs_code" || true)" != "1" ] \
+   || [ "$(grep -cxF '          echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"' <<< "$jobs_code" || true)" != "1" ] \
+   || [ "$(grep -cE '^ +[A-Z_]*(TIP|MB): ' "$AM" || true)" != "2" ] \
+   || ! grep -qxF '          GATE_TIP: ${{ steps.gate.outputs.tip }}' "$AM" \
+   || ! grep -qxF '          GATE_MB: ${{ steps.gate.outputs.merge_base }}' "$AM"; then
+  bad 7 "the gate hands the tip and the merge base it judged to the merge step on one pinned line each (echo \"tip=\${TIP}\", echo \"merge_base=\${MB}\" >> \"\$GITHUB_OUTPUT\"; GATE_TIP: \${{ steps.gate.outputs.tip }}, GATE_MB: \${{ steps.gate.outputs.merge_base }}), and no other env value names a tip or a merge base"
 fi
-# Right before each merge call, retries included, the tip is read again and a
-# tip that moved stops the merge (exit 0, nothing merged); a failed read fails.
-# From the loop's head to the merge call, nothing else runs: comments, blank
-# lines and plain messages aside, each job's lines are exactly these.
+counts="$(names GATE_TIP) $(names GATE_MB) $(names MB) $(names NOW_TIP) $(names NOW_MB) $(names STATE) $(names NOW_MERGED) $(names NOW_COMMIT)"
+if [ "$counts" != "2 2 $((3 * merging)) $((4 * merging)) $((3 * merging)) $((3 * merging)) $((2 * merging)) $((2 * merging))" ]; then
+  bad 7 "lines naming GATE_TIP GATE_MB MB NOW_TIP NOW_MB STATE NOW_MERGED NOW_COMMIT: $counts — each is assigned and compared on its pinned lines only"
+fi
+mbs=$(grep -cxF "          MB=\$(jq -r '.base' <<< \"\$RANGE\")" <<< "$jobs_code" || true)
+mb_held=$(awk '/^          if ! \[\[ "\$MB" =~ \^\[0-9a-f\]\{40,64\}\$ \]\]; then$/ { armed = 1; regions++; next }
+  armed && /^          fi$/ { armed = 0; next }
+  armed && /^            exit 0$/ { exits++; next }
+  armed && /^            echo "::notice::/ { next }
+  armed && /^            echo "merge=false" >> "\$GITHUB_OUTPUT"$/ { next }
+  armed { other++ }
+  END { print regions + 0, exits + 0, other + 0 }' "$AM")
+based=$(grep -cF -- "--jq '{base: (.merge_base_commit.sha // \"\")," <<< "$jobs_code" || true)
+if [ "$mbs" != "$merging" ] || [ "$mb_held" != "$merging $merging 0" ] || [ "$based" != "$merging" ]; then
+  bad 7 "each gate reads the merge base of its range on pinned lines, and holds when it is not a commit (found: $mbs reads, $based listings asking for it, branches, exits, other lines = $mb_held)"
+fi
+# Before each merge call, retries included: the pull request read again (merged
+# already: its commit handed to the check; retargeted: stop), the tip read again
+# and, when it moved, the merge base: moved, stop; unreadable, fail. From the
+# loop's head to the merge call, nothing else runs: comments, blank lines and
+# plain messages aside, each job's lines are exactly these.
 pre_put=$(awk '/^ *for method in squash merge; do$/ { on = 1; print "@@" }
   on && /^ *if OUT=\$\(gh api --method PUT / { on = 0 }
   on { sub(/^ */, ""); print }' "$AM" \
-  | grep -vE '^(#|$)' | grep -vE '^echo "([^"$`]|\$\{[A-Za-z_][A-Za-z0-9_]*(:[0-9]+:[0-9]+)?\})*"$' || true)
-tip_again() { # tip_again <the variable holding the tip the gate judged>
+  | grep -vE '^(#|$)' | grep -vE '^echo "([^"$`\\]|\$\{[A-Za-z_][A-Za-z0-9_]*(:[0-9]+:[0-9]+)?\})*"$' || true)
+before_call() { # before_call <the variable holding the tip the gate judged> <the one holding its merge base>
   printf '%s\n' '@@' 'for method in squash merge; do' \
+    'STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '"'"'[.base.ref, (.merged | tostring), (.merge_commit_sha // "")] | @tsv'"'"') || STATE=""' \
+    'if [ -z "$STATE" ]; then' 'exit 1' 'fi' \
+    'IFS=$'"'"'\t'"'"' read -r NOW_BASE NOW_MERGED NOW_COMMIT <<< "$STATE"' \
+    'if [ "$NOW_MERGED" = "true" ]; then' 'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi' \
+    'if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then' 'exit 0' 'fi' \
     'NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '"'"'.object.sha'"'"') || NOW_TIP=""' \
-    'if [ -z "$NOW_TIP" ]; then' 'exit 1' 'fi' \
-    "if [ \"\$NOW_TIP\" != \"\$$1\" ]; then" 'exit 0' 'fi'
+    'if ! [[ "$NOW_TIP" =~ ^[0-9a-f]{40,64}$ ]]; then' 'exit 1' 'fi' \
+    "if [ \"\$NOW_TIP\" != \"\$$1\" ]; then" \
+    'NOW_MB=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${NOW_TIP}...${HEAD_SHA}" --jq '"'"'.merge_base_commit.sha // ""'"'"') || NOW_MB=""' \
+    'if ! [[ "$NOW_MB" =~ ^[0-9a-f]{40,64}$ ]]; then' 'exit 1' 'fi' \
+    "if [ \"\$NOW_MB\" != \"\$$2\" ]; then" 'exit 0' 'fi' 'fi'
 }
-if [ "$pre_put" != "$(tip_again GATE_TIP; tip_again TIP)" ]; then
-  bad 7 "each merge loop must read the tip again right before its merge call, fail when it cannot, and stop when it moved (promote-from-ci against GATE_TIP, promote-docs against TIP), with nothing else before the call"
+if [ "$pre_put" != "$(before_call GATE_TIP GATE_MB; before_call TIP MB)" ]; then
+  bad 7 "each merge loop must, before its merge call, read the pull request again (hand a merge already made to the check, stop on a retarget), read the tip again and, when it moved, stop if the merge base moved (promote-from-ci against GATE_TIP and GATE_MB, promote-docs against TIP and MB), fail on any failed read, with nothing else before the call"
 fi
 reassigned=$(grep -cE '(^|[^A-Za-z0-9_])(ROWS|LISTED)\+?=' <<< "$jobs_code" || true)
 if [ "$reassigned" != "$((2 * merging))" ]; then
@@ -796,15 +832,15 @@ unread=$(awk '/^          if \[ -z "\$PR_HEAD" \]; then$/ { armed = 1; next } ar
 if [ "$unread" != "$merging" ]; then
   bad 7 "$merging merging job(s) but $unread fail on a pull request that could not be read — an empty head must exit 1, not pass for a moved head"
 fi
-rechecked=$(grep -cxF '          if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then' "$AM" || true)
+rechecked=$(grep -cxF '              if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then' "$AM" || true)
 if [ "$rechecked" != "$merging" ]; then
-  bad 7 "$merging merging job(s) but $rechecked re-read the base branch right before merging"
+  bad 7 "$merging merging job(s) but $rechecked re-read the base branch right before each merge call"
 fi
 foreign_base=$(grep -E '^ +(BASE_(SHA|REF)|TIP): ' "$AM" | grep -cvE '^ +BASE_REF: \$\{\{ (github\.event\.pull_request\.base\.ref|steps\.gate\.outputs\.base_ref) \}\}$' || true)
 if [ "$foreign_base" != "0" ]; then
   bad 7 "BASE_REF must come from the triggering event or from the gate step's output, and no commit of the base may come from outside the job's own read of the tip"
 fi
-pass 7 "the gate reads one immutable range per job from the base branch's tip, holds a listing of 300 files, re-reads the base and the tip before each merge call, and fails on a failed read"
+pass 7 "the gate reads one immutable range per job from the base branch's tip, holds a listing of 300 files, reads the pull request, the tip and the merge base again before each merge call, and fails on a failed read"
 
 # ── AM-8 — tests that get weaker are held ───────────────────────────────────
 # The CI that went green ran the tests as the pull request left them. What the
@@ -868,36 +904,56 @@ pass 8 "a pull request that deletes, renames or rewrites lines of an existing fi
 # The gate lists the changes since one merge base of the tip and the head; the
 # merge writes what GitHub's merge engine computes. They agreed when this was
 # tried live with two merge bases, but nothing documents it, and a branch
-# landing between the last read of the tip and the merge call moves that
+# landing between the last reads before the merge call and the call moves that
 # merge base anyway. So right after each merge step, a step lists the commit
 # the merge created against its first parent and runs the gate's rules on it.
 # The merge is done: its job is to turn the run red, never to pass quietly.
-# Every line of the job, tagged with its job and its step.
+# Nothing in the file may let a failing step pass, change the shell or the
+# environment of a later step, or put an expression into a script: GitHub
+# expands `${{ }}` inside a `run:` block before the shell reads it, comments
+# included, so the text pinned below would not be what runs.
+forbidden=$(grep -cE '^ *(continue-on-error|defaults|shell):|GITHUB_ENV|GITHUB_PATH' "$AM" || true)
+if [ "$forbidden" != "0" ]; then
+  bad 10 "$forbidden line(s) set continue-on-error, defaults or a shell, or write GITHUB_ENV or GITHUB_PATH — none belongs in this workflow"
+fi
+expressions=$(awk '/^ *run: [|>]/ { inrun = 1; key = index($0, "run:"); next }
+  inrun && /^[[:space:]]*$/ { next }
+  inrun { match($0, /^ */); if (RLENGTH < key) inrun = 0 }
+  inrun && index($0, "${{") { n++ }
+  /^ *(- )?run: [^|>]/ && index($0, "${{") { n++ }
+  END { print n + 0 }' "$AM")
+if [ "$expressions" != "0" ]; then
+  bad 10 "$expressions line(s) of a run: script carry \${{ }}, comments included — pass values through env:"
+fi
+# Every line of the jobs, tagged with its job and its step (a step starts at any
+# `- ` item of a job's steps, named or not).
 steps_tsv=$(awk '/^jobs:$/ { on = 1; next }
   !on { next }
   /^  [A-Za-z0-9_-]+:$/ { job = $1; sub(/:$/, "", job); step = "-"; next }
-  /^      - name: / { step = substr($0, 15) }
+  /^      - / { n++; step = n }
   { print job "\t" step "\t" $0 }' "$AM")
 CHECK='Check what the merge wrote'
-checks=$(awk -F'\t' -v c="$CHECK" '$3 == "      - name: " c' <<< "$steps_tsv" | grep -c . || true)
-# The step right after the one whose id is `merge`, in each merging job.
-after_merge=$(awk -F'\t' -v c="$CHECK" '$3 ~ /^      - name: / { if (want != "") { if ($1 == want && $2 == c) good++; else other++ } want = "" }
+NAME="      - name: $CHECK"
+checks=$(awk -F'\t' -v c="$NAME" '$3 == c' <<< "$steps_tsv" | grep -c . || true)
+# The step right after the one whose id is `merge`, in each merging job: its
+# first line is the check's name.
+after_merge=$(awk -F'\t' -v c="$NAME" '$3 ~ /^      - / { if (want != "") { if ($1 == want && $3 == c) good++; else other++ } want = "" }
   $3 == "        id: merge" { want = $1 }
   END { print good + 0, other + 0 }' <<< "$steps_tsv")
 if [ "$checks" != "$merging" ] || [ "$after_merge" != "$merging 0" ]; then
-  bad 10 "$merging merging job(s) but $checks step(s) '$CHECK' (right after the merge step: found $after_merge) — each merging job judges what its merge wrote, in the step that follows it"
+  bad 10 "$merging merging job(s) but $checks step(s) '$CHECK' (right after the merge step, named or not: found $after_merge) — each merging job judges what its merge wrote, in the step that follows it"
 fi
-step_of() { awk -F'\t' -v j="$1" -v c="$CHECK" '$1 == j && $2 == c { print $3 }' <<< "$steps_tsv"; }
+step_of() { # the lines of the check step of job $1
+  awk -F'\t' -v j="$1" -v c="$NAME" '$1 == j && $3 == c { s = $2 } $1 == j && s != "" && $2 == s { print $3 }' <<< "$steps_tsv"; }
 # Up to its `run:`, each check step is exactly this: it runs whenever its merge
-# happened, whatever failed before; nothing lets its failure pass
-# (`continue-on-error`), changes its shell or its inputs.
+# happened, whatever failed before, and reads the commit its merge step wrote.
 for job in promote-from-ci promote-docs; do
   case "$job" in
     promote-docs) pr_from='${{ github.event.pull_request.number }}'; docs="'true'" ;;
     *) pr_from='${{ steps.find-pr.outputs.pr }}'; docs="'false'" ;;
   esac
   header=$(sed '/^        run: |$/,$d' <<< "$(step_of "$job")" | grep -vE '^[[:space:]]*(#|$)' || true)
-  expected_header=$(printf '%s\n' "      - name: $CHECK" '        id: check' \
+  expected_header=$(printf '%s\n' "$NAME" '        id: check' \
     "        if: \${{ !cancelled() && steps.merge.outputs.merged == 'true' }}" \
     '        env:' '          GH_TOKEN: ${{ github.token }}' "          PR: $pr_from" \
     '          MERGED: ${{ steps.merge.outputs.sha }}' "          DOCS_ONLY: $docs")
@@ -906,22 +962,34 @@ for job in promote-from-ci promote-docs; do
   fi
 done
 # Its run block, in both jobs: comments, blank lines, indentation and plain
-# messages aside, exactly these lines. Every way out but the last line is
-# `exit 1`; the weakened files are the gate's own selection (AM-8).
+# messages aside (a message is one double-quoted string with nothing after it
+# and no backslash, no `$(`, no backquote), exactly these lines. Every way out
+# but the last line is `exit 1`; the weakened files are the gate's own
+# selection (AM-8).
 run_of() { sed -n '/^        run: |$/,$p' <<< "$1" | sed '1d; s/^ *//' | grep -vE '^(#|$)' \
-  | grep -vE '^echo "([^"$`]|\$\{[A-Za-z_][A-Za-z0-9_]*(:[0-9]+:[0-9]+)?\})*"$' || true; }
+  | grep -vE '^echo "([^"$`\\]|\$\{[A-Za-z_][A-Za-z0-9_]*(:[0-9]+:[0-9]+)?\})*"$' || true; }
 gate_filter=$(sed -n "s/^ *SHRUNK=\$(jq -r '\(.*\)' <<< \"\$RANGE\")$/\1/p" "$AM" | sort -u)
 IFS= read -r -d '' expected_run <<'RUN' || true
 set -euo pipefail
 if ! [[ "$MERGED" =~ ^[0-9a-f]{40,64}$ ]]; then
 exit 1
 fi
+PARENT=""
+for delay in 0 5 10; do
+sleep "$delay"
 PARENT=$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/${MERGED}" --jq '.parents[0].sha // ""') || PARENT=""
+if [[ "$PARENT" =~ ^[0-9a-f]{40,64}$ ]]; then break; fi
+done
 if ! [[ "$PARENT" =~ ^[0-9a-f]{40,64}$ ]]; then
 exit 1
 fi
+WROTE=""
+for delay in 0 5 10; do
+sleep "$delay"
 WROTE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${PARENT}...${MERGED}" \
 --jq '{listed: (.files | type), files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}') || WROTE=""
+if [ -n "$WROTE" ] && [ "$(jq -r '.listed' <<< "$WROTE")" = "array" ]; then break; fi
+done
 if [ -z "$WROTE" ] || [ "$(jq -r '.listed' <<< "$WROTE")" != "array" ]; then
 exit 1
 fi
@@ -953,14 +1021,17 @@ for job in promote-from-ci promote-docs; do
     bad 10 "$job: the run block of '$CHECK' changed — comments and messages aside, it must read the merge commit's first parent, list compare/\${PARENT}...\${MERGED} whole, run the gate's patterns, its selection of weakened files and (docs job) the docs rule on it, and exit 1 on anything found or unreadable"
   fi
 done
-# The merge steps hand it the commit GitHub created, on the line right after
-# the one that says a merge happened.
+# The merge steps hand it the commit GitHub created, or the one a merge already
+# made carries: right after each line that says a merge happened, and on no
+# other line that writes `sha=`.
 handover=$(awk '$0 ~ /^ +echo "merged=true" >> "\$GITHUB_OUTPUT"$/ { armed = 1; merged++; next }
-  armed && $0 ~ /^ +echo "sha=\$\(jq -r '"'"'\.sha \/\/ empty'"'"' <<< "\$OUT"\)" >> "\$GITHUB_OUTPUT"$/ { shas++ }
+  armed && $0 ~ /^ +echo "sha=\$\(jq -r '"'"'\.sha \/\/ empty'"'"' <<< "\$OUT"\)" >> "\$GITHUB_OUTPUT"$/ { made++ }
+  armed && $0 ~ /^ +echo "sha=\$\{NOW_COMMIT\}" >> "\$GITHUB_OUTPUT"$/ { found++ }
   { armed = 0 }
-  END { print merged + 0, shas + 0 }' "$AM")
-if [ "$handover" != "$merging $merging" ]; then
-  bad 10 "each merge step must write sha=<the merge commit> right after merged=true (found: merged=true lines, sha lines after them = $handover)"
+  END { print merged + 0, made + 0, found + 0 }' "$AM")
+shas=$(grep -E '(^|[^A-Za-z0-9_])sha=' <<< "$jobs_code" | grep -c 'GITHUB_OUTPUT' || true)
+if [ "$handover" != "$((2 * merging)) $merging $merging" ] || [ "$shas" != "$((2 * merging))" ]; then
+  bad 10 "each merge step must write sha=<the merge commit> right after each merged=true, on the two pinned lines, and nowhere else (found: merged=true lines, made, found = $handover; lines writing sha= = $shas)"
 fi
 pass 10 "what each merge wrote is listed and judged again by the gate's rules, right after the merge, and turns the run red"
 
