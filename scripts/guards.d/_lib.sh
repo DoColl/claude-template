@@ -7,9 +7,10 @@
 #
 # Guards run self-tests with `node --test`. A Node test run puts
 # NODE_TEST_CONTEXT in the environment of what it starts, and a `node --test`
-# that inherits it exits 0 whatever its tests do: a gate started from a
-# project's own tests would pass every failing self-test. Cleared here, where
-# every guard starts.
+# that inherits it exits 0 whatever its tests do (Node 20.12 and later; an
+# older one runs them and prints their results serialized): a gate started
+# from a project's own tests would pass every failing self-test. The gate
+# clears it for every guard; cleared here too for a guard started on its own.
 unset NODE_TEST_CONTEXT
 failures=0
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
