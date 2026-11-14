@@ -1190,17 +1190,29 @@ test("auto-merge: AM-7 and AM-10 go red when the tip is not read again before a 
     assert.equal(n, times, `${JSON.stringify(opener)}: ${n} block(s), ${times} expected`);
     return to.join("\n");
   };
-  // Each copy in a project of its own, the guard run on all of them at once (it takes a second or two each).
-  const guard = (label, text) => new Promise((resolve) => {
+  // Each copy in a project of its own, the guard run on it (a second or two each).
+  const guard = async (label, text) => {
     const dir = tmp();
-    fs.cpSync(pristine, dir, { recursive: true });
-    if (text !== undefined) write(dir, file, text);
-    const child = spawn("bash", ["scripts/guards.d/40-auto-merge.sh"], { cwd: dir, env: { ...ENV, CI: "" } });
-    let stdout = "", stderr = "";
-    child.stdout.on("data", (d) => { stdout += d; });
-    child.stderr.on("data", (d) => { stderr += d; });
-    child.on("close", (status) => resolve({ label, status, stdout, stderr }));
-  });
+    await fs.promises.cp(pristine, dir, { recursive: true });
+    if (text !== undefined) await fs.promises.writeFile(path.join(dir, file), text);
+    return new Promise((resolve) => {
+      const child = spawn("bash", ["scripts/guards.d/40-auto-merge.sh"], { cwd: dir, env: { ...ENV, CI: "" } });
+      let stdout = "", stderr = "";
+      child.stdout.on("data", (d) => { stdout += d; });
+      child.stderr.on("data", (d) => { stderr += d; });
+      child.on("close", (status) => resolve({ label, status, stdout, stderr }));
+    });
+  };
+  // The runs with their concurrency bounded by the processor count: the same work, without a burst of
+  // processes on a small runner.
+  const bounded = async (jobs) => {
+    const results = [];
+    let next = 0;
+    const worker = async () => { for (let i = next++; i < jobs.length; i = next++) results[i] = await jobs[i](); };
+    const concurrency = Math.min(jobs.length, Math.max(1, os.availableParallelism()));
+    await Promise.all(Array.from({ length: concurrency }, worker));
+    return results;
+  };
   // Exactly one occurrence of `from` (with its newline) replaced by `to`.
   const once = (text, from, to) => {
     assert.equal(text.split(from).length, 2, `${JSON.stringify(from.slice(0, 60))}: once expected`);
@@ -1248,7 +1260,7 @@ test("auto-merge: AM-7 and AM-10 go red when the tip is not read again before a 
     ["promote-docs keeps the merge commit to itself", "AM-10", last(shipped, shaLine, "")],
     ["a failed check that lets the job go on", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ github.event.pull_request.number }}"), checkName + checkIf + ind(8, "continue-on-error: true") + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ github.event.pull_request.number }}"))],
   ];
-  const [green, ...reds] = await Promise.all([guard("as shipped"), ...cases.map(([label, , text]) => guard(label, text))]);
+  const [green, ...reds] = await bounded([() => guard("as shipped"), ...cases.map(([label, , text]) => () => guard(label, text))]);
   assert.equal(green.status, 0, `${green.stdout}\n${green.stderr}`);
   for (const [i, r] of reds.entries()) {
     assert.equal(r.status, 1, `${r.label}: the guard must fail\n${r.stdout}\n${r.stderr}`);
