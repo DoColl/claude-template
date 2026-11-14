@@ -673,39 +673,63 @@ pass 6 "the merge is pinned to the SHA of the event, once CI and the review have
 # base re-check in each, and the base branch taken from the event or from the
 # gate. The range starts at the base branch's tip, read by its full ref
 # (git/ref/heads/…, which no tag can answer), never at the pull request's
-# base.sha: GitHub leaves that one where the branch was at the last push, and
-# the squash applies the head's changes since its merge base with the current
-# tip — a branch the head had merged, landed since, moves that merge base, and
-# a held path the merge changes back would go unlisted. An unreadable tip fails.
+# base.sha: GitHub sets that one when the pull request is opened and does not
+# move it with the branch, and the squash applies the head's changes since its
+# merge base with the current tip — a branch the head had merged, landed since,
+# moves that merge base, and a held path the merge changes back would go
+# unlisted. An unreadable tip fails.
 live=$(grep -cE 'pulls/\$\{?PR\}?/(files|commits)' "$AM" || true)
 if [ "$live" != "0" ]; then
   bad 7 "$live listing(s) of the pull request's current files or commits — the gate must read compare/\${TIP}...\${HEAD_SHA}"
 fi
-ranges=$(grep -cF 'compare/${TIP}...${HEAD_SHA}"' "$AM" || true)
+# The listing line, its rows and their count, each written exactly so, once per
+# merging job: the read and the check of the tip are pinned below the same way.
+ranges=$(grep -cxF '          RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${HEAD_SHA}" \' <<< "$code" || true)
 if [ "$ranges" != "$merging" ]; then
-  bad 7 "$merging merging job(s) but $ranges read the immutable range compare/\${TIP}...\${HEAD_SHA}"
+  bad 7 "$merging merging job(s) but $ranges read the immutable range on the pinned line RANGE=\$(gh api \"repos/\${GITHUB_REPOSITORY}/compare/\${TIP}...\${HEAD_SHA}\" \\"
 fi
-# One listing per merging job, and the tip named on three lines of each: its
-# read, its check, the listing. A second compare call, or a TIP taken again
-# from anything else (the pull request's base object, an env value), is red.
-compares=$(grep -o 'compare/' <<< "$code" | grep -c . || true)
+rows=$(grep -cxF "          ROWS=\$(jq -r '.files[] | @tsv' <<< \"\$RANGE\")" <<< "$code" || true)
+counted=$(grep -cxF '          LISTED=$(grep -c . <<< "$ROWS" || true)' <<< "$code" || true)
+if [ "$rows" != "$merging" ] || [ "$counted" != "$merging" ]; then
+  bad 7 "$merging merging job(s) but $rows take their rows from the range and $counted count them on the pinned lines"
+fi
+# Counted on the jobs' code only: the patterns of the workflow-level env are the
+# project's values (--set), and may name anything. A message or a comment at
+# the end of a code line counts.
+jobs_code=$(sed -n '/^jobs:/,$p' "$AM" | grep -vE '^[[:space:]]*#')
+# One listing per merging job; the tip named on three lines of each (its read,
+# its check, the listing, all pinned), so that no other line takes it again —
+# from the pull request's base object, an env value or another variable; and
+# the rows and their count assigned on their pinned lines only.
+compares=$(grep -o 'compare/' <<< "$jobs_code" | grep -c . || true)
 if [ "$compares" != "$merging" ]; then
-  bad 7 "$compares compare call(s) for $merging merging job(s) — one listing per job, from the tip"
+  bad 7 "$compares compare call(s) in the jobs for $merging merging job(s) — one listing per job, from the tip"
 fi
-tip_lines=$(grep -cE '(^|[^A-Za-z0-9_])TIP([^A-Za-z0-9_]|$)' <<< "$code" || true)
+tip_lines=$(grep -cE '(^|[^A-Za-z0-9_])TIP([^A-Za-z0-9_]|$)' <<< "$jobs_code" || true)
 if [ "$tip_lines" != "$((3 * merging))" ]; then
-  bad 7 "$tip_lines code line(s) name TIP, $((3 * merging)) expected — the tip is read once per merging job, by its full ref, and used only by its check and the listing"
+  bad 7 "$tip_lines code line(s) of the jobs name TIP, $((3 * merging)) expected — the tip is read once per merging job, by its full ref, and named only by its check and the listing (a message or a comment on a code line counts)"
 fi
-stale=$(grep -ciE 'base[._]sha|compare/\$\{?(BASE|DEFAULT)' <<< "$code" || true)
+reassigned=$(grep -cE '(^|[^A-Za-z0-9_])(ROWS|LISTED)\+?=' <<< "$jobs_code" || true)
+if [ "$reassigned" != "$((2 * merging))" ]; then
+  bad 7 "$reassigned assignment(s) of ROWS or LISTED in the jobs, $((2 * merging)) expected — the listing is counted on its pinned lines only"
+fi
+stale=$(grep -ciE 'base[._]sha|compare/\$\{?(BASE|DEFAULT)' <<< "$jobs_code" || true)
 if [ "$stale" != "0" ]; then
   bad 7 "$stale line(s) name base.sha, base_sha or BASE_SHA, or compare from \${BASE…} or \${DEFAULT…} — GitHub does not move base.sha with the branch"
 fi
 # The compare lists 300 files at most, and the pull request's changed_files can
 # come from another merge base than the tip's: equal counts do not prove a
-# whole listing, so 300 files hold whatever the count.
-cut=$(grep -cxF '          if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then' "$AM" || true)
-if [ "$cut" != "$merging" ]; then
-  bad 7 "$merging merging job(s) but $cut hold a listing of 300 files whatever the count, and any gap between the listing and the pull request's count"
+# whole listing, so 300 files hold whatever the count. The branch holds: up to
+# its `fi`, it only reports (a notice, merge=false) and leaves with `exit 0`.
+cut=$(awk '/^          if \[ "\$LISTED" -ge 300 \] \|\| \[ "\$LISTED" != "\$CHANGED" \]; then$/ { armed = 1; regions++; next }
+  armed && /^          fi$/ { armed = 0; next }
+  armed && /^            exit 0$/ { exits++; next }
+  armed && /^            echo "::notice::/ { next }
+  armed && /^            echo "merge=false" >> "\$GITHUB_OUTPUT"$/ { next }
+  armed { other++ }
+  END { print regions + 0, exits + 0, other + 0 }' "$AM")
+if [ "$cut" != "$merging $merging 0" ]; then
+  bad 7 "the hold of a listing of 300 files, or of a gap with the pull request's count, must be in each of the $merging merging job(s) and only report and exit 0 (found: branches, exits, other lines = $cut)"
 fi
 # The branch name goes into the URL of that read: a name the API would read
 # as another path (a `#`, a `?`, an encoded character) must hold, not resolve.
