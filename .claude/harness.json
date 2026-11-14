@@ -124,7 +124,7 @@
     },
     ".github/workflows/security.yml": {
       "module": "ci-security",
-      "sha256": "c11a7c0fb59b9d7453302124b5a5fc256acbdfefe863450da6bbed94218afc69"
+      "sha256": "9ca8c45af6957f1387ca618641b531bff047247ce7666dbb86b3b15ac0da1bab"
     },
     ".github/zizmor.yml": {
       "module": "ci-security",
@@ -140,7 +140,7 @@
     },
     "docs/conventions/security-workflow.md": {
       "module": "ci-security",
-      "sha256": "c62595e8f6f59d42bdb260677d7967c9b9c0faf265f8fcd5a708742e38a477ba"
+      "sha256": "839156a95e7981240ec15a2ab5d9df89534dd9abb85f358bf003bba8beabc1dd"
     },
     "scripts/fetch-pinned-release.sh": {
       "module": "ci-security",
@@ -168,7 +168,7 @@
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "3438601e32d032f624fe535345027ddb634d1ffdb704e33563ebcdcb53906608"
+      "sha256": "b8cafdf6087ae709ea00c718355bb2ef8442b34aa604d319c5fa1567644ebc3d"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
@@ -180,7 +180,7 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "b275d8c43eec794686fe28d0e27b4153dcfdd4dd7f9a15083f57cd4704c048c2"
+      "sha256": "8ee032867320410af858b6bfe57c8040c796be33fb9abae0e22d16578c658048"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",

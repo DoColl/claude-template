@@ -89,6 +89,8 @@ else
            scripts/audit-gate.test.mjs scripts/audit-allowlist.json \
            scripts/parallel-sessions.sh Scripts/Audit-Allowlist.JSON \
            scripts/fetch-pinned-release.sh .gitleaks.toml .gitleaksignore \
+           .gitleaks.json .GITLEAKS.JSON zizmor.yml zizmor.yaml \
+           .npmrc packages/api/.npmrc \
            .github/zizmor.yml .github/zizmor.yaml scripts/auto-merge-paths.txt \
            SECURITY_REVIEW.md SECURITY_REVIEW_2026-11.md security_review.md \
            docs/conventions/auto-merge-policy.md docs/conventions/new-rule.md \
@@ -106,6 +108,8 @@ else
            scripts/audit-gate.md scripts/audit-allowlist.json.example \
            scripts/parallel-sessions.md src/scripts/audit-gate.mjs \
            src/.gitleaks.toml .gitleaks.toml.md docs/zizmor.yml .github/zizmor.md \
+           src/.gitleaks.json .gitleaks.json.md src/zizmor.yml zizmor.yml.md \
+           .npmrc.example docs/npmrc.md \
            scripts/auto-merge-paths.txt.md SECURITY.md docs/SECURITY_REVIEW.md \
            SECURITY_REVIEW.md.txt; do
     if grep -qiE "$RE" <<< "$p"; then bad 1 "non-gated path matched by CLAUDE_GATE_RE: $p"; fi

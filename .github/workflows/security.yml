@@ -98,9 +98,12 @@ jobs:
       # GitHub's own asset digest.
       #
       # --redact: a real leak must not be copied into the run log, which
-      # anyone with `actions: read` can open. Rules: gitleaks' defaults plus
-      # the repository's .gitleaks.toml when there is one; known history
-      # false positives: .gitleaksignore.
+      # anyone with `actions: read` can open. Rules: the repository's
+      # .gitleaks.toml, which extends gitleaks' defaults, named with --config:
+      # without it gitleaks would read a .gitleaks.json first, so a pull
+      # request adding one could silence the scan that judges it; a missing
+      # .gitleaks.toml fails the job. Known history false positives:
+      # .gitleaksignore.
       - name: Gitleaks (full history)
         if: ${{ !cancelled() }}
         env:
@@ -109,7 +112,7 @@ jobs:
         run: |
           scripts/fetch-pinned-release.sh gitleaks/gitleaks "v${GITLEAKS_VERSION}" \
             "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" "$GITLEAKS_SHA256" gitleaks "$RUNNER_TEMP/bin"
-          "$RUNNER_TEMP/bin/gitleaks" git --redact --no-banner -v .
+          "$RUNNER_TEMP/bin/gitleaks" git --config .gitleaks.toml --redact --no-banner -v .
 
       # The project gate: every guard in scripts/guards.d/, in order — the
       # regression checks of SECURITY_REVIEW.md, the harness guards, and GA-2
