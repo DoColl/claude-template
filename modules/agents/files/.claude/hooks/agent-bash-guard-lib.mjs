@@ -54,7 +54,7 @@ const sameArgv = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]
 
 // ---- verification shapes (the project's, from agent-bash-guard.config.json) --
 // Exact argv, optionally bound to a directory: an entry with "cwd" is only
-// accepted as `cd <cwd> && <argv>`. The file is as trusted as this one — it
+// accepted as `cd ./<cwd> && <argv>`. The file is as trusted as this one — it
 // sits under .claude/ and is reviewed like the hook. The checks below catch
 // mistakes, not malice: keep interpreters running inline code, network clients
 // and package installers out of it.
@@ -97,12 +97,15 @@ export function normalizeConfig(raw) {
 // the guard, and the shell would run them. No allowed shape needs a comment;
 // a `#` inside quotes or after a backslash is a plain character and passes.
 const COMMENT = "comments (#) are not allowed — quote the # if it is part of a pattern";
+// A backslash that escapes a blank at the end of a segment, or ends it: the trim below would drop the escaped
+// blank, and the word loop the backslash, while the shell keeps both in the word (`cd x\ ` is `cd 'x '`).
+const TRAILING_ESCAPE = "a backslash at the end of a command, or before the blanks that end it, is not allowed: this check would drop the escaped character, the shell keeps it";
 function splitSegments(src) {
   if (/\$'|\$"/.test(src)) throw new Error("$'…' / $\"…\" quoting is not allowed");
   if (/`/.test(src)) throw new Error("backticks are not allowed");
   if (/\$\(/.test(src)) throw new Error("command substitution $( ) is not allowed");
   const out = []; let cur = ""; let q = null; let op = null;
-  const push = (nextOp) => { if (cur.trim()) out.push({ op, text: cur.trim() }); else if (op !== null || nextOp === null) throw new Error("empty command between operators"); cur = ""; op = nextOp; };
+  const push = (nextOp) => { if (/(\\*)[ \t]*$/.exec(cur)[1].length % 2 === 1) throw new Error(TRAILING_ESCAPE); if (cur.trim()) out.push({ op, text: cur.trim() }); else if (op !== null || nextOp === null) throw new Error("empty command between operators"); cur = ""; op = nextOp; };
   for (let i = 0; i < src.length; i++) {
     const c = src[i], n = src[i + 1];
     if (q) { if (c === "\\" && q === '"') { cur += c + (n ?? ""); i++; continue; } cur += c; if (c === q) q = null; continue; }
@@ -166,12 +169,10 @@ function words(segment) {
 }
 
 // ---- shapes ----------------------------------------------------------------
-// "$CLAUDE_PROJECT_DIR"/x (quotes already stripped) and the resolved root map to x.
-function projectRelative(tok) {
-  const m = /^\$CLAUDE_PROJECT_DIR\/(.*)$/.exec(tok); if (m) return m[1];
-  const root = (process.env.CLAUDE_PROJECT_DIR || "").replace(/\/$/, "");
-  return root && tok.startsWith(root + "/") ? tok.slice(root.length + 1) : tok;
-}
+// Paths are relative to the project root, as written. "$CLAUDE_PROJECT_DIR"/x is not one: Claude Code sets that
+// variable for hooks, not for the Bash tool's shell, where it is /x. Nor is the hook's own root as an absolute path:
+// in a worktree session it can be another checkout than the worktree the session works in (a worktree session
+// started from the desktop application, or a session that entered a worktree after it started).
 
 // Shared option walker: literal flags, value options, clusters; returns the positional args or an error string.
 // git reads the value of -U only attached (-U5): its value is optional, so a bare -U is a whole option and the
@@ -215,14 +216,14 @@ function checkReader(argv, first) {
   const cmd = argv[0]; const spec = READERS[cmd];
   const r = walkOptions(argv, { flags: [], ...spec }, cmd);
   if (typeof r === "string") return r;
-  for (const p of r.positional) if (!safeArg(projectRelative(p))) return `unsafe path '${p}' (project-relative paths only)`;
+  for (const p of r.positional) if (!safeArg(p)) return `unsafe path '${p}' (project-relative paths only)`;
   if (cmd === "cat" && first && r.positional.length === 0) return "cat needs a file";
   return null;
 }
 
-const CD_RULE = "cd is only allowed as `cd <dir> && <command>`, for a verification command the config binds to that directory";
+const CD_RULE = "cd is only allowed as `cd ./<dir> && <command>`, written exactly so, for a verification command the config binds to that directory";
 
-// verifyShapes: the argv list valid at this position (after `cd <dir> &&`, or at
+// verifyShapes: the argv list valid at this position (after `cd ./<dir> &&`, or at
 // the root as long as no cd came before), or null when none is.
 function checkSegment(argv, { first, profile, verifyShapes, cfg, atRoot }) {
   while (argv.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[0])) { if (!SAFE_PREFIX.has(argv[0])) return `environment prefix '${argv[0].split("=")[0]}=…' is not allowed`; argv.shift(); }
@@ -230,7 +231,7 @@ function checkSegment(argv, { first, profile, verifyShapes, cfg, atRoot }) {
   const cmd = argv[0];
   if (cmd === "cd") return profile === "verify" ? CD_RULE : "cd is not allowed (paths are project-relative from the root)";
   if (first) {
-    const gate = /^(?:\.\/)?scripts\/([^/]+)$/.exec(projectRelative(cmd));
+    const gate = /^(?:\.\/)?scripts\/([^/]+)$/.exec(cmd);
     if (gate && Object.hasOwn(GATE_SHAPES, gate[1])) {
       if (!atRoot) return `${gate[1]} runs from the project root: after a cd, the same relative path would be another script`;
       return sameArgv(argv.slice(1), GATE_SHAPES[gate[1]]) ? null : `${gate[1]} takes exactly: ${GATE_SHAPES[gate[1]].join(" ") || "(no argument)"}`;
@@ -238,7 +239,7 @@ function checkSegment(argv, { first, profile, verifyShapes, cfg, atRoot }) {
     if (cmd === "git") return checkGit(argv);
     if (profile === "verify") {
       if (verifyShapes?.some(s => sameArgv(argv, s))) return null;
-      if (cfg.heads.has(cmd)) return `'${argv.join(" ")}' is not one of the verification commands of agent-bash-guard.config.json at this position (exact arguments, and \`cd <dir> &&\` first when the entry has a "cwd")`;
+      if (cfg.heads.has(cmd)) return `'${argv.join(" ")}' is not one of the verification commands of agent-bash-guard.config.json at this position (exact arguments, and \`cd ./<dir> &&\` first when the entry has a "cwd")`;
     }
   }
   if (Object.hasOwn(READERS, cmd)) return checkReader(argv, first);
@@ -259,6 +260,8 @@ export function decide(command, profile, config = EMPTY_CONFIG) {
   // dozen other Unicode spaces. Read as a break here, `LC_ALL=C<VT>cat rm x` was a `cat` of two files, while the
   // shell read one assignment word, `LC_ALL=C<VT>cat`, and ran `rm x`. None of them belongs in a command the agents
   // run, quoted or not.
+  // A NUL: this check reads `\<NUL>` as an escape, a shell that drops the NUL reads the quote after it as live.
+  if (command.includes("\0")) return { allow: false, reason: "a NUL character is not allowed: a shell that drops it would read what follows differently" };
   if (/[^\S \t\n]/.test(command)) return { allow: false, reason: "whitespace other than a space, a tab or a newline is not allowed (a carriage return, a vertical tab, a form feed, a no-break or other Unicode space): the shell does not separate words on it, this check would" };
   const cfg = profile === "verify" ? config : EMPTY_CONFIG;
   try {
@@ -267,8 +270,12 @@ export function decide(command, profile, config = EMPTY_CONFIG) {
     for (let i = 0; i < segs.length; i++) {
       const argv = words(segs[i].text);
       if (i === 0 && profile === "verify" && argv[0] === "cd") { // the only accepted cd: first, to a configured directory, then && one of its commands
-        const dir = argv.length === 2 ? projectRelative(argv[1]) : null;
-        if (!(dir !== null && cfg.byDir.has(dir) && segs[1]?.op === "&&")) return { allow: false, reason: CD_RULE };
+        // Read from the segment as written, never from its words: one exact text, anchored at both ends, so that no
+        // quoting or escape has to be modelled. Some variants name another directory (`./x\ ` is `./x `,
+        // `./x'/..'` is x's parent), others the same one (`'./x'`, `./x/`): all are refused.
+        // `./` keeps CDPATH out of it, which the shell consults first for a bare name.
+        const dir = /^cd \.\/([A-Za-z0-9._\/-]+)$/.exec(segs[0].text)?.[1];
+        if (!(dir !== undefined && cfg.byDir.has(dir) && segs[1]?.op === "&&")) return { allow: false, reason: CD_RULE };
         cdDir = dir; continue;
       }
       const verifyShapes = cdDir === null ? cfg.root : i === 1 ? cfg.byDir.get(cdDir) : null; // after a cd, only the segment right behind it, and never a root command

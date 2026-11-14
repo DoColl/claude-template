@@ -363,17 +363,17 @@ jobs:
           # The gate judges what the merge below will bring in, not what the
           # pull request shows at this instant. The merge is pinned to HEAD_SHA,
           # so files and commits are read from the immutable range between the
-          # base commit and HEAD_SHA (compare API): a head or a base moved and
-          # put back while this step runs changes nothing to it (AM-7). One
-          # read of the pull request gives its base, its head, its file count
-          # and its author. Any doubt holds: a head that is no longer HEAD_SHA,
-          # a file count that does not match the range (the compare lists 300
-          # files at most), a commit list cut short.
+          # base branch's tip and HEAD_SHA (compare API): a head or a base moved
+          # and put back while this step runs changes nothing to it (AM-7). One
+          # read of the pull request gives its base branch, its head, its file
+          # count and its author. Any doubt holds: a head that is no longer HEAD_SHA,
+          # a listing of 300 files (the most the compare lists), a file count that
+          # does not match the range, a commit list cut short.
           # A failed read is an error, never "the head moved": inside
           # `read … <<< "$(…)"` a failing call leaves every variable empty and
           # the job green.
-          PR_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .base.sha, .head.sha, .changed_files, .user.login] | @tsv') || PR_INFO=""
-          IFS=$'\t' read -r BASE_REF BASE_SHA PR_HEAD CHANGED AUTHOR <<< "$PR_INFO"
+          PR_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .head.sha, .changed_files, .user.login] | @tsv') || PR_INFO=""
+          IFS=$'\t' read -r BASE_REF PR_HEAD CHANGED AUTHOR <<< "$PR_INFO"
           if [ -z "$PR_HEAD" ]; then
             echo "::error::PR #${PR} could not be read from the API — nothing was decided and nothing was merged. Re-run this job."
             exit 1
@@ -389,23 +389,39 @@ jobs:
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! [[ "$BASE_SHA" =~ ^[0-9a-f]{40,64}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40,64}$ ]]; then
-            echo "::notice::PR #${PR}: unreadable base or head commit — leaving it for a hand merge."
+          if ! [[ "$BASE_REF" =~ ^[A-Za-z0-9._/@+-]+$ && "$HEAD_SHA" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::notice::PR #${PR}: unreadable base branch or head commit — leaving it for a hand merge."
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          # The range starts at the base branch's tip as it is now, never at
+          # the pull request's base.sha: GitHub does not move that one when the
+          # branch moves, and the squash below applies the head's changes since
+          # its merge base with the current tip. A branch the head had merged,
+          # landed on the base branch since, moves that merge base: from the
+          # stored base.sha, a held path the merge changes back would not be
+          # listed. The tip is read by its full ref, so that no tag of the same
+          # name can answer, and an unreadable tip fails the job.
+          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || TIP=""
+          if ! [[ "$TIP" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::error::The tip of ${BASE_REF} could not be read — nothing was decided and nothing was merged. Re-run this job."
+            exit 1
           fi
           # The base the range is judged against: the merge step refuses a pull
           # request retargeted since.
           echo "base_ref=${BASE_REF}" >> "$GITHUB_OUTPUT"
           # Each file row carries `previous_filename` too, so a rename OUT of a
-          # gated path (CLAUDE.md → docs/legacy.md) is still seen. The count is
-          # checked against the pull request's changed_files: any gap holds.
-          RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
+          # gated path (CLAUDE.md → docs/legacy.md) is still seen. The compare
+          # lists 300 files at most, and the pull request's changed_files may
+          # be counted from another merge base than the tip's: equal counts do
+          # not prove a whole listing. A listing of 300 files holds whatever
+          # the count, and so does any gap between the two.
+          RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${HEAD_SHA}" \
                     --jq '{total: .total_commits, commits: [.commits[] | {login: (.author.login // "unknown"), message: .commit.message}], files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
           ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
-          if [ "$LISTED" != "$CHANGED" ]; then
-            echo "::notice::PR #${PR}: file listing incomplete (${LISTED} of ${CHANGED}) — leaving it for a hand merge."
+          if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then
+            echo "::notice::PR #${PR}: ${LISTED} file(s) listed from the tip of ${BASE_REF}, ${CHANGED} counted on the pull request (a listing of 300 may be cut short; a gap is a merge base the tip moved) — leaving it for a hand merge."
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -719,7 +735,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
@@ -734,8 +749,10 @@ jobs:
           # but never merge unattended (see promote-from-ci's gate): no CI runs
           # on them either, so such a PR waits for a hand merge.
           # Same listing and gate as promote-from-ci (comments there): the
-          # immutable range this event carries, never the pull request's
-          # current files; a head or a base that is no longer the event's holds.
+          # immutable range from the base branch's tip, read by its full ref,
+          # to the head this event carries, never the pull request's current
+          # files nor the event's base.sha; a head or a base that is no longer
+          # the event's holds.
           # A failed read is an error, not a changed head (see promote-from-ci).
           PR_INFO=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, .head.sha, .changed_files] | @tsv') || PR_INFO=""
           IFS=$'\t' read -r NOW_BASE PR_HEAD CHANGED <<< "$PR_INFO"
@@ -747,16 +764,21 @@ jobs:
             echo "::notice::PR #${PR}: head or base changed since this event — left as is."
             exit 0
           fi
-          if ! [[ "$BASE_SHA" =~ ^[0-9a-f]{40,64}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40,64}$ ]]; then
-            echo "::notice::PR #${PR}: unreadable base or head commit — leaving it for a hand merge."
+          if ! [[ "$BASE_REF" =~ ^[A-Za-z0-9._/@+-]+$ && "$HEAD_SHA" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::notice::PR #${PR}: unreadable base branch or head commit — leaving it for a hand merge."
             exit 0
           fi
-          RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
+          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || TIP=""
+          if ! [[ "$TIP" =~ ^[0-9a-f]{40,64}$ ]]; then
+            echo "::error::The tip of ${BASE_REF} could not be read — nothing was decided and nothing was merged. Re-run this job."
+            exit 1
+          fi
+          RANGE=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${TIP}...${HEAD_SHA}" \
                     --jq '{files: [.files[]? | [.filename, (.previous_filename // "")]], changes: [.files[]? | {filename, previous_filename, status, additions, deletions}]}')
           ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")
           LISTED=$(grep -c . <<< "$ROWS" || true)
-          if [ "$LISTED" != "$CHANGED" ]; then
-            echo "::notice::PR #${PR}: file listing incomplete (${LISTED} of ${CHANGED}) — leaving it for a hand merge."
+          if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then
+            echo "::notice::PR #${PR}: ${LISTED} file(s) listed from the tip of ${BASE_REF}, ${CHANGED} counted on the pull request (a listing of 300 may be cut short; a gap is a merge base the tip moved) — leaving it for a hand merge."
             exit 0
           fi
           PATHS=$(tr '\t' '\n' <<< "$ROWS" | grep . || true)
