@@ -63,3 +63,4 @@ The gate that runs is the project's if `scripts/security-checks.sh` was adopted,
 - Do not commit unless the user asks. Everything here is executed by later sessions: it is read by a human before it lands.
 - In the pull request description: the modules adopted, the kit version and commit (`.claude/harness.json`, `kit`), the files taken from the kit, the files kept and why, the fragments declined.
 - List what stays adopted: those are the conflicts of the next update (`harness-update`).
+- A post-install step that acts on a person's machine rather than on the project — installing a tool, starting a process, writing under `~` or into a shell profile, pointing sessions somewhere — is relayed word for word, never done by this session.

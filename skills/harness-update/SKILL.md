@@ -53,3 +53,4 @@ The gate must pass. `--check` must exit 0, or list only what the user chose to l
 
 - Do not commit unless the user asks. An update rewrites files every session executes, and the manifest that HD-1 compares them with: it is read by a human before it lands, and never merged unattended.
 - In the pull request description: the kit version and commit before and after (`.claude/harness.json`, `kit`), the scope, the files merged, the conflicts left and why, the "By hand" items done or left.
+- A "By hand" item or a post-install step that acts on a person's machine rather than on the project — installing a tool, starting a process, writing under `~` or into a shell profile, pointing sessions somewhere — is relayed word for word, never done by this session. Only the items that change the project's own files, such as a seed, are done here, on the user's yes.
