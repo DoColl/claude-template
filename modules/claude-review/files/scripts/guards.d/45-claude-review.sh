@@ -18,7 +18,7 @@
 shopt -s dotglob nullglob # GitHub loads a workflow named .x.yml
 
 WF=.github/workflows
-CLAUDE_REVIEW_DIGEST=06587432bff048b8dfa794414934ee9b04a350e6
+CLAUDE_REVIEW_DIGEST=1b959220a4be5ea7aa1c7fe583042b764140a876
 
 if [ ! -f "$WF/claude-review.yml" ]; then
   fail "CR-1: $WF/claude-review.yml is missing — restore it, or remove this guard along with the workflow"

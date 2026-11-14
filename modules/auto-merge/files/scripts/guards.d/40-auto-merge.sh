@@ -10,8 +10,9 @@
 #         defined once too and applied in the same grep; the rows of
 #         scripts/auto-merge-paths.txt are run on the two patterns together.
 #   AM-7  the gate judges the range that is merged: files and commits come
-#         from compare/<base commit>...<validated head>, never from the pull
-#         request's current state, and the base is re-read before each merge.
+#         from compare/<base branch's tip>...<validated head>, the tip read by
+#         its full ref, never from the pull request's current state nor from
+#         its stored base.sha, and the base is re-read before each merge.
 #         A pull request that cannot be read fails the job instead of passing
 #         for a moved head.
 #   AM-4  marking a pull request ready never merges it. The two ready lines are
@@ -668,14 +669,38 @@ pass 6 "the merge is pinned to the SHA of the event, once CI and the review have
 # of the pull request's CURRENT files or commits can be made to show another
 # diff for an instant (a head or a base moved and put back). So: no such
 # listing, one read of the immutable range per merging job, a head check and a
-# base re-check in each, and the base taken from the event or from the gate.
+# base re-check in each, and the base branch taken from the event or from the
+# gate. The range starts at the base branch's tip, read by its full ref
+# (git/ref/heads/…, which no tag can answer), never at the pull request's
+# base.sha: GitHub leaves that one where the branch was at the last push, and
+# the squash applies the head's changes since its merge base with the current
+# tip — a branch the head had merged, landed since, moves that merge base, and
+# a held path the merge changes back would go unlisted. An unreadable tip fails.
 live=$(grep -cE 'pulls/\$\{?PR\}?/(files|commits)' "$AM" || true)
 if [ "$live" != "0" ]; then
-  bad 7 "$live listing(s) of the pull request's current files or commits — the gate must read compare/\${BASE_SHA}...\${HEAD_SHA}"
+  bad 7 "$live listing(s) of the pull request's current files or commits — the gate must read compare/\${TIP}...\${HEAD_SHA}"
 fi
-ranges=$(grep -cF 'compare/${BASE_SHA}...${HEAD_SHA}"' "$AM" || true)
+ranges=$(grep -cF 'compare/${TIP}...${HEAD_SHA}"' "$AM" || true)
 if [ "$ranges" != "$merging" ]; then
-  bad 7 "$merging merging job(s) but $ranges read the immutable range compare/\${BASE_SHA}...\${HEAD_SHA}"
+  bad 7 "$merging merging job(s) but $ranges read the immutable range compare/\${TIP}...\${HEAD_SHA}"
+fi
+stale=$(grep -ciE 'base[._]sha|compare/\$\{?(BASE|DEFAULT)' <<< "$code" || true)
+if [ "$stale" != "0" ]; then
+  bad 7 "$stale line(s) read the pull request's base.sha or compare from a base other than the tip — GitHub does not move base.sha with the branch"
+fi
+# The branch name goes into the URL of that read: a name the API would read
+# as another path (a `#`, a `?`, an encoded character) must hold, not resolve.
+named=$(grep -cxF '          if ! [[ "$BASE_REF" =~ ^[A-Za-z0-9._/@+-]+$ && "$HEAD_SHA" =~ ^[0-9a-f]{40,64}$ ]]; then' "$AM" || true)
+if [ "$named" != "$merging" ]; then
+  bad 7 "$merging merging job(s) but $named check the base branch's name before reading its tip"
+fi
+tips=$(grep -cxF '          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '"'"'.object.sha'"'"') || TIP=""' "$AM" || true)
+if [ "$tips" != "$merging" ]; then
+  bad 7 "$merging merging job(s) but $tips read the base branch's tip by its full ref (git/ref/heads/\${BASE_REF})"
+fi
+tip_fails=$(awk '/^          if ! \[\[ "\$TIP" =~ \^\[0-9a-f\]\{40,64\}\$ \]\]; then$/ { armed = 1; next } armed && /^            exit 1$/ { n++ } /^          fi$/ { armed = 0 } END { print n + 0 }' "$AM")
+if [ "$tip_fails" != "$merging" ]; then
+  bad 7 "$merging merging job(s) but $tip_fails fail when the tip cannot be read — an unreadable tip must exit 1"
 fi
 heads_checked=$(grep -cF 'if [ "$PR_HEAD" != "$HEAD_SHA" ]' "$AM" || true)
 if [ "$heads_checked" != "$merging" ]; then
@@ -697,11 +722,11 @@ rechecked=$(grep -cxF '          if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BAS
 if [ "$rechecked" != "$merging" ]; then
   bad 7 "$merging merging job(s) but $rechecked re-read the base branch right before merging"
 fi
-foreign_base=$(grep -E '^ +BASE_(SHA|REF): ' "$AM" | grep -cvE '^ +(BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}|BASE_REF: \$\{\{ (github\.event\.pull_request\.base\.ref|steps\.gate\.outputs\.base_ref) \}\})$' || true)
+foreign_base=$(grep -E '^ +(BASE_(SHA|REF)|TIP): ' "$AM" | grep -cvE '^ +BASE_REF: \$\{\{ (github\.event\.pull_request\.base\.ref|steps\.gate\.outputs\.base_ref) \}\}$' || true)
 if [ "$foreign_base" != "0" ]; then
-  bad 7 "BASE_SHA / BASE_REF must come from the triggering event or from the gate step's output"
+  bad 7 "BASE_REF must come from the triggering event or from the gate step's output, and no commit of the base may come from outside the job's own read of the tip"
 fi
-pass 7 "the gate reads the immutable range that is merged, the base is re-read before each merge, and a failed read fails the job"
+pass 7 "the gate reads the immutable range from the base branch's tip, the base is re-read before each merge, and a failed read fails the job"
 
 # ── AM-8 — tests that get weaker are held ───────────────────────────────────
 # The CI that went green ran the tests as the pull request left them. What the
