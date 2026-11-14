@@ -1307,9 +1307,12 @@ test("auto-merge: AM-7 and AM-10 go red when the tip is not read again before a 
     ["a stop on any moved tip", "AM-7", edit(shipped, 'NOW_MB=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${NOW_TIP}...${HEAD_SHA}"', 2, "exit 0")],
   ];
   // A project may widen its documentation set (auto-merge-policy.md § Setting it up): in every copy, the check's included.
-  const widened = shipped.split("'(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)'").join("'(\\.md$|^docs/|^site/|^LICENSE$|^\\.gitignore$)'");
+  const widened = shipped.split("'(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)'").join("'(\\.md$|^docs/|^site/|^LICENSE$|^\\.gitignore$)'")
+    // and the project's own patterns may name anything, a jq script or a sudoers file included.
+    .replace(/^  PROJECT_GATE_RE: '.*'$/m, () => "  PROJECT_GATE_RE: '^tools/filter\\.jq$|(^|/)sudoers$'");
   assert.notEqual(widened, shipped);
-  const [green, wide, ...reds] = await bounded([() => guard("as shipped"), () => guard("a docs set widened everywhere", widened), ...cases.map(([label, , text]) => () => guard(label, text))]);
+  assert.ok(widened.includes("filter\\.jq"), "PROJECT_GATE_RE replaced");
+  const [green, wide, ...reds] = await bounded([() => guard("as shipped"), () => guard("a docs set widened everywhere, the project's own patterns naming a .jq file and sudoers", widened), ...cases.map(([label, , text]) => () => guard(label, text))]);
   assert.equal(green.status, 0, `${green.stdout}\n${green.stderr}`);
   assert.equal(wide.status, 0, `${wide.label}\n${wide.stdout}\n${wide.stderr}`);
   for (const [i, r] of reds.entries()) {

@@ -944,15 +944,18 @@ pass 8 "a pull request that deletes, renames or rewrites lines of an existing fi
 #   GitHub expands it before the shell reads the script, comments included.
 # A deliberate rewrite can still find another way: these catch a regression
 # and the simple ways round the pins. The workflow is a held path, merged by
-# hand, and the ruleset of the policy page stands against the rest.
+# hand, and the ruleset of the policy page stands against the rest. The four
+# patterns of the workflow-level env are data (the project's values, --set),
+# tested by AM-1 and AM-8: the words below are not looked for in them.
 breaks=$(LC_ALL=C grep -cE $'\r|\xc2\x85' "$AM" || true)
+not_patterns=$(grep -vE "^  (CLAUDE_GATE_RE|PROJECT_GATE_RE|TEST_HOLD_RE|MAJOR_HOLD_RE): '" "$AM")
 FORBIDDEN_RE='continue-on-error|BASH_ENV|GITHUB_ENV|GITHUB_PATH|[$][{]!|sudo|(^|[^A-Za-z0-9_])(PATH|HOME)[[:space:]]*[:=]|[.]jq([^A-Za-z0-9_]|$)|(^|[[:space:]'"'"'"])(defaults|shell)['"'"'"]?[[:space:]]*:|^[[:space:]]*(-[[:space:]]+)?[?]([[:space:]]|$)'
-forbidden=$(grep -cE "$FORBIDDEN_RE" "$AM" || true)
-quotes=$(grep -cE '[A-Za-z0-9_](""|'"''"')[A-Za-z0-9_]' "$AM" || true)
+forbidden=$(grep -cE "$FORBIDDEN_RE" <<< "$not_patterns" || true)
+quotes=$(grep -cE '[A-Za-z0-9_](""|'"''"')[A-Za-z0-9_]' <<< "$not_patterns" || true)
 defs=$(grep -cE '\(\)[[:space:]]*\{|(^|[^A-Za-z0-9_.-])function[[:space:]]' <<< "$jobs_code" || true)
 known_defs=$(grep -cE '^ *(signoff_state|dependabot_verdict|bump_level)\(\) \{$' "$AM" || true)
 builtins=$(grep -cE '(^|[;&|[:space:]])(alias|enable|shopt|unset)[[:space:]]' <<< "$jobs_code" || true)
-continued=$(awk 'held { line = $0; sub(/^ */, "", line); if (line !~ /^(-|&&|[|][|])/) bad++; held = 0 } /\\$/ { held = 1 } END { print bad + 0 }' "$AM")
+continued=$(awk 'held { line = $0; sub(/^ */, "", line); if (line !~ /^(-|&&|[|][|])/) bad++; held = 0 } /\\$/ { held = 1 } END { print bad + 0 }' <<< "$not_patterns")
 puts=$(grep -cE '(^|[^A-Za-z0-9_])PUT([^A-Za-z0-9_]|$)' <<< "$jobs_code" || true)
 if [ "$breaks" != "0" ] || [ "$forbidden" != "0" ] || [ "$quotes" != "0" ] || [ "$defs" != "3" ] || [ "$known_defs" != "3" ] \
    || [ "$builtins" != "0" ] || [ "$continued" != "0" ] || [ "$puts" != "$merging" ]; then
