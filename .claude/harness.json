@@ -157,7 +157,7 @@
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "fd4633620c1b38b34bff4c36117d654dab680e092f559e77e0470c8abea6edd8"
+      "sha256": "c3380ca5f042b235f9f598b3a1538eafee34550170d9c3f0c6b8e11bf2508fe3"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",
@@ -181,11 +181,11 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "23e9cd0c2e49e3f71a0f4d917a9bc54e12cd3e7ee349fb110ca6b15a108ed002"
+      "sha256": "c0c3ebe238aeabf9e9ac2e3c5072c71720728f6c6621d84e12c4d2bcb5d9994b"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",
-      "sha256": "8526d6d5e42831ad82bba713407171ed500cbdfa7a36f897444d315c5e470423"
+      "sha256": "41d02af4f8ca6a1f64e294c09895966ffaa0dc767e91f3ee77cc797428cb2949"
     },
     ".github/workflows/eco-design.yml": {
       "module": "eco-design",

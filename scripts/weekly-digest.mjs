@@ -270,7 +270,7 @@ export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, aut
   if ((pr.labels ?? []).includes(HOLD_LABEL)) {
     const idleH = (now - new Date(pr.updatedAt ?? pr.createdAt)) / HOUR;
     if (idleH < STALE_HOLD_HOURS) return null;
-    const lift = pr.draft ? ' and lift the draft by hand' : '';
+    const lift = pr.draft ? ', then lift the draft once CI is green on it' : '';
     return `labelled \`${HOLD_LABEL}\`, no activity for ${Math.floor(idleH / 24)} d: if no session is at work on it any more, remove the label${lift}`;
   }
 

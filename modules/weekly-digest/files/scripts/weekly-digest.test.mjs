@@ -283,7 +283,7 @@ test('PR reasons: a pull request a session holds with session-active', () => {
   const held = (o) => pr({ labels: ['bug', 'session-active'], draft: true, ...o });
   assert.equal(prReason(held({ updatedAt: daysAgo(1) }), res, now), null, 'a session is at work on it: not the owner\'s move');
   assert.equal(prReason(held({ updatedAt: daysAgo(1), mergeableState: 'dirty', ci: { status: 'completed', conclusion: 'failure' } }), res, now), null, 'its conflict and its red CI are the session\'s to settle');
-  assert.equal(prReason(held({ updatedAt: daysAgo(3) }), res, now), 'labelled `session-active`, no activity for 3 d: if no session is at work on it any more, remove the label and lift the draft by hand');
+  assert.equal(prReason(held({ updatedAt: daysAgo(3) }), res, now), 'labelled `session-active`, no activity for 3 d: if no session is at work on it any more, remove the label, then lift the draft once CI is green on it');
   assert.match(prReason(held({ updatedAt: daysAgo(3), draft: false }), res, now), /remove the label$/, 'not a draft: nothing to lift');
   assert.match(prReason(held({ updatedAt: undefined, createdAt: daysAgo(5) }), res, now), /no activity for 5 d/, 'no update time: its age stands in');
   assert.equal(prReason(pr({ labels: ['session-active-old'] }), res, now), prReason(pr({}), res, now), 'another label holds nothing');
