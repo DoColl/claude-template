@@ -58,7 +58,7 @@
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
-      "sha256": "e7b8b888bab17d8d20de9848afd1675131210ae7d2068dec106e088390a4dd6f"
+      "sha256": "c28bf4a57343e2cf0a01490bf2f98c88776d2f92eae9a1e34f2fa39d2a101f7a"
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",
@@ -71,6 +71,10 @@
     "scripts/guards.d/10-claude-md.sh": {
       "module": "core",
       "sha256": "626b48a1553ace6f5b3f5827047c0e35cdf6689e39f8baf967fe61826b468a8d"
+    },
+    "scripts/guards.d/10-conflict-markers.sh": {
+      "module": "core",
+      "sha256": "d68cca8dc66792f295d775464e53eb3c28f31dce5ff2ff7b2434ce9cf0f8e1d1"
     },
     "scripts/guards.d/50-project.sh": {
       "module": "core",
