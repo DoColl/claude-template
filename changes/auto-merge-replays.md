@@ -1,0 +1,5 @@
+bump: patch
+
+- `auto-merge`: the kit's tests replay the workflow's gate, its merge step and its check of what the merge wrote, as bash runs them, against a stand-in for the API served from scratch git repositories (`test/auto-merge-fake-gh.mjs`). A table of histories (held paths and convention pages set back, a count gap with nothing held, tests weakened under `TEST_HOLD_RE` and a path of `PROJECT_GATE_RE` (held by the gate; the check after the merge is replayed on `CLAUDE_GATE_RE` paths only), ranges around 300 files, the base branch moving between the gate and the merge call, two merge bases) states what each step must decide (the gate's `merge`, whether a merge call is made, whether the check turns red), with a pull request's file count taken from its stored base and from the tip. AM-7's table of broken copies gains a reversed range, a tip re-anchored on the stored base, a second listing that replaces the range, and the 300-file hold without its exit. `docs/conventions/auto-merge-policy.md` says what the replays exercise and what they do not.
+
+By hand: nothing. Nothing installed in a project changes but the policy page.
