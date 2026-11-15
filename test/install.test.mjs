@@ -785,6 +785,21 @@ test("the kit's own installation is what the modules ship today", () => {
   assert.deepEqual(s.fragmentsMissingSlot, []);
 });
 
+// README.md and CLAUDE.md name the modules installed at the kit's root, in one sentence each. Nothing else ties
+// them to the manifest: a module added at the root without both sentences would go unnoticed.
+test("README.md and CLAUDE.md name exactly the modules installed at the kit's root", () => {
+  const manifest = readManifest(KIT_ROOT);
+  if (!manifest) return; // a copy of the kit without its own harness
+  const installed = [...manifest.modules].sort();
+  const named = (file, re) => {
+    const list = re.exec(read(KIT_ROOT, file))?.[1];
+    assert.ok(list, `${file}: the sentence that lists the modules installed at the root is not found`);
+    return [...list.matchAll(/`([a-z0-9-]+)`/g)].map((m) => m[1]).sort();
+  };
+  assert.deepEqual(named("README.md", /The kit installs part of itself at its root — ([^\n]*?) — /), installed, "README.md § Working on the kit");
+  assert.deepEqual(named("CLAUDE.md", /The kit installs part of itself at its root \(`\.claude\/harness\.json`\): ([^\n]*?), so that /), installed, "CLAUDE.md § The kit's own harness");
+});
+
 test("session-settings: the gate goes red when the settings file widens what every session may do", () => {
   if (!kit.modules.has("session-settings")) return;
   const dir = tmp();
