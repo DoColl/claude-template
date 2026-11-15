@@ -722,6 +722,36 @@ test("the gate: a failing guard fails it, a skipped one does not, an empty one i
   r = gate(dir); assert.equal(r.status, 1); assert.match(r.stderr, /checked nothing/);
 });
 
+// A conflict committed as text — a rebase stopped, then the file staged and the rebase continued — passes every
+// other guard. CF-1 refuses a marker at the start of a line; a heading underlined with `=======` and a marker
+// shown indented stay green.
+test("CF-1: a tracked file that holds a git conflict marker turns the gate red", () => {
+  const dir = tmp();
+  install(dir, []);
+  const marker = (c) => c.repeat(7); // built here so that this file holds no marker at the start of a line
+  const [open, base, sep, close] = [marker("<"), marker("|"), marker("="), marker(">")];
+  for (const [text, why] of [
+    [`a\n${open} HEAD\nours\n${sep}\ntheirs\n${close} topic\n`, "a two-way conflict"],
+    [`a\n${open} HEAD\nours\n${base} parent of 1234567 (x)\nbase\n${sep}\ntheirs\n${close} 1234567 (x)\n`, "a diff3 conflict"],
+    [`${open}\n`, "a marker alone on its line"],
+    ["```\n" + `${close} topic\n` + "```\n", "a marker at column 0 inside a fenced block"],
+  ]) {
+    write(dir, "docs/page.md", text);
+    const r = gate(dir); assert.equal(r.status, 1, `${why} is refused`); assert.match(r.stderr, /CF-1: \d+ line\(s\) start with a git conflict marker/);
+    assert.match(r.stderr, /docs\/page\.md:2|docs\/page\.md:1/, "the file and the line are named");
+  }
+  for (const [text, why] of [
+    [`Title\n${sep}\n\nText.\n`, "a heading underlined with seven `=`"],
+    ["```\n" + `    ${open} HEAD\n    ${close} topic\n` + "```\n", "an indented example"],
+    [`${open}${open}\n> quoted ${close}\n`, "a longer run, and a marker that does not start its line"],
+  ]) {
+    write(dir, "docs/page.md", text);
+    const r = gate(dir); assert.equal(r.status, 0, `${why} passes: ${output(r)}`);
+  }
+  fs.writeFileSync(path.join(dir, "docs/blob.bin"), Buffer.from(`\0${open} HEAD\n`));
+  assert.equal(gate(dir).status, 0, "a binary file is not read");
+});
+
 test("CM-1 and CM-2: the budget and the pointers of CLAUDE.md are enforced", () => {
   const dir = tmp();
   install(dir, []);
@@ -805,6 +835,21 @@ test("the kit's own installation is what the modules ship today", () => {
   assert.deepEqual(s.conflicts, [], `a root file was edited in place: ${fix} --force`);
   assert.deepEqual(s.local, [], "no kit file is edited at the root: change the module instead");
   assert.deepEqual(s.fragmentsMissingSlot, []);
+});
+
+// README.md and CLAUDE.md name the modules installed at the kit's root, in one sentence each. Nothing else ties
+// them to the manifest: a module added at the root without both sentences would go unnoticed.
+test("README.md and CLAUDE.md name exactly the modules installed at the kit's root", () => {
+  const manifest = readManifest(KIT_ROOT);
+  if (!manifest) return; // a copy of the kit without its own harness
+  const installed = [...manifest.modules].sort();
+  const named = (file, re) => {
+    const list = re.exec(read(KIT_ROOT, file))?.[1];
+    assert.ok(list, `${file}: the sentence that lists the modules installed at the root is not found`);
+    return [...list.matchAll(/`([a-z0-9-]+)`/g)].map((m) => m[1]).sort();
+  };
+  assert.deepEqual(named("README.md", /The kit installs part of itself at its root — ([^\n]*?) — /), installed, "README.md § Working on the kit");
+  assert.deepEqual(named("CLAUDE.md", /The kit installs part of itself at its root \(`\.claude\/harness\.json`\): ([^\n]*?), so that /), installed, "CLAUDE.md § The kit's own harness");
 });
 
 test("session-settings: the gate goes red when the settings file widens what every session may do", () => {
@@ -1063,6 +1108,40 @@ test("a guard that runs a workflow step's script pins how the step runs: if, con
     }
   }
   assert.ok(marked >= 1, "the scan found the marked steps it is meant to check");
+});
+
+// RG-5: a CI workflow that holds one job for session-active holds them all, or a held run ends `success` with
+// checks skipped and ready-on-green may lift the draft on it. A CI workflow that holds nothing is not concerned.
+test("RG-5: a CI workflow that holds a job for session-active holds every job, and runs them when the label comes off", () => {
+  if (!kit.modules.has("ready-on-green")) return;
+  const dir = tmp();
+  install(dir, ["ready-on-green"]);
+  const held = "!(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active'))";
+  const ci = ({ name = "CI", types = "[opened, synchronize, reopened, unlabeled, ready_for_review]", first = `\${{ ${held} }}`, second = `\${{ ${held} && needs.lint.result == 'success' }}` } = {}) =>
+    `name: ${name}\non:\n  pull_request:\n    types: ${types}\npermissions: {}\njobs:\n  lint:\n    if: ${first}\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n` +
+    `  test:\n    needs: lint\n${second === null ? "" : `    if: ${second}\n`}    runs-on: ubuntu-latest\n    steps:\n      - run: true\n`;
+  const rg5 = (text) => { write(dir, ".github/workflows/ci.yml", text); const r = gate(dir); return { r, line: output(r).split("\n").find((l) => l.includes("RG-5")) ?? "" }; };
+
+  let { r, line } = rg5("name: CI\non: [pull_request]\npermissions: {}\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n");
+  assert.equal(r.status, 0, output(r)); assert.match(line, /does not hold its jobs/);
+  ({ r, line } = rg5(ci()));
+  assert.equal(r.status, 0, output(r)); assert.match(line, /holds all its 2 job\(s\)/);
+  ({ r, line } = rg5(ci({ name: "'CI' # quoted" })));
+  assert.equal(r.status, 0, "the name is read quoted, as the digest reads it");
+  ({ r, line } = rg5(ci({ name: "Other" })));
+  assert.equal(r.status, 0); assert.match(line, /no workflow named CI here/);
+
+  for (const [opts, re, why] of [
+    [{ second: null }, /do not carry the hold[^\n]*: test/, "a job without the hold"],
+    [{ second: `\${{ ${held} || github.event_name == 'push' }}` }, /: test/, "the hold undone by ||"],
+    [{ second: `\${{ always() && ${held} }}` }, /: test/, "the hold not first"],
+    [{ second: `\${{ !(github.event.pull_request.draft) }}` }, /: test/, "another condition"],
+    [{ types: "[opened, synchronize, reopened, ready_for_review]" }, /types[^\n]*lack: unlabeled/, "no unlabeled type"],
+    [{ types: "[opened, synchronize, reopened, unlabeled]" }, /lack: ready_for_review/, "no ready_for_review type"],
+  ]) {
+    ({ r, line } = rg5(ci(opts)));
+    assert.equal(r.status, 1, `${why} turns RG-5 red`); assert.match(output(r), re, why);
+  }
 });
 
 // ready-on-green: the step that picks the pull request whose draft green CI lifts, run as the runner runs it, with

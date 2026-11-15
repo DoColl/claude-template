@@ -50,7 +50,7 @@ jobs:
     if: ${{ !(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active')) }}
 ```
 
-- **Every job carries the condition.** A run whose jobs are all skipped ends `skipped`, and this workflow, like any other that acts on a green CI run, acts on `success` only. A run where one job ran and the others were skipped ends `success`: if the label came off between the end of that run and this workflow's read of the pull request, the draft would be lifted on checks that never ran.
+- **Every job carries the condition** — RG-5 checks it, and the two types. A run whose jobs are all skipped ends `skipped`, and this workflow, like any other that acts on a green CI run, acts on `success` only. A run where one job ran and the others were skipped ends `success`: if the label came off between the end of that run and this workflow's read of the pull request, the draft would be lifted on checks that never ran.
 - **Drafts only.** GitHub does not merge a draft, but it counts a skipped job as passed for a required check: a held pull request that could be merged would go through untested. A pull request that is not a draft runs CI in full, label or not, and `ready_for_review` runs it when a held draft is lifted by hand. A draft this workflow lifts starts no run (§ Limits).
 - **`unlabeled` fires for any label.** Another label taken off a held draft runs nothing; taken off a pull request that is not held, it runs CI again, in full.
 - **The price.** What CI runs first — a secret scan, the gate — no longer runs on each push while the label is on, only once at the end, before the draft is lifted. A secret pushed in between is found then, not at once: the gate run before each push stays the first line.
@@ -73,6 +73,7 @@ GitHub reads a `workflow_run` workflow from the default branch, whatever the pul
 - **RG-2** — no checkout, no action, no merge, review, comment or push; `permissions: {}` at the top and two permissions in the job, `pull-requests: write` and `contents: write`.
 - **RG-3** — every job takes green `pull_request` runs of this repository only and refuses the branches a CI Claude session wrote; each `gh pr ready` follows a comparison of the head with the validated commit.
 - **RG-4** — the `session-active` label is read with the pull request and checked before the pull request is named to the step that lifts the draft.
+- **RG-5** — the CI workflow named at install (`name:` as the weekly digest reads it), when one of its jobs carries the `session-active` hold: every job carries it, in exactly one `if:` at four spaces, either alone or followed by `&&` and with no `||` on the line. Its `pull_request` types, on one line, list `unlabeled` and `ready_for_review`. A CI workflow without the hold, or no workflow by that name, passes. It reads jobs at two spaces of indentation: a workflow indented otherwise fails until it is.
 
 ## History
 
@@ -82,3 +83,4 @@ GitHub reads a `workflow_run` workflow from the default branch, whatever the pul
 - A pull request labelled `session-active` keeps its draft (RG-4): a pull request had been merged once its CI was green and its draft lifted, while the session that wrote it was still reviewing it.
 - What follows when the label comes off, and a CI workflow that holds its jobs while it is on: each push of a session at work ran CI in full, on commits nobody would merge as they were. Every job holds, so that a held run ends `skipped`, never `success` on checks that never ran. Run live with the kit's own CI (§ Status).
 - Its job runs on the runner the installation value `LIGHT_RUNNER` names, `ubuntu-slim` by default (`README.md` of the kit, § Actions minutes): every job is billed rounded up to the minute, and that one-CPU runner costs less. Not run live on that runner.
+- RG-5: a CI workflow that holds some of its jobs and not others passed every check, and only this page said otherwise; a project had the page alone, the kit a test of its own CI. Tested in the kit's suite and on the kit's own CI; not run in an installed project.

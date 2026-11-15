@@ -58,7 +58,7 @@
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
-      "sha256": "e7b8b888bab17d8d20de9848afd1675131210ae7d2068dec106e088390a4dd6f"
+      "sha256": "c28bf4a57343e2cf0a01490bf2f98c88776d2f92eae9a1e34f2fa39d2a101f7a"
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",
@@ -71,6 +71,10 @@
     "scripts/guards.d/10-claude-md.sh": {
       "module": "core",
       "sha256": "626b48a1553ace6f5b3f5827047c0e35cdf6689e39f8baf967fe61826b468a8d"
+    },
+    "scripts/guards.d/10-conflict-markers.sh": {
+      "module": "core",
+      "sha256": "d68cca8dc66792f295d775464e53eb3c28f31dce5ff2ff7b2434ce9cf0f8e1d1"
     },
     "scripts/guards.d/50-project.sh": {
       "module": "core",
@@ -94,7 +98,7 @@
     },
     ".claude/skills/parallel-sessions/SKILL.md": {
       "module": "parallel-sessions",
-      "sha256": "528536fcc0218a075fd97f63c63d0edb94780e38fceb0658c68ce5d538ad908b"
+      "sha256": "f04aa45778d538742287b36d0cae1faff1158142faa7a920bfe04045c7edf9be"
     },
     ".worktreeinclude": {
       "module": "parallel-sessions",
@@ -102,7 +106,7 @@
     },
     "docs/conventions/parallel-sessions.md": {
       "module": "parallel-sessions",
-      "sha256": "f4cc666d64d36998d8c49d20d13cad0dd09af80adcf595496ce2bd65c1908f08"
+      "sha256": "cb0a735af8822380589e0b4813706385fc51e25b56c9f639de97bf74b9b7207b"
     },
     "scripts/guards.d/18-parallel-sessions.sh": {
       "module": "parallel-sessions",
@@ -158,11 +162,11 @@
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "f3f47741b627a3652f9a9c22568c8f1efda3b3c9320f9f96753d8393f191140a"
+      "sha256": "72784063ddeae512213ff6d6254bb0c80f9b50064f5560b3e10312c5ae11dab2"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",
-      "sha256": "109f8d46d162288c081917f6710bdb6fc8bdfc8adb23da1fc3bb6e39df3c13b2"
+      "sha256": "bb028dfa41829bf027ae15e08ddb739e6a41c6a958d3c5363497a0aea57d08ea"
     },
     ".github/workflows/weekly-digest.yml": {
       "module": "weekly-digest",
