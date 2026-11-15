@@ -35,7 +35,9 @@ Options for update:
                    (repeatable; with --modules, a file must match both)
   --set KEY=VALUE  change a placeholder value (repeatable): the files that carry
                    it are rendered again, and the value is recorded
-  --check          write nothing; exit 3 when something would change
+  --check          write nothing; exit 3 when something would change, the kit
+                   version the manifest records included (not with --modules
+                   or --only: a selection never writes it)
   --merge          a kit file edited here and changed in the kit: merge the two
                    when they do not overlap (needs git, and the kit as a git
                    checkout with its history); otherwise it stays a conflict
@@ -223,8 +225,13 @@ function update(kit, dir, opt) {
   }
   if (opt.check) {
     const behind = s.created.length + s.updated.length + s.merged.length + s.appended.length + s.fragmentsInserted.length + s.removed.length + s.conflicts.length + s.dropped.length;
+    // Every file in step, the manifest still naming an older kit: `update`
+    // would write the manifest, and the By hand steps above stay listed until
+    // it does. A selection never writes the version, so it is not asked about.
+    const stamp = !modules.length && !only.length && Boolean(from) && from !== kit.version;
     if (behind) out(`\nbehind the kit: ${behind} item(s)`);
-    return behind ? 3 : 0;
+    else if (stamp) out(`\nbehind the kit: only the version the manifest records (${from}); \`update\` writes ${kit.version}`);
+    return behind || stamp ? 3 : 0;
   }
   return s.conflicts.length ? 2 : 0;
 }

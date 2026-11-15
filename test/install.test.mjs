@@ -595,6 +595,28 @@ test("update lists the By hand steps of the versions it crosses, until the manif
   assert.deepEqual(byHandBetween(kitCopy(), "1.0.0", "9.9.9"), [], "a kit without a changelog has no step to show");
 });
 
+// A version that changed nothing a project installs still moves the manifest: until `update` writes it, the
+// project is behind, and --check says so rather than exit 0 under a "kit X → Y" line.
+test("update --check exits 3 when only the kit version the manifest records is behind", () => {
+  const root = kitCopy(), dir = tmp();
+  for (const rel of ["bin", "lib"]) fs.cpSync(path.join(KIT_ROOT, rel), path.join(root, rel), { recursive: true });
+  const version = (v) => fs.writeFileSync(path.join(root, "kit.json"), JSON.stringify({ name: "claude-template", version: v, repository: "example/kit" }));
+  version("1.0.0");
+  applyPlan(buildPlan({ kit: loadKit(root), target: dir, given: { PROJECT_NAME: "demo-app" } }));
+  version("1.0.1");
+  const up = (...args) => spawnSync(process.execPath, [path.join(root, "bin/harness.mjs"), "update", dir, ...args], { encoding: "utf8", input: "" });
+  const before = readManifest(dir);
+  const check = up("--check"); assert.equal(check.status, 3, output(check));
+  assert.match(check.stdout, /kit 1\.0\.0 → 1\.0\.1/);
+  assert.match(check.stdout, /behind the kit: only the version the manifest records \(1\.0\.0\); `update` writes 1\.0\.1/);
+  assert.deepEqual(readManifest(dir), before, "--check writes nothing");
+  assert.equal(up("--check", "--modules", "core").status, 0, "a selection never writes the version: in step");
+  assert.equal(up("--check", "--only", "scripts/").status, 0);
+  const done = up(); assert.equal(done.status, 0, output(done));
+  assert.equal(readManifest(dir).kit.version, "1.0.1");
+  const after = up("--check"); assert.equal(after.status, 0, output(after)); assert.doesNotMatch(after.stdout, /behind the kit/);
+});
+
 // `status . | head`: the reader closes, the command is not at fault.
 test("a reader that closes early stops the report, not the command", async () => {
   const dir = tmp(); install(dir, []);
