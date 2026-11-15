@@ -345,12 +345,21 @@ test('digest: empty, then one item per section', () => {
       { workflow: 'ci.yml', maxAgeDays: 9, lastRun: { createdAt: daysAgo(12), status: 'completed', conclusion: 'success', url: 'u' } },
       { workflow: 'security.yml', maxAgeDays: 9, lastRun: { createdAt: daysAgo(1), status: 'completed', conclusion: 'failure', url: 'u' } },
       { workflow: 'cleanup.yml', maxAgeDays: 9, lastRun: null },
+      // No run yet: listed once the workflow is older than its slack, not before.
+      { workflow: 'young.yml', maxAgeDays: 9, lastRun: null, createdAt: daysAgo(2) },
+      { workflow: 'slack.yml', maxAgeDays: 9, lastRun: null, createdAt: daysAgo(9) },
+      { workflow: 'old.yml', maxAgeDays: 9, lastRun: null, createdAt: daysAgo(10) },
+      { workflow: 'nightly.yml', maxAgeDays: 1, lastRun: null, createdAt: daysAgo(2) },
     ],
     mainCi: { conclusion: 'failure', url: 'u' },
   };
   const d = buildDigest(full);
-  // 1 PR + 4 runs (default branch + 3 schedules) + 1 old alert + 4 deadlines (late, soon, today, undated)
-  assert.equal(d.count, 10);
+  // 1 PR + 6 runs (default branch + 5 schedules) + 1 old alert + 4 deadlines (late, soon, today, undated)
+  assert.equal(d.count, 12);
+  assert.match(d.markdown, /`cleanup\.yml`: no scheduled run found/, 'a workflow of unknown age with no run is listed');
+  assert.doesNotMatch(d.markdown, /young\.yml|slack\.yml/, 'a workflow within its slack with no run is not listed yet');
+  assert.match(d.markdown, /`old\.yml`: no scheduled run found/);
+  assert.match(d.markdown, /`nightly\.yml`: no scheduled run found/, 'the slack is the workflow\'s own');
   assert.match(d.markdown, /#9 today — due 2030-03-01/, 'due today is not overdue');
   assert.match(d.markdown, /#11 .*Claude instruction files/);
   assert.doesNotMatch(d.markdown, /#13/);
@@ -363,7 +372,7 @@ test('digest: empty, then one item per section', () => {
   // Without a CI workflow the digest says what it could not look at; no line is added to the count.
   const blind = buildDigest({ ...full, hasCi: false, mainCi: null });
   assert.match(blind.markdown, /No workflow named/);
-  assert.equal(blind.count, 9);
+  assert.equal(blind.count, 11);
   assert.equal(buildDigest({ ...base, hasCi: false, mainCi: null }).count, 0);
 });
 

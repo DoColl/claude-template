@@ -345,9 +345,13 @@ export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, ga
   if (mainCi?.conclusion && mainCi.conclusion !== 'success') {
     runLines.push(`- [ ] latest CI run on \`${DEFAULT_BRANCH}\`: **${mainCi.conclusion}** — ${mainCi.url}`);
   }
-  for (const { workflow, maxAgeDays, lastRun } of schedules) {
+  for (const { workflow, maxAgeDays, lastRun, createdAt } of schedules) {
     const age = lastRun && ageD(lastRun.createdAt);
-    const msg = !lastRun ? 'no scheduled run found'
+    // A workflow GitHub first saw less than its slack ago may not have reached
+    // its first scheduled day yet. created_at is when any branch first carried
+    // the file, never after it reached the default branch: it can only make the
+    // workflow look older, so it never hides a missing run past the slack.
+    const msg = !lastRun ? (createdAt && ageD(createdAt) <= maxAgeDays ? null : 'no scheduled run found')
       : age > maxAgeDays ? `last scheduled run ${age} d ago (skipped cron?) — ${lastRun.url}`
       : lastRun.status === 'completed' && !['success', 'skipped'].includes(lastRun.conclusion)
         ? `last scheduled run **${lastRun.conclusion}** — ${lastRun.url}`
@@ -414,6 +418,12 @@ function client(token, repo) {
     return out;
   }
   return { call, all };
+}
+
+// When GitHub first registered the workflow file (`created_at`).
+async function workflowCreated(gh, workflow) {
+  const { data } = await gh.call('GET', `/actions/workflows/${workflow}`);
+  return data.created_at ?? null;
 }
 
 async function latestRun(gh, workflow, query) {
@@ -498,12 +508,13 @@ async function collect(gh, repo, now) {
   const ciFile = ciWorkflowFile(CI_WORKFLOW); // null: no workflow carries that name
   const watched = scheduledWorkflows().filter((w) => w !== SELF);
 
-  const [prs, alertIssues, deadlineIssues, lastRuns, mainCi] = await Promise.all([
+  const [prs, alertIssues, deadlineIssues, lastRuns, mainCi, created] = await Promise.all([
     gh.all('/pulls?state=open&per_page=100').then((open) => mapLimit(open, 4, (p) => collectPr(gh, p, ciFile))),
     openIssues(gh, 'dependabot-alert'),
     openIssues(gh, DEADLINE_LABEL),
     mapLimit(watched, 4, (w) => latestRun(gh, w, 'event=schedule')),
     ciFile ? mainCiRun(gh, repo, ciFile) : null,
+    mapLimit(watched, 4, (w) => workflowCreated(gh, w)),
   ]);
 
   return {
@@ -512,7 +523,7 @@ async function collect(gh, repo, now) {
     alerts: alertIssues.map((i) => ({ number: i.number, title: i.title, createdAt: i.created_at })),
     deadlines: deadlineIssues.map((i) => ({ number: i.number, title: i.title, body: i.body })),
     schedules: watched.map((workflow, k) => ({
-      workflow, maxAgeDays: MAX_AGE_DAYS[workflow] ?? DEFAULT_MAX_AGE_DAYS, lastRun: lastRuns[k],
+      workflow, maxAgeDays: MAX_AGE_DAYS[workflow] ?? DEFAULT_MAX_AGE_DAYS, lastRun: lastRuns[k], createdAt: created[k],
     })),
     mainCi,
     ...rules,
