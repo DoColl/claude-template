@@ -10,7 +10,7 @@ name: Security
 #    findings (Actions logs) but do NOT gate merges on their own —
 #    false-positive rates are too high to block on every finding without
 #    triage. Because nothing gates on them, they run ONLY on the standalone
-#    triggers (weekly cron, manual dispatch, docs-only pushes): on every
+#    triggers (weekly cron, manual dispatch): on every
 #    pull-request push they would cost billed minutes for findings that are
 #    triaged asynchronously anyway. The `github.workflow == 'Security'` guard
 #    is how a job detects a standalone run: when a CI workflow calls this one
@@ -28,27 +28,18 @@ name: Security
 # a hash (scripts/guards.d/30-github-actions.sh).
 #
 # Meant to be called from the project's CI workflow as its FIRST job on every
-# pull request and push to the default branch, so the rest of CI (lint, tests,
+# pull request and push to the default branch, documentation-only ones
+# included (no path filter on that workflow), so the rest of CI (lint, tests,
 # build, deploy) only runs once the enforcing tier is green
 # (docs/conventions/security-workflow.md § Wiring). The standalone triggers
 # below keep it runnable on its own for scheduled audits and ad-hoc checks.
+# There is no `push` trigger here: CI calls it on every push, and a second
+# trigger would scan the same commit twice.
 on:
   workflow_call:
   schedule:
     - cron: '17 6 * * 1' # Mondays 06:17 UTC
   workflow_dispatch:
-  # Standalone trigger for docs-only pushes, which the CI workflow is expected
-  # to skip through paths-ignore. The paths here MIRROR that paths-ignore, so a
-  # push that only touches docs gets scanned here; a push that touches code
-  # gets scanned through workflow_call. Mixed pushes (code + docs) trigger
-  # both, each in its own concurrency group below.
-  push:
-    branches: [__HARNESS_DEFAULT_BRANCH__]
-    paths:
-      - 'docs/**'
-      - '**.md'
-      - 'LICENSE'
-      - '.gitignore'
 
 # Least privilege (zizmor excessive-permissions): no workflow-wide grant —
 # that would hand every job, including the ones that run third-party
@@ -61,10 +52,10 @@ on:
 permissions: {}
 
 # The workflow name keeps a standalone run and the one CI calls in separate
-# groups (github.workflow reads the caller's name there): sharing one, a push
-# touching code and docs makes them cancel each other, and when the called run
-# loses, whatever CI gates on it is silently skipped. Never cancel on the
-# default branch.
+# groups (github.workflow reads the caller's name there): sharing one, a manual
+# run and a CI run on the same branch would cancel each other, and when the
+# called run loses, whatever CI gates on it is silently skipped. Never cancel
+# on the default branch.
 concurrency:
   group: security-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/__HARNESS_DEFAULT_BRANCH__' }}
@@ -131,7 +122,7 @@ jobs:
   # the signal is clear.
   #
   # `if: github.workflow == 'Security'` — standalone runs only (weekly
-  # cron, manual dispatch, docs pushes). When a CI workflow calls this one,
+  # cron, manual dispatch). When a CI workflow calls this one,
   # github.workflow is the caller's name and these jobs skip (skipped jobs
   # bill nothing).
 

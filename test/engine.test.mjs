@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { loadKit, resolveSelection, listModules, PHASES } from "../lib/kit.mjs";
+import { loadKit, resolveSelection, listModules, PHASES, KIT_ROOT } from "../lib/kit.mjs";
 import { walk } from "../lib/install.mjs";
 import { render, tokensIn, insertAtSlot, slotsIn, appendBlock } from "../lib/render.mjs";
 import { parseEntries } from "../lib/changelog.mjs";
@@ -242,30 +242,30 @@ test("guard numbers are unique across modules", () => {
   }
 });
 
-// The documentation set is skipped by CI and merged at once by auto-merge: written in four places, it must be
-// one set. And what the CI skeleton takes back after skipping it must be held by the merge gate — a path
-// re-included but not held would be merged, as documentation, while the CI run it started is in flight.
-test("the docs paths agree across the shipped workflows, and CI re-includes only what the merge gate holds", () => {
-  const list = (text, re) => { const m = re.exec(text); assert.ok(m, `${re} not found`); return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]); };
+// CI runs on every pull request, documentation included: a pull request a path filter skips gets no run, so a
+// required check never reports and auto-merge, which only follows CI, never merges it — and its files are never
+// scanned. The costly jobs skip on the `changes` verdict instead, whose documentation set is the one the weekly
+// digest uses for a CI workflow that still filters, and the one the kit's own CI uses.
+test("CI runs on every pull request with no path filter, and every merge waits for it", () => {
   const ci = read(kit.modules.get("ci-workflow").dir, "files/.github/workflows/ci.yml");
   const security = read(kit.modules.get("ci-security").dir, "files/.github/workflows/security.yml");
   const autoMerge = read(kit.modules.get("auto-merge").dir, "files/.github/workflows/auto-merge.yml");
-  const docs = ["docs/**", "**.md", "LICENSE", ".gitignore"];
-  assert.deepEqual(list(ci, /\n  push:\n(?:.*\n)*?    paths-ignore: \[(.*)\]\n/), docs, "ci.yml, push");
-  const pr = list(ci, /\n  pull_request:\n(?:    .*\n)*?    paths:\n((?:      - .*\n)+)/);
-  assert.equal(pr[0], "**", "ci.yml, pull_request: a paths list needs a positive pattern first");
-  const lastExclusion = pr.findLastIndex((p) => p.startsWith("!"));
-  assert.deepEqual(pr.slice(1, lastExclusion + 1), docs.map((p) => `!${p}`), "ci.yml, pull_request: the exclusions, in one run");
-  assert.deepEqual(list(security, /\n  push:\n(?:.*\n)*?    paths:\n((?:      - .*\n)+)/), docs, "security.yml, push");
-  assert.deepEqual(list(autoMerge, /\n  pull_request:\n(?:.*\n)*?    paths:\n((?:      - .*\n)+)/), docs, "auto-merge.yml, pull_request");
+  const digest = read(kit.modules.get("weekly-digest").dir, "files/scripts/weekly-digest.mjs");
+  const triggers = (text) => text.slice(text.indexOf("\non:\n"), text.indexOf("\npermissions:"));
+  assert.doesNotMatch(triggers(ci), /\bpaths(-ignore)?:/, "ci.yml: no path filter");
+  assert.match(triggers(ci), /\n  push:\n/, "ci.yml runs on push");
+  assert.match(triggers(ci), /\n  pull_request:\n/, "ci.yml runs on pull_request");
+  assert.doesNotMatch(triggers(security), /\n  push:/, "security.yml: CI calls it on every push, no trigger of its own");
+  assert.doesNotMatch(triggers(autoMerge), /\n  pull_request(_target)?:/, "auto-merge.yml: no merge without a CI run");
+  assert.doesNotMatch(autoMerge, /NON_DOCS|promote-docs/, "auto-merge.yml: no documentation fast path left");
+  const docsOf = (text, what) => { const m = /^ +docs='([^']+)'$/m.exec(text); assert.ok(m, `${what}: docs='…' not found`); return m[1]; };
+  const docs = docsOf(ci, "ci.yml");
+  assert.equal(docs, "(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)");
+  assert.equal(docsOf(read(KIT_ROOT, ".github/workflows/ci.yml"), "the kit's ci.yml"), docs, "the kit's own CI");
+  assert.equal(/^export const DEFAULT_DOCS_RE = '(.*)';$/m.exec(digest)[1].replaceAll("\\\\", "\\"), docs, "the weekly digest");
   const review = read(kit.modules.get("claude-review").dir, "files/.github/workflows/claude-review.yml");
   assert.match(review, /\n  workflow_run: # zizmor: ignore\[dangerous-triggers\]\n    workflows: \["__HARNESS_CI_WORKFLOW__"\]\n    types: \[completed\]\n/, "claude-review.yml follows CI, so it reviews the pull requests CI runs on");
   assert.doesNotMatch(review, /\n  pull_request(_target)?:/, "claude-review.yml is never started by a pull request");
-  assert.ok(autoMerge.includes("grep -E -v -c '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)'"), "auto-merge.yml, NON_DOCS");
-  const gate = new RegExp(/^  CLAUDE_GATE_RE: '(.*)'$/m.exec(autoMerge)[1], "i");
-  const back = pr.slice(lastExclusion + 1);
-  assert.deepEqual(back, [".claude/**", "**/.claude/**", "CLAUDE.md", "**/CLAUDE.md"], "ci.yml, pull_request: the instruction files come back after the exclusions");
-  for (const p of back) assert.match(p.replaceAll("**/", "sub/").replaceAll("**", "agents/x.md"), gate, `${p} is re-included by CI, so the merge gate must hold it`);
 });
 
 // What the kit ships to be run or read — its scripts and what they read, hooks, instruction files, scanner configs —

@@ -80,10 +80,12 @@ export const MAX_AGE_DAYS = SETTINGS.maxAgeDays;
 // Its absence is the signal (no run of the workflow on its scheduled day).
 export const SELF = 'weekly-digest.yml';
 
-// Used only when auto-merge.yml is not installed (loadRules): the paths that
-// Claude Code or git EXECUTE rather than read, and the docs-only set a CI
-// workflow usually ignores. With auto-merge.yml, its own declarations are read
-// instead, so the digest and the merge gate cannot drift.
+// DEFAULT_GATE_RE is used only when auto-merge.yml is not installed
+// (loadRules): the paths that Claude Code or git EXECUTE rather than read.
+// With auto-merge.yml, its own declaration is read instead, so the digest and
+// the merge gate cannot drift. DEFAULT_DOCS_RE is the documentation set a CI
+// workflow that still filters its triggers skips (the kit's skeleton no longer
+// does: it runs on every pull request).
 export const DEFAULT_GATE_RE = '(^|/)\\.claude(/|$)|(^|/)(claude(\\.local)?|agents)\\.md$|^\\.githooks(/|$)|(^|/)\\.mcp\\.json$|(^|/)\\.claude\\.json$|(^|/)\\.ripgreprc$|(^|/)\\.gitmodules$|(^|/)\\.husky(/|$)|^\\.github/workflows/(auto-merge|claude[^/]*)\\.ya?ml$|^(\\.github/)?zizmor\\.ya?ml$|^\\.gitleaks(\\.toml|\\.json|ignore)$|(^|/)\\.npmrc$|^scripts/guards\\.d/|^scripts/(security-checks\\.sh|fetch-pinned-release\\.sh|plugin-pins(\\.test)?\\.mjs|reviewed-plugins\\.json|auto-merge-paths\\.txt|weekly-digest(\\.test|\\.config)?\\.mjs|audit-gate(\\.test)?\\.mjs|audit-allowlist\\.json|parallel-sessions\\.sh|eco-design-audit(\\.test)?\\.mjs|eco-design\\.config\\.json)$|^security_review[^/]*\\.md$|^docs/conventions/';
 export const DEFAULT_DOCS_RE = '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)';
 
@@ -97,13 +99,6 @@ export function readGateRe(autoMergeYml) {
   if (!m) throw new Error('CLAUDE_GATE_RE not found in auto-merge.yml');
   const own = autoMergeYml.match(/^ {2}PROJECT_GATE_RE: '(.*)'$/m);
   return new RegExp(own ? `(?:${m[1]})|(?:${own[1]})` : m[1], 'i');
-}
-
-/** The docs-only path set as auto-merge.yml's NON_DOCS grep defines it (same set as the CI workflow's paths-ignore). */
-export function readDocsRe(autoMergeYml) {
-  const m = autoMergeYml.match(/NON_DOCS=\$\(grep -E -v -c '([^']+)'/);
-  if (!m) throw new Error('NON_DOCS pattern not found in auto-merge.yml');
-  return new RegExp(m[1]);
 }
 
 /**
@@ -125,7 +120,7 @@ export function loadRules(dir = join(ROOT, '.github/workflows')) {
   const file = join(dir, 'auto-merge.yml');
   if (!existsSync(file)) return { gateRe: new RegExp(DEFAULT_GATE_RE, 'i'), docsRe: new RegExp(DEFAULT_DOCS_RE), testRe: null, autoMerge: false };
   const yml = readFileSync(file, 'utf8');
-  return { gateRe: readGateRe(yml), docsRe: readDocsRe(yml), testRe: readTestRe(yml), autoMerge: true };
+  return { gateRe: readGateRe(yml), docsRe: new RegExp(DEFAULT_DOCS_RE), testRe: readTestRe(yml), autoMerge: true };
 }
 
 /** One path pattern of a workflow trigger as a regular expression source. */
@@ -184,6 +179,26 @@ export function readCiAlso(ciYml) {
     throw unread('takes a path back before a later ! exclusion');
   }
   return patterns.slice(lastExclusion + 1);
+}
+
+/**
+ * Whether the CI workflow's triggers filter on paths (`paths` or `paths-ignore`
+ * anywhere under `on:`). Without a filter a docs-only pull request gets a run
+ * like any other, so a missing one is reported. Anything unread counts as a
+ * filter: the digest then keeps its older, quieter reading.
+ */
+export function readCiFilters(ciYml) {
+  const lines = ciYml.split(/\r?\n/).map((l) => l.replace(/(^|\s)#.*$/, ''));
+  const start = lines.findIndex((l) => /^["']?on["']?\s*:/.test(l));
+  if (start === -1) return true;
+  const end = lines.findIndex((l, i) => i > start && /^[^\s]/.test(l));
+  return lines.slice(start, end === -1 ? undefined : end).some((l) => /(^|[\s{,])["']?paths(-ignore)?["']?\s*:/.test(l));
+}
+
+/** Whether the CI workflow found by `ciWorkflow` filters on paths; true when none is found. */
+export function loadCiFilters(dir = join(ROOT, '.github/workflows'), settings = SETTINGS) {
+  const file = ciWorkflowFile(settings.ciWorkflow, dir);
+  return file ? readCiFilters(readFileSync(join(dir, file), 'utf8')) : true;
 }
 
 /**
@@ -252,17 +267,21 @@ export function parseDeadline(body) {
  * `autoMerge`: auto-merge.yml is installed (green PRs are expected to merge on
  * their own). `hasCi`: a CI workflow exists (a run is expected on every PR).
  */
-export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, autoMerge = true, hasCi = true }, now) {
+export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, autoMerge = true, hasCi = true, ciFilters = true }, now) {
   const ageH = (now - new Date(pr.createdAt)) / HOUR;
   const { files } = pr;
-  // The CI workflow skips docs-only PRs (paths-ignore): no run is expected then.
+  // A CI workflow that still filters its triggers skips docs-only PRs: no run
+  // is expected then (the kit's skeleton runs on every PR, and a docs-only PR
+  // without a run is listed once stale, below).
   // A truncated listing never counts as docs-only. Without a CI workflow, no
   // run is expected at all. `ciAlso`: the documentation paths the CI workflow
   // runs on all the same (instruction files it takes back after skipping
   // Markdown) — one such file and a run IS expected, so a missing one is
   // reported as missing, not as a hand merge that waits.
   const docsOnly = pr.filesComplete !== false && files.length > 0 && files.every((p) => docsRe.test(p));
-  const ciSkipped = !hasCi || (docsOnly && !(ciAlso && files.some((p) => ciAlso.test(p))));
+  // `ciFilters`: the CI workflow filters its triggers on paths; without a
+  // filter (the kit's skeleton) every PR gets a run, docs-only ones included.
+  const ciSkipped = !hasCi || (ciFilters && docsOnly && !(ciAlso && files.some((p) => ciAlso.test(p))));
   const gated = files.some((p) => gateRe.test(p)) || pr.headRef.startsWith('claude/issue-');
   const ci = pr.ci; // { status, conclusion } of the latest CI run on the head SHA, or null
 
@@ -285,7 +304,9 @@ export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, aut
   if (!hasCi) return 'no CI workflow to wait for: merge it or close it';
   // Without auto-merge.yml nothing merges on its own: a green PR simply waits.
   if (!autoMerge) return ci ? 'CI green, not merged: merge it or close it' : 'docs-only, no CI run expected: merge it or close it';
-  if (!ci) return 'docs-only and not merged: check `auto-merge.yml`';
+  // auto-merge.yml only merges after a green CI run: a docs-only PR without
+  // one waits for nothing.
+  if (!ci) return 'docs-only, no CI run: `auto-merge.yml` waits for one — drop the CI workflow\'s path filter, or merge by hand';
   // auto-merge.yml merges Dependabot patch and minor bumps; its verdict holds
   // the rest (its run names why). An Action PR may also have hit the 403: from
   // here only the run tells which.
@@ -304,7 +325,7 @@ export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, aut
 }
 
 /** Pure: data in, { count, markdown } out. */
-export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, gateRe, docsRe, testRe = null, ciAlso = null, autoMerge = true, hasCi = true }) {
+export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, gateRe, docsRe, testRe = null, ciAlso = null, autoMerge = true, hasCi = true, ciFilters = true }) {
   const sections = [];
   let count = 0;
   const section = (title, lines) => {
@@ -316,7 +337,7 @@ export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, ga
   const ageD = (d) => Math.floor((now - new Date(d)) / DAY);
 
   section('Pull requests', prs.flatMap((pr) => {
-    const why = prReason(pr, { gateRe, docsRe, testRe, ciAlso, autoMerge, hasCi }, now);
+    const why = prReason(pr, { gateRe, docsRe, testRe, ciAlso, autoMerge, hasCi, ciFilters }, now);
     return why ? [item(pr.number, pr.title, `— ${why} (${ageD(pr.createdAt)} d)`)] : [];
   }));
 
@@ -496,6 +517,7 @@ async function collect(gh, repo, now) {
     mainCi,
     ...rules,
     ciAlso: ciAlsoOrWarn(),
+    ciFilters: loadCiFilters(),
     hasCi: ciFile !== null,
   };
 }

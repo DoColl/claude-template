@@ -1,26 +1,32 @@
 # The CI workflow skeleton
 
-**Rule:** `.github/workflows/ci.yml` calls `security.yml` as its first job and every other job waits for it. Its `pull_request` trigger skips documentation but takes the Claude instruction files back, so the gate runs on a pull request that touches only them.
+**Rule:** `.github/workflows/ci.yml` runs on every pull request and every push to the default branch, with no path filter. Its first job calls `security.yml` and always runs; a `changes` job says whether anything outside the documentation set changed, and the project's costly jobs wait for it and are skipped when nothing did (CW-1 to CW-3).
 
 ## Status
 
-The call to `security.yml` and the triggers are the ones `security-workflow.md` § Wiring describes. Run live once, on 2026-11-12, in a throwaway private repository (the kit at commit `e677e3d` plus the `actions: read` fix of `claude-rework`; `claude-code-action` at `f27be6b`, which installed Claude Code 2.1.302), with one test job added after the call. Observed: a documentation-only pull request started no run; one that only touched `CLAUDE.md` did, through the re-inclusion; one opened into another branch started none, and its `edited` event started one once it was retargeted onto the default branch. In your repository, open one pull request that only touches `CLAUDE.md` and check that the run starts.
+The call to `security.yml`, the `edited` type and the triggers are the ones `security-workflow.md` § Wiring describes. An earlier shape of this file, with a path filter instead of the `changes` job, ran live once, on 2026-11-12, in a throwaway private repository (the kit at commit `e677e3d`), with one test job added after the call: the `edited` event of a pull request retargeted onto the default branch started a run, as described below. The current shape — no path filter, the `changes` job, its guard — is unit-tested only: the guard runs the `changes` script on a table of changes built in scratch repositories, and the kit's tests run the guard on broken copies of this file. It has not run live. In your repository, open one pull request that only touches a Markdown file and check that the run starts, that `Security` runs and that your own jobs are skipped.
 
 ## Why
 
 A project that installs the security workflow still has to write the workflow that calls it, and until it does the enforcing tier does not run on pull requests at all. The call is the same in every project; only the jobs after it depend on the stack. So the call is shipped, and the jobs are left as a marked gap.
 
-The path filter has a trap. A CI workflow usually skips documentation, and `CLAUDE.md` and the agent definitions under `.claude/` are Markdown. The gate has checks that exist for those files — the byte budget of `CLAUDE.md` (CM-1), its pointers (CM-2), the hook line of every read-only agent where the agents are installed — and with a plain `paths-ignore: ['**.md']` none of them runs on the one kind of pull request that changes them.
+A path filter on the triggers looks like the cheap way to spare the build on documentation. It breaks three things:
+
+- **Required checks.** Where a ruleset requires the CI checks, a pull request the workflow skips never gets them: a required check that never reports blocks the merge, and only a bypass lands the pull request. A ruleset cannot exempt paths from a required check.
+- **Unattended merges.** Where the `auto-merge` module is installed, a merge waits for a green CI run (AM-11); a pull request with no run waits forever.
+- **The secret scan.** A token pasted into a runbook is a change to a Markdown file. Skipped by CI, it lands unscanned; the first scan is the next scheduled run.
+
+So the workflow runs on everything, and the decision moves from the trigger to the jobs. GitHub counts a job skipped by its `if:` as a passing required check, so a documentation-only pull request still gets every check a ruleset requires, and pays only for the jobs that ran: the security call and the `changes` job.
 
 ## Details
 
-- **`push`** to the default branch uses `paths-ignore`. A documentation-only push is not lost: the `push` trigger of `security.yml` has the same list as `paths`, and runs the enforcing tier on it.
-- **`pull_request`** uses `paths`, because `paths-ignore` cannot re-include. The list starts with `'**'`, removes the documentation set with `!` patterns, then adds `.claude/**` and `CLAUDE.md` again, at the root and at any depth. A later pattern overrides an earlier one, so the order is the rule.
-- **The documentation set** (`docs/**`, `**.md`, `LICENSE`, `.gitignore`) is the same in `ci.yml` (twice), in the `push.paths` of `security.yml`, and — when the auto-merge module is installed — in its `pull_request.paths` and its `NON_DOCS` pattern (the gate's, and its two copies in the checks of what the merge wrote, which its guard holds equal). Change it everywhere or nowhere.
-- **Re-include only what is held for a hand merge.** Where merges are unattended, a pull request whose every file is documentation is merged at once, without waiting for CI. A path re-included here that is not also held by the merge gate would be merged while the run this file starts is still in flight.
-- **The name** on the first line is the one given at installation (`CI` by default). Anything that waits for this workflow waits for that exact name.
-- **A project without code** keeps the file as installed: one job, the gate. The `TODO(harness)` block stays until there is something to build or test.
-- **This file is a seed**: the kit never overwrites it. A project that already has a CI workflow does not need this module; it adds the call to its own.
+- **`security`** calls `security.yml`: gitleaks over the full history, then the gate. It never waits for `changes` and is never skipped by it (CW-2): documentation is scanned too, and the gate checks `CLAUDE.md` and the agent definitions, which are Markdown.
+- **`changes`** checks out the commit with its parents (`fetch-depth: 2`) and writes one output, `code`. On a pull request, `HEAD` is the merge commit GitHub built, compared with its first parent, the base; on a push, the commit pushed when it is the only one, its parent being the tip before the push. `code` is `'false'` only when that diff was read and every file in it is in the documentation set: `docs/**`, any `*.md`, `LICENSE`, `.gitignore`. Anything else is `'true'`: code, a rename (listed as a deletion and an addition, so code moved into `docs/` counts), a quoted file name, an empty diff, a push of several commits, a scheduled or manual run, a commit that is not a merge commit, no repository. It runs on `ubuntu-slim`, GitHub's one-CPU runner (git, jq, the GitHub CLI and Node.js are on it), for a few seconds.
+- **The project's jobs** declare `needs: [security, changes]` and `if: needs.changes.outputs.code != 'false'`: an empty verdict, whatever left it empty, runs them. A job that must also run on documentation, a link checker say, leaves the `if:` out. If `changes` fails, the jobs that wait for it are skipped and the run is red: nothing merges on it.
+- **The documentation set** is written once, in the script, and it is broad: everything under `docs/` and every `*.md` anywhere. A project whose `docs/` holds code (a documentation site's `package.json`, a `conf.py`) or whose Markdown is read at run time (prompt files) narrows it — `^docs/.*\.md$`, say — or that code is skipped on a pull request that touches nothing else. Widening it (a `site/` directory of static pages, say) is an edit of this file; CW-3's table keeps checking that code and workflows still count as code.
+- **The name** on the first line is the one given at installation (`CI` by default). Anything that waits for this workflow waits for that exact name; a ruleset requires its jobs by their names (`Security / Enforcing (gitleaks + gate)`, and yours).
+- **A project without code** keeps the file as installed: the gate and the `changes` job. The `TODO(harness)` block stays until there is something to build or test.
+- **This file is a seed**: the kit never overwrites it. A project that already has a CI workflow does not need this module; it adds the call to its own, and the same `changes` job if it wants the saving.
 
 ### Retargeted pull requests
 
@@ -28,11 +34,16 @@ The `pull_request` trigger lists `edited` on top of GitHub's default types (`ope
 
 ## Checks
 
+`scripts/guards.d/31-ci-workflow.sh`:
+
+- **CW-1** — `on:` names `pull_request` and `push`, and no trigger has a `paths` or `paths-ignore` filter.
+- **CW-2** — a job calls `security.yml` (`uses: $/.github/workflows/security.yml`; a call to another repository's copy is not recognised); that job needs no other job and has no `if:`.
+- **CW-3** — when there is a `changes` job: its one output is `code: ${{ steps.diff.outputs.code }}`; the step is exactly a name, `id: diff`, `EVENT` and `BEFORE` from the event, then its run block; the job has no `if`, `continue-on-error`, `shell` or `defaults` key, so the step can be neither skipped nor allowed to fail into an empty verdict; its run block is the script between `# harness:changes-begin` and `# harness:changes-end`, and nothing else. That script is run with `bash -e`, as a runner runs it, on sixteen changes built in scratch repositories: `'false'` for a pull request that edits `docs/` or `README.md` and for a single-commit push that edits `docs/`, `'true'` for the thirteen others (code, docs and code, code moved into `docs/`, a workflow, a quoted name, an empty change, no merge commit, a single-commit push of code, a push of two commits, a push whose previous tip is unknown, a scheduled run, a manual run, no repository). Each row must write exactly one `code=` line. Without `changes`, the guard notes that every job runs on every change.
 - **GA-1, GA-2** apply to this workflow like any other.
-- This module ships no check of the path filter. The kit's own tests check that the documentation set is the same in every workflow it ships and that each re-included path is one the merge gate holds.
 
 ## History
 
 - Installed with the kit.
 - `edited` added to the `pull_request` types, so that a retargeted pull request gets its own run.
 - First live run (§ Status): the path filter and the `edited` type behaved as described.
+- The path filter is gone. With a ruleset that requires the CI checks, a documentation-only pull request got no run, so its required checks never reported and it could not be merged without a bypass; and documentation was never scanned for secrets on its way in. The workflow now runs on every pull request and push; a `changes` job, failing closed, lets the costly jobs skip on documentation; CW-1 to CW-3 guard that shape. Unit-tested only.
