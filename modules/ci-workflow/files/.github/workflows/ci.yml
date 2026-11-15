@@ -48,7 +48,7 @@ jobs:
   # the script between the markers on a table of changes.
   changes:
     name: Changes outside the documentation
-    runs-on: ubuntu-slim
+    runs-on: __HARNESS_LIGHT_RUNNER__
     timeout-minutes: 5
     permissions:
       contents: read

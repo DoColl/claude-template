@@ -116,3 +116,4 @@ Nothing checks that a finding was read, or who wrote a line of `.green-claude/de
 
 - 0.8.0 — the convention for the plugin in sessions, pinned as a plugin.
 - 0.9.0 — the audit runs in CI on every pull request; the plugin is no longer needed for it; the detector that runs a command is left out. First live run on the kit's own pull request.
+- The audit job, its timeout down from 30 to 15 minutes, that runner's limit, runs on the runner the installation value `LIGHT_RUNNER` names, `ubuntu-slim` by default (`README.md` of the kit, § Actions minutes): every job is billed rounded up to the minute, and that one-CPU runner costs less. Not run live on that runner.

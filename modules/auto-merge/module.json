@@ -10,7 +10,8 @@
     "CI_WORKFLOW": { "prompt": "Name of the CI workflow that must be green before a merge (its `name:`)", "default": "CI", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}" },
     "PROJECT_GATE_RE": { "prompt": "Paths of your own that are executed and never merge unattended (extended regular expression; ^$ adds none)", "default": "^$", "pattern": "[^'\\r\\n]{1,2000}" },
     "TEST_HOLD_RE": { "prompt": "Paths of your tests: a pull request that deletes or rewrites their lines is held (extended regular expression; ^$ holds none)", "default": "^$", "pattern": "[^'\\r\\n]{1,2000}" },
-    "MAJOR_HOLD_RE": { "prompt": "Paths where an indirect Dependabot major is held (extended regular expression; . holds everywhere)", "default": ".", "pattern": "[^'\\r\\n]{1,2000}" }
+    "MAJOR_HOLD_RE": { "prompt": "Paths where an indirect Dependabot major is held (extended regular expression; . holds everywhere)", "default": ".", "pattern": "[^'\\r\\n]{1,2000}" },
+    "LIGHT_RUNNER": { "prompt": "Runner label for the short jobs that need only bash, git, jq, the GitHub CLI and Node.js (ubuntu-latest keeps the 2-core runner; a self-hosted label works too)", "default": "ubuntu-slim", "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,63}" }
   },
   "postInstall": [
     "Before installing, check that GitHub enforces rulesets on this repository (on some plans a private repository only gets a warning on its Rulesets page): without one, do not use this module. Then protect the default branch with a ruleset: no direct push, a code-owner review required for .github/workflows/**, no bypass for GitHub Actions. A pull request runs its own copy of the workflows, so one that rewrites auto-merge.yml is judged by its own version: docs/conventions/auto-merge-policy.md § Setting it up.",

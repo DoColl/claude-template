@@ -6,7 +6,8 @@
   "order": 41,
   "requires": ["core"],
   "placeholders": {
-    "CI_WORKFLOW": { "prompt": "Name of the CI workflow that must be green before a merge (its `name:`)", "default": "CI", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}" }
+    "CI_WORKFLOW": { "prompt": "Name of the CI workflow that must be green before a merge (its `name:`)", "default": "CI", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}" },
+    "LIGHT_RUNNER": { "prompt": "Runner label for the short jobs that need only bash, git, jq, the GitHub CLI and Node.js (ubuntu-latest keeps the 2-core runner; a self-hosted label works too)", "default": "ubuntu-slim", "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,63}" }
   },
   "postInstall": [
     "The CI workflow (the name given at install, \"CI\" by default) must exist under that exact `name:` and run on pull_request. A pull request CI does not run on — documentation only, where CI skips it — keeps its draft: lift it by hand.",

@@ -22,8 +22,8 @@ concurrency:
 jobs:
   audit:
     name: Eco-design audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: __HARNESS_LIGHT_RUNNER__
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:

@@ -16,7 +16,8 @@
     "CLAUDE_MD_BUDGET": "25000",
     "DEFAULT_BRANCH": "main",
     "KIT_REPOSITORY": "DoColl/claude-template",
-    "CI_WORKFLOW": "CI"
+    "CI_WORKFLOW": "CI",
+    "LIGHT_RUNNER": "ubuntu-slim"
   },
   "files": {
     ".claude/skills/retro/SKILL.md": {
@@ -153,11 +154,11 @@
     },
     ".github/workflows/ready-on-green.yml": {
       "module": "ready-on-green",
-      "sha256": "af88ec0e55a4541742021c2d099e0e163b2ff99cad515b97fe1110fb0694d26a"
+      "sha256": "8e27f1db7a799088fb02521bc8a38b28768821d89911401ea637ddff263c7fa3"
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "b18898b4acd5e0cd29af19d6cd5bc665fbb07484e348ad439f20a24900d8138f"
+      "sha256": "f3f47741b627a3652f9a9c22568c8f1efda3b3c9320f9f96753d8393f191140a"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",
@@ -165,11 +166,11 @@
     },
     ".github/workflows/weekly-digest.yml": {
       "module": "weekly-digest",
-      "sha256": "b6d7268fdf0f6fbbfece6e47df1c93e1296bfc874365f879fd539df6fa084db4"
+      "sha256": "7b9d57b237ac07ad25c1b42d8f0235e33f417c80689427607257d9cc4fa5793d"
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "8823d08e0d35d9f79031f7375c9a3fc5b08b9c8fa2c4c059423d3bc64c2ae316"
+      "sha256": "6a86dc9d457cf07fa2f500b1fd944a19c4957e5e6bb51dce69960137692a1e0b"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
@@ -189,11 +190,11 @@
     },
     ".github/workflows/eco-design.yml": {
       "module": "eco-design",
-      "sha256": "f0bf50f3caf9590da6270745e938781c68ed0bf9d7d8076153b234a3f26dd129"
+      "sha256": "d9e7824012cbb9d7fec2d3c70c50fd79de55e9141bd6accf1a4055c059e418f4"
     },
     "docs/conventions/eco-design.md": {
       "module": "eco-design",
-      "sha256": "4aef2994f303f33bb0bf971e55e41c6b4d5805f02d5b617291b7a750a3e41b36"
+      "sha256": "fb0cff3931e4b804568d2b9a6eef921241c8f90bfbc8dedb5fe1e5304dceeb36"
     },
     "scripts/eco-design-audit.mjs": {
       "module": "eco-design",
