@@ -44,7 +44,7 @@ The areas `CLAUDE.md` lists under "Before pushing" — authentication and author
 ## Rules
 
 - A sub-agent never commits, pushes, or edits `CLAUDE.md`, `.claude/**`, `docs/**`, `.github/**`. The orchestrator does, after reviewing.
-- Do not spawn an agent for what three tool calls would do.
+- Do not spawn an agent for what three tool calls would do. What a session may spend on agents beyond this table — models, an estimate before a large run, the stop rule — is `session-cost.md`.
 - A new agent gets a row in the "Delegation" table of `CLAUDE.md`, and the hook if it has Bash and no editing tool (AG-1 enforces that).
 - After adding or changing an agent file, restart the open sessions.
 

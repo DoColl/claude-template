@@ -22,7 +22,7 @@
   "files": {
     ".claude/skills/retro/SKILL.md": {
       "module": "core",
-      "sha256": "c36217d429071085ebbfabec11ec8e029a28453795d1f2bcd7b6dc3d4c47816b"
+      "sha256": "f6bd9bfbb050a339a3a46674355e597714a3873d04db86483aa24c5a9ce3034f"
     },
     ".gitleaks.toml": {
       "module": "core",
@@ -54,7 +54,7 @@
     },
     "docs/conventions/claude-md.md": {
       "module": "core",
-      "sha256": "03fa6892b46fdd6917ae020b7ea5fb371a52b8e37f37c7fb6fa0f40434593145"
+      "sha256": "7f5057588b6eadd13aca47aa9193123402431dcbb449ac6bda33175468a56b58"
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
@@ -63,6 +63,10 @@
     "docs/conventions/review-tiers.md": {
       "module": "core",
       "sha256": "55186d97c6d81a9122b37eaa559266f7009b3ec676dd4a219f074c6b99107dad"
+    },
+    "docs/conventions/session-cost.md": {
+      "module": "core",
+      "sha256": "3d82e7398eee5638d556d30741865db7c6e2ab43632bc24bc734c31b895ed195"
     },
     "docs/runbook/README.md": {
       "module": "core",

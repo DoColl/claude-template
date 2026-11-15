@@ -40,7 +40,7 @@ An incident is a point where the session went wrong or spent effort for nothing:
 - a long search for a file, a command or a fact the repository holds;
 - the same failing command run again and again;
 - something the session could not see: a log, a service, a decision taken elsewhere;
-- something that worked but cost more than it should: files read whole for one line, a sub-agent briefed twice, a check run by hand that a script already runs.
+- something that worked but cost more than it should: files read whole for one line, a sub-agent briefed twice, a check run by hand that a script already runs, agents started against `docs/conventions/session-cost.md` (the session's model for bulk work, a large run without an estimate, a loop past its first round).
 
 One line per incident, with its evidence: the command, the file, the message or the correction.
 
