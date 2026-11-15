@@ -59,6 +59,15 @@ A branch that is behind catches up before its pull request is opened, even when 
 
 A rebase rewrites the branch, so it is for a branch nobody else has: one that is not pushed. A pushed branch takes a merge of the default branch instead, which needs no forced push. Pushed means that the remote holds commits of the branch that the default branch lacks: a branch reused after its pull request was merged has nothing a rebase would rewrite. The report's "how" line says which of the two applies, and PS-2 repeats it in the gate. After catching up: redo what was taken — a change that takes a shared counter or heading takes the next free one, and a change that only adds a changelog fragment has nothing to renumber —, run the checks, then push and open the pull request at once — the check is only as fresh as its fetch.
 
+### Fewer CI runs
+
+CI runs per push and per pull request event, not per commit: ten commits pushed at once make one run, and a commit that stays local makes none. Each run costs CI time, often billed per job and rounded up. A session that takes several small issues and opens one pull request each pays for its test job once per issue. In one repository, nine one-issue pull requests cost about nine runs of the test job, which made most of the bill, where one pull request with nine commits would have run it once.
+
+- **One pull request per batch**, or one per theme. A piece that needs its own review — a new check, a change to what a session may do — keeps a pull request of its own. One commit per issue, and a `Closes` line for each: the history stays readable commit by commit, and a revert can take one issue back. The price: one red check holds the whole batch.
+- **Push once.** Commit as you go; push when the batch is ready. Sub-agents working in parallel commit to their own branches and do not push; the session that leads collects their commits onto the batch branch and pushes it.
+- **After the pull request is open**, every push and every event its CI listens to is a run: an edited description, where the CI lists `edited`; a label taken off, where it lists `unlabeled`. The description is written in full at creation. A CI that holds its jobs on a draft carrying a label makes the pushes in between cheap: the label goes on before the second push.
+- **An open pull request is not brought up to date** with the default branch unless it conflicts or the repository requires it: each update is a full run, and where CI also runs on the default branch, the merged result is checked there.
+
 ### Shared files and the order of merges
 
 - **Split the work by files** before starting two sessions, not by topics: two topics can meet in one file.
@@ -106,7 +115,7 @@ Claude Code's agent teams (experimental, off by default) put several sessions un
 The module inserts none. For a project that wants the rule in front of every session, under "Key conventions":
 
 ```markdown
-- **Parallel sessions**: a worktree isolates files only; another session's uncommitted work is invisible. Run `./scripts/parallel-sessions.sh` when you start and before you push. Before a pull request, catch up with the default branch: rebase if not pushed, else merge. Assign yourself the issue you work on; its pull request says `Closes #<n>` or `Refs #<n>`. When another branch holds the same files, the user orders the merges. Commit early. → `docs/conventions/parallel-sessions.md`
+- **Parallel sessions**: a worktree isolates files only; another session's uncommitted work is invisible. Run `./scripts/parallel-sessions.sh` when you start and before you push. Before a pull request, catch up with the default branch: rebase if not pushed, else merge. Assign yourself the issue you work on; its pull request says `Closes #<n>` or `Refs #<n>`. Several small issues: one pull request, one commit each, one push. When another branch holds the same files, the user orders the merges. Commit early. → `docs/conventions/parallel-sessions.md`
 ```
 
 ### Limits
@@ -139,3 +148,4 @@ The module inserts none. For a project that wants the rule in front of every ses
 - The report and PS-2 speak as soon as the branch is behind the default branch, and say how to catch up: a rebase while the branch is not pushed, a merge once it is. The skill has a step before a pull request. Asked for once the module's own pull request had been renumbered three times before it could be opened.
 - The report compares the branches pushed from elsewhere. On the kit's own repository, sessions in the cloud worked for a day on branches the worktree comparison never saw: two of them took the same guard number, and a release was cut while another branch still edited the changelog fragments it was to consume. Both were found by hand, close to the merge. The first run of the new comparison showed the branch of a session then at work in the cloud. The skill and this page say when to write to another session, after an exchange between two cloud sessions that kept such a conflict away.
 - The skill assigns the issue a session works on and its pull request, and links the pull request to the issue with a closing keyword. On the kit's own repository, every assignment had been made by hand by the owner, after the fact and once after a merge, and a pull request that named its issue without a closing keyword left it open. The catch-up step no longer tells a change to renumber a version where changelog fragments give the version to a release step.
+- Grouping and pushing once (§ Fewer CI runs): a batch of small issues taken one pull request each had run the test job once per issue, where one pull request would have run it once. Prose in the skill and on this page, exercised by no test.
