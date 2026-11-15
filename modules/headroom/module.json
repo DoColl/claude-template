@@ -21,6 +21,6 @@
     "Start the proxy only with the launch script of the page (§ The launch script), saved outside the repository, then give ANTHROPIC_BASE_URL to the one claude process you start yourself (§ Start a session).",
     "Do not run `headroom wrap`, `headroom init`, `headroom mcp install`, `headroom learn` or the headroom-marketplace plugins: they write user-wide settings, register a server for every agent, or send transcripts to a model (§ Left out).",
     "HR-1 refuses any committed gateway URL and any proxy variable in a workflow, whatever the job: read § Not for every project before keeping this module in a project that has one.",
-    "This piece has never run live: do the live check (§ Live check) once before trusting it."
+    "This piece has never run live (docs/conventions/headroom.md § Status): do its live check (§ Live check) once before trusting it."
   ]
 }

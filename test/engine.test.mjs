@@ -364,6 +364,23 @@ test("every post-install line and summary is one line of plain text", () => {
   }
 });
 
+// What a piece has been exercised by is stated once, on its page's § Status. A next step that restates it names
+// that page, so a status that changes is changed in one place and the next steps follow it.
+test("a post-install line that says what was run names its page's § Status", () => {
+  const states = /\b(run live|ran live|ran once|run once|run twice|never (been )?run|(not been|been) exercised|unit-tested|in production)\b/i;
+  let seen = 0;
+  for (const m of listModules(kit)) for (const line of m.postInstall ?? []) {
+    if (!states.test(line)) continue;
+    seen++;
+    const page = /\(([\w./-]+\.md) § Status\)/.exec(line)?.[1];
+    assert.ok(page, `${m.id}: "${line.slice(0, 80)}…" states what was run: name its page's § Status, as "(docs/conventions/<page>.md § Status)"`);
+    const file = path.join(kit.modules.get(m.id).dir, "files", page);
+    assert.ok(fs.existsSync(file), `${m.id}: ${page} is not a file the module ships`);
+    assert.match(fs.readFileSync(file, "utf8"), /^## Status$/m, `${m.id}: ${page} has no § Status`);
+  }
+  assert.ok(seen >= 5, "the scan found the status lines it is meant to check");
+});
+
 // ── the kit's releases (bin/release.mjs) ────────────────────────────────────
 // A pull request adds changes/<slug>.md; a release turns the fragments into the next version and its entry.
 test("every changelog fragment waiting in changes/ is well formed, and together they make the next entry", () => {
