@@ -3,7 +3,9 @@
 #   AG-1  node --test .claude/hooks/agent-bash-guard.test.mjs — the allow/block
 #         table per profile, the CLI exit codes, the project's verification
 #         config, and the real frontmatter hook line of every read-only agent
-#         (blocks a write, allows a read, blocks when the guard is missing).
+#         (blocks a write, allows a read, blocks when the guard is missing);
+#         then agent-bash-guard.mutants.test.mjs — the specification run on
+#         broken copies of the lib, each caught by the row it names.
 #   AG-2  every file under .claude/hooks/ is tracked by git and matches no
 #         .gitignore rule. On a clone, a missing guard blocks every command of
 #         the guarded agents through `|| exit 2`: fail closed, but useless.
@@ -18,11 +20,11 @@ if ! command -v node >/dev/null 2>&1; then
   finish
 fi
 
-if out=$(node --test .claude/hooks/agent-bash-guard.test.mjs 2>&1); then
-  ok "AG-1: the allowlist specification passes"
+if out=$(node --test .claude/hooks/agent-bash-guard.test.mjs .claude/hooks/agent-bash-guard.mutants.test.mjs 2>&1); then
+  ok "AG-1: the allowlist specification passes, and fails on every mutant of the lib"
 else
   printf '%s\n' "$out" | grep -E '^(✖|not ok)|should (allow|block|reject)|must |AssertionError|Error:' | head -40 >&2
-  fail "AG-1: node --test .claude/hooks/agent-bash-guard.test.mjs fails (see above)"
+  fail "AG-1: node --test .claude/hooks/agent-bash-guard.test.mjs .claude/hooks/agent-bash-guard.mutants.test.mjs fails (see above)"
 fi
 
 if in_git; then

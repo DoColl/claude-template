@@ -48,6 +48,13 @@ const BLOCK_RO = [
   // writes / deletes / installs / network / other programs
   "touch /tmp/x", "echo hi > /tmp/x", "echo hi >> f", "echo x >/dev/null/../f", "echo hi", "printf x", "rm -rf x", "mv a b", "cp a b", "mkdir x", "chmod +x f", "ln -s a b", "tee f", "ls | tee f", "sudo ls", "curl http://localhost:3000/health", "wget x",
   "npm install", "npm test", "cd backend && npm test", "npx db-tool reset --force", "npx --no tsc --noEmit", "node --test .claude/hooks/agent-bash-guard.test.mjs", "node -e 1", "python3 -c 'print(1)'", "perl -pi -e 's/a/b/' f", "bash -c 'rm x'", "sh -c ls", "eval \"$X\"", "source ~/.zshrc", ". ./env.sh", "exec rm x", "xargs rm", "command rm x", "command git push",
+  // cat first in a command needs a file: on standard input it waits for good
+  "cat", "cat 2>&1", "cat --",
+  // each refused by one check only: a backgrounded segment, a brace expansion, a redirection hidden after a file
+  // name, a path that climbs to the parent, a word the shell splits on $IFS, a gate name inherited from Object
+  // zsh reads a trailing (…) as glob qualifiers, and (e:…:) runs code; a quoted &1 is a file named &1, not a dup
+  "git log -S README.md(e:'touch pwn':)", "grep -e README.md(e:'touch pwn':) f", "cat f 2>'&1'", "cat f >\\&2",
+  "grep -e x&touch pwn", "git diff HEAD {--output=pwn,HEAD}", "cat f >pwn2>&1", "ls ..", "grep -rn -e x ..", "cat .$IFS/etc/passwd", "scripts/toString", "scripts/valueOf",
   "sed -n 1p f", "awk '{print $1}' f", "jq -r .a f.json", "sort f", "uniq f", "find . -name x", "tree", "rg x", "yq .a f", "date", "env -u X git status", "timeout 60 git log -1", "cd backend", "cd .. && ls", "pushd /tmp", "export PATH=/tmp/e:$PATH", "set -- rm x", "unset PATH", "constructor x", "__proto__ x", "git constructor", "git __proto__ x",
   // verification commands belong to the verify profile only; make, go, cargo are nobody's readers
   "make test", "go test ./...", "cargo test --locked", "./gradlew check", "make check", "cd services/api && make test",
@@ -134,16 +141,27 @@ const BLOCK_VERIFY = [
   "cd ./.. && ls", "cd ./nowhere && cat f", "cd ./backend/../.. && git status",
   // only the first segment may be a cd, and only `&&` follows it
   "cd ./backend && cd /etc && cat passwd", "cd ./backend && cd ..", "cd ./backend || npm test", "cd ./backend",
+  // a verification command runs first in its segment, never fed by a pipe
+  "git status | make check", "cat f | ./gradlew check", "git status |\nmake check", "git status &&\nmake check && make check",
   "./gradlew publish", "./gradlew check --offline", "gradlew check", "go test ./... -run X", "go build ./...", "cargo test", "cargo test --locked --features x",
 ];
 
-test("readonly allows the inspection shapes", () => { for (const c of ALLOW_RO) { const r = decide(c, "readonly"); assert.equal(r.allow, true, `should allow: ${c}\n  ${r.reason ?? ""}`); } });
-test("readonly blocks everything else (writes, network, other programs, smuggling), config or not", () => { for (const c of BLOCK_RO) { assert.equal(decide(c, "readonly").allow, false, `should block: ${c}`); assert.equal(decide(c, "readonly", CFG).allow, false, `should block even with a verify config: ${c}`); } });
-test("verify allows the configured commands and the inspection shapes", () => { for (const c of [...ALLOW_RO, ...ALLOW_VERIFY_EXTRA]) { const r = decide(c, "verify", CFG); assert.equal(r.allow, true, `should allow: ${c}\n  ${r.reason ?? ""}`); } });
-test("verify blocks variations of the configured commands", () => { for (const c of BLOCK_VERIFY) assert.equal(decide(c, "verify", CFG).allow, false, `should block: ${c}`); });
+// Every row is checked, and every row that fails is named on its own line as a JSON string: a mutant of the lib
+// (agent-bash-guard.mutants.test.mjs) must be caught by the row it names, not by whichever row comes first.
+function expectAll(rows, verdict, check, label = `should ${verdict}`) {
+  const wrong = [];
+  for (const c of rows) { const r = check(c); if (r.allow !== (verdict === "allow")) wrong.push(`${label}: ${JSON.stringify(c)}${r.reason ? `  (${r.reason})` : ""}`); }
+  assert.equal(wrong.length, 0, `${wrong.length} row(s) decided wrong:\n${wrong.join("\n")}`);
+}
+test("readonly allows the inspection shapes", () => expectAll(ALLOW_RO, "allow", (c) => decide(c, "readonly")));
+test("readonly blocks everything else (writes, network, other programs, smuggling), config or not", () => {
+  expectAll(BLOCK_RO, "block", (c) => { const r = decide(c, "readonly"); return r.allow ? r : decide(c, "readonly", CFG); }, "should block, with a verify config or without");
+});
+test("verify allows the configured commands and the inspection shapes", () => expectAll([...ALLOW_RO, ...ALLOW_VERIFY_EXTRA], "allow", (c) => decide(c, "verify", CFG)));
+test("verify blocks variations of the configured commands", () => expectAll(BLOCK_VERIFY, "block", (c) => decide(c, "verify", CFG)));
 test("verify without a config is the readonly allowlist", () => {
-  for (const c of ALLOW_RO) assert.equal(decide(c, "verify").allow, true, `should allow: ${c}`);
-  for (const c of [...BLOCK_RO, ...ALLOW_VERIFY_EXTRA.filter((c) => !c.startsWith("git"))]) assert.equal(decide(c, "verify").allow, false, `should block: ${c}`);
+  expectAll(ALLOW_RO, "allow", (c) => decide(c, "verify"));
+  expectAll([...BLOCK_RO, ...ALLOW_VERIFY_EXTRA.filter((c) => !c.startsWith("git"))], "block", (c) => decide(c, "verify"));
 });
 test("unknown profile and empty command block", () => { assert.equal(decide("git status", "root").allow, false); assert.equal(decide("", "readonly").allow, false); assert.equal(decide(undefined, "readonly").allow, false); });
 
@@ -154,7 +172,8 @@ test("the config accepts exact argv entries only", () => {
     { verify: [{ argv: ["make", "../x"] }] }, { verify: [{ argv: ["make", "--file=/etc/x"] }] }, { verify: [{ argv: ["make", "/etc/x"] }] }, { verify: [{ argv: Array(13).fill("a") }] }, { verify: [{ argv: ["make"], extra: 1 }] },
     { verify: [{ argv: ["make"], cwd: "../x" }] }, { verify: [{ argv: ["make"], cwd: "/abs" }] }, { verify: [{ argv: ["make"], cwd: "." }] }, { verify: [{ argv: ["make"], cwd: "a b" }] }, { verify: [{ argv: ["make"], cwd: 3 }] }, { verify: Array(51).fill({ argv: ["make"] }) },
   ];
-  for (const raw of bad) assert.throws(() => normalizeConfig(raw), undefined, `should reject: ${JSON.stringify(raw)?.slice(0, 80)}`);
+  const accepted = bad.filter((raw) => { try { normalizeConfig(raw); return true; } catch { return false; } });
+  assert.equal(accepted.length, 0, `${accepted.length} config(s) accepted:\n${accepted.map((raw) => `should reject: ${JSON.stringify(raw)?.slice(0, 120)}`).join("\n")}`);
   const ok = normalizeConfig({ $comment: "x", verify: [{ argv: ["make", "test"], note: "unit tests" }, { cwd: "pkg/api", argv: ["go", "test", "./..."] }] });
   assert.deepEqual(ok.root, [["make", "test"]]); assert.deepEqual(ok.byDir.get("pkg/api"), [["go", "test", "./..."]]);
   assert.deepEqual(normalizeConfig({}).root, []);
