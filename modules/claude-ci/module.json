@@ -8,7 +8,7 @@
   "postInstall": [
     "For a PRIVATE repository only: read docs/conventions/claude-ci.md before enabling it anywhere else.",
     "Add the repository secret CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`).",
-    "This workflow has not been exercised end to end by the kit's authors: make the first `@claude` a comment on a throwaway issue, and read the run log.",
+    "This workflow has not been exercised end to end by the kit's authors (docs/conventions/claude-ci.md § Status): make the first `@claude` a comment on a throwaway issue, and read the run log.",
     "Never let a `claude/issue-*` branch, or a change to claude.yml, merge unattended (the auto-merge module enforces both)."
   ]
 }
