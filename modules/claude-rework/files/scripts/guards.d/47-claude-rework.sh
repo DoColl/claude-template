@@ -14,7 +14,7 @@
 
 RW=.github/workflows/claude-rework.yml
 REVIEW=.github/workflows/claude-review.yml
-REWORK_DIGEST=a00532db7877974edb02ab9d5df433bbe465381a
+REWORK_DIGEST=a94723357c9c89cd48b6a8349d6e9f55ebeb5401
 
 command -v git >/dev/null 2>&1 || { fail "RW-1: git is needed to compute the digest"; finish; }
 

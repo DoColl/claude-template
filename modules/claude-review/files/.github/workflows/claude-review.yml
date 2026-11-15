@@ -149,7 +149,7 @@ jobs:
     # A review that failed, timed out or returned nothing usable is a hold.
     needs: review
     if: ${{ always() && needs.review.result != 'skipped' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       pull-requests: write

@@ -24,7 +24,7 @@ concurrency:
 jobs:
   tag:
     name: Tag the version of kit.json
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       contents: write # create the tag ref; nothing else is written

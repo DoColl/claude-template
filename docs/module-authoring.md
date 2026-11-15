@@ -54,6 +54,7 @@ Shared spec to copy verbatim when a module needs it:
 
 ```json
 "CI_WORKFLOW": { "prompt": "Name of the CI workflow that must be green before a merge (its `name:`)", "default": "CI", "pattern": "[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}" }
+"LIGHT_RUNNER": { "prompt": "Runner label for the short jobs that need only bash, git, jq, the GitHub CLI and Node.js (ubuntu-latest keeps the 2-core runner; a self-hosted label works too)", "default": "ubuntu-slim", "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,63}" }
 ```
 
 What only the project can write is not a placeholder: leave a `TODO(harness): …` comment. `status` and the `90-harness-todo` guard list them.
@@ -118,6 +119,7 @@ Tests a guard runs ship with the module, next to the code they test. Always name
 ## Workflows
 
 - `permissions: {}` at workflow level, the minimum per job.
+- A short job that needs only bash, git, jq, the GitHub CLI and Node.js — no job `container:`, no Docker, done well within 15 minutes — runs on `__HARNESS_LIGHT_RUNNER__` (`README.md` § Actions minutes): every job is billed rounded up to the minute, and that runner costs less. A job that builds, scans or runs Claude stays on `ubuntu-latest`.
 - Every `uses:` pinned to a full commit SHA with the version in a comment. A pin is copied from a reviewed source; never invented.
 - `persist-credentials: false` on every checkout unless the job pushes.
 - No `${{ … }}` inside `run:` — pass values through `env:`.

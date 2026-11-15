@@ -5,6 +5,9 @@
   "phase": "pr-flow",
   "order": 48,
   "requires": ["core"],
+  "placeholders": {
+    "LIGHT_RUNNER": { "prompt": "Runner label for the short jobs that need only bash, git, jq, the GitHub CLI and Node.js (ubuntu-latest keeps the 2-core runner; a self-hosted label works too)", "default": "ubuntu-slim", "pattern": "[A-Za-z0-9][A-Za-z0-9._-]{0,63}" }
+  },
   "seed": ["scripts/eco-design.config.json"],
   "postInstall": [
     "The workflow fetches green-claude at the commit in scripts/eco-design.config.json and runs it on every pull request: the kit's authors read it at that commit; read it yourself, or put a commit you have read there (docs/conventions/eco-design.md § Bumping the pin).",

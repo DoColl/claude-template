@@ -33,7 +33,7 @@ concurrency:
 jobs:
   digest:
     name: Build and post the digest
-    runs-on: ubuntu-latest
+    runs-on: __HARNESS_LIGHT_RUNNER__
     timeout-minutes: 10
     permissions:
       contents: read       # checkout: the script, its settings and auto-merge.yml's gate regex

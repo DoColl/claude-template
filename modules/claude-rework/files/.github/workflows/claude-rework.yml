@@ -49,7 +49,7 @@ jobs:
     # A review run that held: started by workflow_run (so from the default
     # branch's file) from the review's own file, in this repository.
     if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'workflow_run' && github.event.workflow_run.path == '.github/workflows/claude-review.yml' && github.event.workflow_run.head_repository.full_name == github.repository }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       actions: read # the review run's verdict artifact
@@ -257,7 +257,7 @@ jobs:
     # held path, pushes one new branch and opens the pull request.
     needs: [prepare, rework]
     if: ${{ always() && needs.prepare.outputs.go == 'true' && needs.rework.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 10
     permissions:
       actions: read # this run's rework-patch artifact
@@ -330,7 +330,7 @@ jobs:
     # Two attempts already: say so once, and stop.
     needs: prepare
     if: ${{ needs.prepare.outputs.needs_human == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 5
     permissions:
       pull-requests: write

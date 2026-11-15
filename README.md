@@ -140,6 +140,7 @@ Most of the kit is distilled from one production codebase, which stays unnamed. 
 | [Claude Code environment variables](https://code.claude.com/docs/en/env-vars), [MCP tool search](https://code.claude.com/docs/en/mcp) | — | 2026-11-13 | The variables that move a session's API traffic, which the `headroom` guard refuses in committed files, and tool search behind a gateway (`docs/conventions/headroom.md` § Sources). |
 | [changesets/changesets](https://github.com/changesets/changesets) | MIT | `main`, 2026-11-14 (README, `docs/guide/getting-started.md`) | For the kit's own releases (`bin/release.mjs`, `changes/`): one Markdown file per change, whose header gives its semver bump (`patch`, `minor` or `major`) and whose text is the summary written to the changelog. An idea; no code or text copied. |
 | [twisted/towncrier](https://github.com/twisted/towncrier) | MIT | `trunk`, 2026-11-14 (README, `docs/tutorial.rst`) | For the kit's own releases: fragments kept in a directory and read instead of one file that every contributor writes to and that produces merge conflicts; a build that writes them into the changelog and removes them, and a draft mode that writes nothing (`--dry-run`). An idea; no code or text copied. |
+| [actions/runner-images](https://github.com/actions/runner-images) (`images/ubuntu-slim/ubuntu-slim-Readme.md`) and [GitHub Docs](https://github.com/github/docs) ("GitHub-hosted runners", § Single-CPU runners) | MIT; CC BY 4.0 (content) | `f642dfb` (2026-11-13); `6946b3e` (2026-11-12) | For `LIGHT_RUNNER` (§ Actions minutes): what the `ubuntu-slim` image carries (bash, git, jq, the GitHub CLI, Node.js 24, Python and pipx), that it runs a job in an unprivileged container and stops it at 15 minutes. |
 | [GitHub Docs](https://github.com/github/docs) ("Changing the base branch of a pull request", "Pull requests") | CC BY 4.0 (content) | `main`, 2026-11-14 | For `auto-merge` and `claude-review`: that a pull request's base commit is set when it is opened and does not move with the branch, and that GitHub's compare pages and pull request pages may show different changed files, each from its own merge base, which the kit assumes of the API too (`docs/conventions/auto-merge-policy.md` § Sources). No text copied. |
 
 ## What lands in your project
@@ -194,6 +195,18 @@ Copy `skills/harness-init/` into `~/.claude/skills/`, set `CLAUDE_TEMPLATE_DIR` 
 ## Why files and not a plugin
 
 Most of the kit is not Claude configuration at all: scripts, git hooks, workflows, documentation. And the one piece that must not be optional, the hook that confines read-only agents, is declared in each agent's frontmatter, which Claude Code ignores for agents shipped by a plugin. Project files it is.
+
+## Actions minutes
+
+On a private repository GitHub bills each job's time rounded **up to the whole minute**, and a pull request in a project equipped with the kit runs many short jobs: CI, the merge, ready-on-green, the eco-design audit, the review's report. Most of such a bill is rounding, not work. The kit keeps it down three ways:
+
+- **Light jobs on a one-CPU runner.** The jobs that need only bash, git, jq, the GitHub CLI and Node.js run on the runner the installation value `LIGHT_RUNNER` names — `ubuntu-slim` unless the project chose otherwise (`update <dir> --set LIGHT_RUNNER=ubuntu-latest`, or a self-hosted label): the CI skeleton's `changes` job, `auto-merge`, `ready-on-green`, the weekly digest and the eco-design audit. The review's report and the rework's orchestration jobs run on `ubuntu-slim` written in their files: those files are pinned by a digest (CR-1, RW-1), and a digest that accepted any runner label would accept one for the job that runs Claude too. GitHub sells that runner as the lower-cost option for short automation; it runs the job in an unprivileged container (no Docker-in-Docker, no job `container:`) and stops it at 15 minutes. The jobs that build, scan or run Claude stay on `ubuntu-latest`.
+- **Jobs skipped rather than run.** A job skipped by its `if:` gets no runner and costs nothing: the CI skeleton skips its costly jobs on documentation (`docs/conventions/ci-workflow.md`), and the advisory scanners run only on the weekly schedule and by hand.
+- **Steps folded into one job** where they always run together: the secret scan and the gate are one job, not two.
+
+Two levers sit outside the kit. Standard GitHub-hosted runners are free on public repositories, and self-hosted runners cost nothing on GitHub's side. Usage per repository and per workflow can be read from the billing usage API, to see which workflow costs what.
+
+Not done on purpose: `cancel-in-progress` on the CI workflow where `auto-merge` is installed. Cancelling a run is how a person holds a pull request there, and a title edit (an `edited` event) would cancel the run of the same commit, holding it until the next push.
 
 ## Limits
 
