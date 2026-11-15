@@ -1064,6 +1064,40 @@ test("parallel-sessions: the report compares the branches pushed from elsewhere,
   assert.equal(report("--check").stdout, "");
 });
 
+// RG-5: a CI workflow that holds one job for session-active holds them all, or a held run ends `success` with
+// checks skipped and ready-on-green may lift the draft on it. A CI workflow that holds nothing is not concerned.
+test("RG-5: a CI workflow that holds a job for session-active holds every job, and runs them when the label comes off", () => {
+  if (!kit.modules.has("ready-on-green")) return;
+  const dir = tmp();
+  install(dir, ["ready-on-green"]);
+  const held = "!(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active'))";
+  const ci = ({ name = "CI", types = "[opened, synchronize, reopened, unlabeled, ready_for_review]", first = `\${{ ${held} }}`, second = `\${{ ${held} && needs.lint.result == 'success' }}` } = {}) =>
+    `name: ${name}\non:\n  pull_request:\n    types: ${types}\npermissions: {}\njobs:\n  lint:\n    if: ${first}\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n` +
+    `  test:\n    needs: lint\n${second === null ? "" : `    if: ${second}\n`}    runs-on: ubuntu-latest\n    steps:\n      - run: true\n`;
+  const rg5 = (text) => { write(dir, ".github/workflows/ci.yml", text); const r = gate(dir); return { r, line: output(r).split("\n").find((l) => l.includes("RG-5")) ?? "" }; };
+
+  let { r, line } = rg5("name: CI\non: [pull_request]\npermissions: {}\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n");
+  assert.equal(r.status, 0, output(r)); assert.match(line, /does not hold its jobs/);
+  ({ r, line } = rg5(ci()));
+  assert.equal(r.status, 0, output(r)); assert.match(line, /holds all its 2 job\(s\)/);
+  ({ r, line } = rg5(ci({ name: "'CI' # quoted" })));
+  assert.equal(r.status, 0, "the name is read quoted, as the digest reads it");
+  ({ r, line } = rg5(ci({ name: "Other" })));
+  assert.equal(r.status, 0); assert.match(line, /no workflow named CI here/);
+
+  for (const [opts, re, why] of [
+    [{ second: null }, /do not carry the hold[^\n]*: test/, "a job without the hold"],
+    [{ second: `\${{ ${held} || github.event_name == 'push' }}` }, /: test/, "the hold undone by ||"],
+    [{ second: `\${{ always() && ${held} }}` }, /: test/, "the hold not first"],
+    [{ second: `\${{ !(github.event.pull_request.draft) }}` }, /: test/, "another condition"],
+    [{ types: "[opened, synchronize, reopened, ready_for_review]" }, /types[^\n]*lack: unlabeled/, "no unlabeled type"],
+    [{ types: "[opened, synchronize, reopened, unlabeled]" }, /lack: ready_for_review/, "no ready_for_review type"],
+  ]) {
+    ({ r, line } = rg5(ci(opts)));
+    assert.equal(r.status, 1, `${why} turns RG-5 red`); assert.match(output(r), re, why);
+  }
+});
+
 // ready-on-green: the step that picks the pull request whose draft green CI lifts, run as the runner runs it, with
 // `gh` answering from a table — the pull requests it lifts, and the nearby ones that keep their draft. The step
 // calls jq, as the runner provides it: without jq here, the test has nothing to run.
