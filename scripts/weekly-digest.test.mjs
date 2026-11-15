@@ -7,29 +7,26 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  buildDigest, prReason, parseDeadline, safeText, readGateRe, readDocsRe, readTestRe, hasSchedule,
+  buildDigest, prReason, parseDeadline, safeText, readGateRe, readTestRe, hasSchedule,
   scheduledWorkflows, loadRules, workflowName, ciWorkflowFile, checkConfig, readCiAlso, ciAlsoRe, loadCiAlso,
-  MAX_AGE_DAYS, SELF, DEFAULT_BRANCH, CI_WORKFLOW,
+  DEFAULT_DOCS_RE, MAX_AGE_DAYS, SELF, DEFAULT_BRANCH, CI_WORKFLOW,
 } from './weekly-digest.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// The two declarations the digest reads, written the way auto-merge.yml carries
-// them: a workflow-level env entry and the NON_DOCS grep of the docs-only job.
+// The declaration the digest reads, written the way auto-merge.yml carries it:
+// a workflow-level env entry.
 const AUTO_MERGE = [
   'env:',
   '  GH_REPO: ${{ github.repository }}',
   "  CLAUDE_GATE_RE: '(^|/)\\.claude(/|$)|(^|/)claude(\\.local)?\\.md$|^\\.githooks(/|$)|^\\.github/workflows/(auto-merge|claude[^/]*)\\.ya?ml$'",
   'jobs:',
-  '  promote-docs:',
-  '    steps:',
-  '      - run: |',
-  "          NON_DOCS=$(grep -E -v -c '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)' <<< \"$PATHS\" || true)",
+  '  promote-from-ci:',
   '',
 ].join('\n');
 
 const gateRe = readGateRe(AUTO_MERGE);
-const docsRe = readDocsRe(AUTO_MERGE);
+const docsRe = new RegExp(DEFAULT_DOCS_RE);
 const res = { gateRe, docsRe };
 const now = new Date('2030-03-01T06:00:00Z');
 const daysAgo = (n) => new Date(now - n * 86400000).toISOString();
@@ -69,7 +66,7 @@ test('schedule detection covers every YAML spelling, not comments', () => {
   assert.ok(!hasSchedule('on:\n  push: # no schedule: here\n'));
 });
 
-test('docs-only set and gate regex are read from auto-merge.yml', () => {
+test('the docs-only set, and the gate regex read from auto-merge.yml', () => {
   isDocs(docsRe);
   isGate(gateRe);
 });
@@ -103,8 +100,6 @@ test('rules: built-in without auto-merge.yml, read from it when installed, loud 
 
   writeFileSync(join(dir, 'auto-merge.yml'), AUTO_MERGE.replace('CLAUDE_GATE_RE', 'GATE'));
   assert.throws(() => loadRules(dir), /CLAUDE_GATE_RE not found/);
-  writeFileSync(join(dir, 'auto-merge.yml'), AUTO_MERGE.replace('NON_DOCS', 'DOCS'));
-  assert.throws(() => loadRules(dir), /NON_DOCS pattern not found/);
 }));
 
 test('the rules of this repository load, from auto-merge.yml if it is installed', () => {
@@ -245,7 +240,7 @@ test('PR reasons', () => {
   assert.equal(prReason(pr({ createdAt: daysAgo(1) }), res, now), null, 'green and young: not the owner\'s move yet');
   assert.match(prReason(pr({ ci: null }), res, now), /no CI run/);
   assert.equal(prReason(pr({ ci: null, createdAt: new Date(now - 600000).toISOString() }), res, now), null);
-  assert.match(prReason(pr({ ci: null, files: ['docs/x.md'] }), res, now), /docs-only/);
+  assert.match(prReason(pr({ ci: null, files: ['docs/x.md'] }), res, now), /^docs-only, no CI run: `auto-merge\.yml` waits for one/, 'auto-merge never merges without a CI run, documentation included');
   assert.match(prReason(pr({ ci: null, files: ['CLAUDE.md'] }), res, now), /Claude instruction files/, 'a CI that skips every Markdown file: no run by design, hand merge');
   assert.match(prReason(pr({ ci: null, files: ['CLAUDE.md', 'x.ts'] }), res, now), /no CI run/);
   assert.match(prReason(pr({ ci: null, files: ['docs/x.md'], filesComplete: false }), res, now), /no CI run/, 'truncated listing is never docs-only');

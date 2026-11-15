@@ -125,7 +125,7 @@
     },
     ".github/workflows/security.yml": {
       "module": "ci-security",
-      "sha256": "9ca8c45af6957f1387ca618641b531bff047247ce7666dbb86b3b15ac0da1bab"
+      "sha256": "a4e1977e5a4ca684d49bb9749862947988a8be72e3413b2fd1e09df1bc71c2c7"
     },
     ".github/zizmor.yml": {
       "module": "ci-security",
@@ -141,7 +141,7 @@
     },
     "docs/conventions/security-workflow.md": {
       "module": "ci-security",
-      "sha256": "839156a95e7981240ec15a2ab5d9df89534dd9abb85f358bf003bba8beabc1dd"
+      "sha256": "a220ae429dd9bac2bd96f561d2c65bb5fa0364ed02a58ee7f0cf0387520a03fe"
     },
     "scripts/fetch-pinned-release.sh": {
       "module": "ci-security",
@@ -157,7 +157,7 @@
     },
     "docs/conventions/ready-on-green.md": {
       "module": "ready-on-green",
-      "sha256": "3a7735e70382d7b86e4ce1a8c969d64c2b5c1f9d1a38578ff536987b06ea65c6"
+      "sha256": "b18898b4acd5e0cd29af19d6cd5bc665fbb07484e348ad439f20a24900d8138f"
     },
     "scripts/guards.d/41-ready-on-green.sh": {
       "module": "ready-on-green",
@@ -169,7 +169,7 @@
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "f5f44d5e55e4afcc12a2eee01c4af66286e618f07916982016172646b2c223d9"
+      "sha256": "b397883b9f4afdb22b167c608821597bc89573d19477d2a05add9b38f7c449cb"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
@@ -181,11 +181,11 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "c0c3ebe238aeabf9e9ac2e3c5072c71720728f6c6621d84e12c4d2bcb5d9994b"
+      "sha256": "3ae8099c05c447523b5cf16df5a17898de5a7a34c34c07e574fdc669f8810607"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",
-      "sha256": "41d02af4f8ca6a1f64e294c09895966ffaa0dc767e91f3ee77cc797428cb2949"
+      "sha256": "7a49c5cb26fb22a3ebba6df46c8addf51e09dddab38817b410669132384b7a2a"
     },
     ".github/workflows/eco-design.yml": {
       "module": "eco-design",

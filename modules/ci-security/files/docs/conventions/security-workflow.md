@@ -18,7 +18,7 @@ The scanners are pinned because the binary that decides what merges is itself an
 
 ### The two tiers
 
-- **Enforcing** — one job, on every invocation (called from CI, weekly cron, manual dispatch, docs-only push). Steps: checkout with full history and `persist-credentials: false`; gitleaks (`git --redact`, so a real leak is not copied into a log anyone with `actions: read` can open); the gate. Each check step carries `if: ${{ !cancelled() }}`: with the default, the first red step skips the later ones and one failure hides the others.
+- **Enforcing** — one job, on every invocation (called from CI, weekly cron, manual dispatch). Steps: checkout with full history and `persist-credentials: false`; gitleaks (`git --redact`, so a real leak is not copied into a log anyone with `actions: read` can open); the gate. Each check step carries `if: ${{ !cancelled() }}`: with the default, the first red step skips the later ones and one failure hides the others.
 - **Advisory** — three jobs, `if: github.workflow == 'Security'`, which is true only on a standalone run: when a CI workflow calls this one, the `github` context is the caller's and `github.workflow` reads the caller's name. Skipped jobs bill nothing, and nothing gates on these jobs, so running them on every pull-request push would only buy billed minutes. Their steps end with `|| echo "::warning::…"`: they never fail the run.
   - Semgrep with the language-neutral `p/owasp-top-ten` pack. Add the packs of your languages as further `--config` lines.
   - Trivy on the repository tree: dependency CVEs from the lockfiles it recognises, infrastructure-as-code misconfiguration, hardcoded secrets.
@@ -34,23 +34,11 @@ This module ships no CI workflow: the jobs depend on the stack. The kit's `ci-wo
 name: CI
 
 on:
+  # No `paths` or `paths-ignore`: every pull request and push is scanned.
   push:
     branches: [__HARNESS_DEFAULT_BRANCH__]
-    paths-ignore: ['docs/**', '**.md', 'LICENSE', '.gitignore']
   pull_request:
     branches: [__HARNESS_DEFAULT_BRANCH__]
-    # The same set, as `paths` with negations: `paths-ignore` cannot take
-    # anything back, and the last four lines must.
-    paths:
-      - '**'
-      - '!docs/**'
-      - '!**.md'
-      - '!LICENSE'
-      - '!.gitignore'
-      - '.claude/**'
-      - '**/.claude/**'
-      - 'CLAUDE.md'
-      - '**/CLAUDE.md'
 
 permissions: {}
 
@@ -69,15 +57,15 @@ jobs:
     # … the project's own jobs
 ```
 
-- The `paths-ignore` list of `push` and the `push.paths` list of `security.yml` mirror each other: a docs-only push skips CI and is scanned by the standalone trigger; a push touching code is scanned through the call. If your CI does not skip docs-only pushes, remove the `push` trigger from `security.yml`, or both will scan them.
-- **Pull requests have no such second trigger**, so the `pull_request` filter must not skip the Claude instruction files with the rest of the Markdown. `CLAUDE.md` and the agent definitions under `.claude/` end in `.md`, and the gate has checks made for them (the `CLAUDE.md` budget and pointers, the hook line of each read-only agent where those are installed): with a plain `paths-ignore: ['**.md']`, a pull request that only edits them never runs the gate. Hence `paths` with `!` exclusions followed by the re-inclusions; a later pattern overrides an earlier one. The filter is written from GitHub's documented rules and has not been observed on a run of this kit: check it once, with a pull request that only touches `CLAUDE.md`.
+- **No path filter.** `security.yml` has no `push` trigger of its own: CI calls it on every push and pull request, documentation-only ones included, so a secret pasted into a Markdown file is scanned before it lands. A CI workflow that skips documentation leaves those changes unscanned until the weekly run. To spare the build on documentation, skip the costly jobs instead, on the verdict of a cheap job: the `ci-workflow` module's skeleton has one (`changes`), and its page explains why a skipped job still satisfies a required check.
+- The call never waits for another job and is never skipped: the gate has checks made for files that are Markdown (the `CLAUDE.md` budget and pointers, the hook line of each read-only agent where those are installed).
 - A called workflow cannot hold more permissions than the calling job grants. A job of `security.yml` that asked for more than `contents: read` would fail the whole CI run at startup.
 - Until a workflow calls it, the enforcing job does not run on pull requests. The `30-github-actions` guard prints a note while that is the case.
 - Do not rename the workflow (`name: Security`) without changing the `if:` of the advisory jobs.
 
 ### Concurrency
 
-The concurrency group carries `github.workflow`, so a standalone run and the one CI calls never share a group. When they did, a push touching code and docs made them cancel each other, and when the called run lost, everything in CI that waited on it was silently skipped. A run on the default branch is never cancelled.
+The concurrency group carries `github.workflow`, so a standalone run and the one CI calls never share a group. When they did, a push touching code and docs, which then started both, made them cancel each other, and when the called run lost, everything in CI that waited on it was silently skipped. A run on the default branch is never cancelled.
 
 ### Pinned scanners
 
@@ -166,3 +154,4 @@ After a bump:
 ## History
 
 - Installed with the kit.
+- The `push` trigger on documentation paths is gone. It scanned documentation-only pushes that a CI workflow with a path filter skipped; the CI workflow now runs on every push and pull request and calls this one, so documentation is scanned on its way in, pull requests included. Unit-tested only.

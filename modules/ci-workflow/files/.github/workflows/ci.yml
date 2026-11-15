@@ -1,17 +1,24 @@
 name: __HARNESS_CI_WORKFLOW__
 
-# The project's CI (docs/conventions/ci-workflow.md). As installed it has one
-# job: the enforcing tier of security.yml (gitleaks, then the gate). Add the
-# project's jobs below it, each waiting for it, so that "CI is green" always
-# includes the gate.
+# The project's CI (docs/conventions/ci-workflow.md). It runs on every pull
+# request and every push to the default branch, documentation included. Two
+# jobs as installed:
+#  - security: the enforcing tier of security.yml (gitleaks, then the gate).
+#    It always runs, so every change is scanned, Markdown included.
+#  - changes: whether anything outside the documentation set changed.
+# Add the project's jobs below them, each waiting for both and skipped when
+# only documentation changed. A job skipped by its `if:` counts as passed for
+# a required status check, so a documentation-only pull request still gets
+# every check a ruleset requires, without paying for the build.
 #
-# This file is yours: the kit never overwrites it.
+# This file is yours: the kit never overwrites it. Its gate checks the shape
+# that matters (scripts/guards.d/31-ci-workflow.sh, CW-1 to CW-3).
 on:
+  # No `paths` or `paths-ignore` on either trigger (CW-1). A pull request this
+  # workflow skips gets no run: a check the ruleset requires never reports,
+  # nothing waiting for CI ever merges it, and its files are never scanned.
   push:
     branches: [__HARNESS_DEFAULT_BRANCH__]
-    # Documentation-only pushes are scanned by security.yml's own `push`
-    # trigger, whose `paths` mirror this list.
-    paths-ignore: ['docs/**', '**.md', 'LICENSE', '.gitignore']
   pull_request:
     branches: [__HARNESS_DEFAULT_BRANCH__]
     # `edited` on top of the default types: a pull request retargeted to the
@@ -20,30 +27,14 @@ on:
     # branch's copy of this file (auto-merge-policy.md, AM-9). It also fires on
     # a title or description edit: the price of a re-run.
     types: [opened, synchronize, reopened, edited]
-    # The same documentation set is skipped here, written as `paths` with
-    # negations because `paths-ignore` cannot take anything back. The last
-    # lines take the Claude instruction files back: they are Markdown, but the
-    # gate has checks on them (the CLAUDE.md budget, the agents' hook lines),
-    # and nothing else runs it on a pull request that touches only them.
-    # Order matters: a later pattern overrides an earlier one. Re-include only
-    # paths that are never merged unattended (auto-merge-policy.md, if that
-    # module is installed).
-    paths:
-      - '**'
-      - '!docs/**'
-      - '!**.md'
-      - '!LICENSE'
-      - '!.gitignore'
-      - '.claude/**'
-      - '**/.claude/**'
-      - 'CLAUDE.md'
-      - '**/CLAUDE.md'
 
 permissions: {}
 
 jobs:
   security:
     name: Security
+    # Never waits for `changes` and never skipped by it (CW-2): the secret scan
+    # and the gate judge every change, documentation included.
     # `$/` is this repository at the caller's commit. `./` means the same to
     # GitHub, but zizmor reports it (self-repository) and GA-2 would fail.
     uses: $/.github/workflows/security.yml
@@ -51,8 +42,58 @@ jobs:
     permissions:
       contents: read
 
+  # Whether anything outside the documentation set (docs/**, **.md, LICENSE,
+  # .gitignore) changed: `code` is 'true' or 'false'. It fails closed: 'true'
+  # unless the diff was read and every file in it is documentation. CW-3 runs
+  # the script between the markers on a table of changes.
+  changes:
+    name: Changes outside the documentation
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The commit checked out and its parents: on a pull request, the
+          # merge commit GitHub built and the base it was built on.
+          fetch-depth: 2
+      - name: Anything outside the documentation set?
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # harness:changes-begin
+          # On a pull request, HEAD is the merge commit GitHub built, compared
+          # with its first parent, the base. On a push, the commit pushed when
+          # it is the only one (its parent is the tip before the push). Any
+          # other event, a push of several commits, or a diff that cannot be
+          # read runs everything. Renames are listed as a deletion and an
+          # addition, so code moved into docs/ counts as code; a quoted name
+          # (an unusual character) never ends in .md and counts as code too.
+          code=true
+          docs='(\.md$|^docs/|^LICENSE$|^\.gitignore$)'
+          base=""
+          if [ "$EVENT" = pull_request ] && git rev-parse -q --verify 'HEAD^2' >/dev/null; then
+            base='HEAD^1'
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && [ "$(git rev-parse -q --verify 'HEAD^1' || true)" = "$BEFORE" ]; then
+            base='HEAD^1'
+          fi
+          if [ -n "$base" ] && files=$(git diff --no-renames --name-only "$base" HEAD) && [ -n "$files" ] && ! grep -E -v -q "$docs" <<< "$files"; then
+            code=false
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "Anything outside the documentation set: $code"
+          # harness:changes-end
+
   # TODO(harness): the project's own jobs (lint, tests, build). Each one
-  # declares `needs: [security]`, `runs-on`, `timeout-minutes` and its own
-  # minimal `permissions:`; its checkout is pinned to the commit SHA
-  # security.yml uses and sets `persist-credentials: false`
-  # (docs/conventions/github-actions-rules.md).
+  # declares `needs: [security, changes]`,
+  # `if: needs.changes.outputs.code == 'true'`, `runs-on`, `timeout-minutes`
+  # and its own minimal `permissions:`; its checkout is pinned to the commit
+  # SHA security.yml uses and sets `persist-credentials: false`
+  # (docs/conventions/github-actions-rules.md). A job that must run on
+  # documentation too (a link checker) leaves the `if:` out.

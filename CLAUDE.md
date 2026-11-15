@@ -50,7 +50,7 @@ The kit installs part of itself at its root (`.claude/harness.json`): `core`, `c
 - **Eco-design**: `eco-design.yml` audits every pull request with green-claude at the commit pinned in `scripts/eco-design.config.json` (ED-1..3). A finding is a candidate: fix it, or record it in `.green-claude/decisions.md` with its reason, reviewed like a derogation. The rules never outrank this file, security or the request. → `docs/conventions/eco-design.md`
 <!-- harness:rows conventions -->
 
-`.github/workflows/security.yml` has two tiers. **Enforcing** (blocks merges; every run, including the one CI calls first): gitleaks over the full history, then `./scripts/security-checks.sh` — the same gate as on a laptop. **Advisory** (log-only; weekly cron, manual dispatch and docs-only pushes): Semgrep, Trivy, a Syft SBOM. Scanner binaries are pinned releases verified by sha256 (`scripts/fetch-pinned-release.sh`); zizmor is pinned to an exact PyPI version, without a hash. Never `curl … | sh`, never a bump without the procedure. → `docs/conventions/security-workflow.md`
+`.github/workflows/security.yml` has two tiers. **Enforcing** (blocks merges; every run, including the one CI calls first): gitleaks over the full history, then `./scripts/security-checks.sh` — the same gate as on a laptop. **Advisory** (log-only; weekly cron and manual dispatch): Semgrep, Trivy, a Syft SBOM. Scanner binaries are pinned releases verified by sha256 (`scripts/fetch-pinned-release.sh`); zizmor is pinned to an exact PyPI version, without a hash. Never `curl … | sh`, never a bump without the procedure. → `docs/conventions/security-workflow.md`
 
 <!-- harness:slot security-workflow -->
 ## Before pushing

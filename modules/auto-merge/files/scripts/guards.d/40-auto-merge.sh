@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AM-1, AM-4, AM-5, AM-6, AM-7, AM-8, AM-9, AM-10 — invariants of .github/workflows/auto-merge.yml
+# AM-1, AM-4, AM-5, AM-6, AM-7, AM-8, AM-9, AM-10, AM-11 — invariants of .github/workflows/auto-merge.yml
 # (docs/conventions/auto-merge-policy.md). That workflow merges pull requests
 # with nobody watching, so what it must never do is pinned here.
 #
@@ -57,10 +57,9 @@
 #         since one merge base of the tip and the head; the merge writes what
 #         GitHub's merge engine computes. Right after each merge step, a step
 #         lists the commit the merge created against its first parent and
-#         runs the gate's rules on it (held paths, weakened tests, and outside
-#         the docs for the docs job): red when anything matches, when the
-#         listing is cut short or cannot be read. Its run block is pinned,
-#         the same in both jobs, and the merge steps hand it the commit; a
+#         runs the gate's rules on it (held paths, weakened tests): red when
+#         anything matches, when the listing is cut short or cannot be read.
+#         Its run block is pinned, and the merge steps hand it the commit; a
 #         failed merge call leaves only on a 409 (red after a call that may
 #         have merged), notes a 5xx or no answer as a call that may have
 #         merged, and tries a merge commit only when GitHub refuses squash.
@@ -68,6 +67,11 @@
 #         the file, no key YAML builds another way (an alias, an explicit
 #         `?`, an escape), and no ${{ }} inside a run: script (comments
 #         included).
+#   AM-11 every merge waits for CI. The workflow's only trigger is
+#         workflow_run, and it holds one merge call, promote-from-ci's:
+#         a pull_request trigger (as a docs fast path once was) runs the file
+#         as the pull request writes it and merges what no CI run judged —
+#         neither the secret scan nor the gate.
 #
 # AM-2 and AM-3 are unused on purpose. In the workflow this guard was first
 # written for, they covered a post-merge deploy dispatch: whether the default
@@ -83,6 +87,7 @@ AM=.github/workflows/auto-merge.yml
 group=0 # failures of the check being run
 bad() { fail "AM-$1: $2"; group=$((group + 1)); }
 pass() { if [ "$group" -eq 0 ]; then ok "AM-$1: $2"; fi; group=0; }
+per_job() { local i; for ((i = 0; i < merging; i++)); do printf '%s\n' "$1"; done; } # $1, once per merging job
 
 if [ ! -f "$AM" ]; then
   fail "AM-1: $AM is missing"
@@ -229,7 +234,7 @@ fi
 pass 1 "CLAUDE_GATE_RE and PROJECT_GATE_RE gate what is executed; the $merging merging job(s) apply them and refuse claude/issue-* heads"
 
 # ── AM-4 — marking ready never merges ───────────────────────────────────────
-# Held pull requests (green CI, hand merge pending; gated docs-only ones) are
+# Held pull requests (green CI, hand merge pending) are
 # marked ready so the merge button works, and that is ALL those lines do.
 # Pinned to the exact text, and every way of merging is accounted for: a merge
 # can be spelled many ways, so the guard checks what the steps are, not what
@@ -243,13 +248,6 @@ if [ -z "$ready" ] \
    || ! grep -qxF '          if [ "$HEAD" != "$HEAD_SHA" ]; then' <<< "$ready" \
    || ! grep -qxF "          $READY" <<< "$ready"; then
   bad 4 "promote-from-ci's 'Mark ready (validated head only, never merges)' step changed: it must only mark the validated head ready"
-fi
-# promote-docs hands over a gated docs-only pull request once, inside its gate
-# branch. (Both jobs have such a branch: collect every one, up to its `exit 0`.)
-gated_branch=$(awk '/if \[ "\$CLAUDE_FILES" != "0" \]; then/ {f=1; next} f && /^ +exit 0$/ {f=0} f' "$AM")
-docs_line="            if [ \"\$NON_DOCS\" = \"0\" ]; then $READY; fi"
-if [ "$(grep -cxF "$docs_line" "$AM")" != "1" ] || ! grep -qxF "$docs_line" <<< "$gated_branch"; then
-  bad 4 "promote-docs must hand over a gated docs-only pull request with exactly one pinned line inside its CLAUDE_FILES branch"
 fi
 # Every merge call in the file (any spelling, comments excluded) is one of the
 # gated REST PUTs AM-1 counts — so no ready step can merge either.
@@ -775,8 +773,7 @@ merge_code=$(awk -F'\t' '$3 == "        id: merge" { holds[$1 "\t" $2] = 1 }
 # merge base read again before a merge call when the tip moved, and the listing
 # of what the merge wrote (AM-10, pinned there). The tip named on four lines of
 # each (its read, its check, the listing, and its hand-over to the merge loop:
-# the gate's output in promote-from-ci, the comparison before each merge call
-# in promote-docs; all pinned), so that no other line takes it again — from the
+# the gate's output; all pinned), so that no other line takes it again — from the
 # pull request's base object, an env value or another variable; and the rows
 # and their count assigned on their pinned lines only.
 compares=$(grep -o 'compare/' <<< "$jobs_code" | grep -c . || true)
@@ -846,8 +843,8 @@ before_call() { # before_call <the variable holding the tip the gate judged> <th
     'if [ "$NOW_MB" = "$HEAD_SHA" ]; then continue; fi' \
     "if [ \"\$NOW_MB\" != \"\$$2\" ]; then" 'exit 0' 'fi' 'fi'
 }
-if [ "$pre_put" != "$(before_call GATE_TIP GATE_MB; before_call TIP MB)" ]; then
-  bad 7 "each merge loop must, from its head to its merge call, read the pull request again (hand a merge this workflow's token made to the check, leave a hand merge alone, stop on a closed pull request, a retarget or a head pushed since — red when a call before answered a 5xx or nothing), read the tip again and, when it moved, wait while the head is on the base branch already and stop if the merge base moved (promote-from-ci against GATE_TIP and GATE_MB, promote-docs against TIP and MB), fail on any failed read, with nothing else before the call"
+if [ "$pre_put" != "$(before_call GATE_TIP GATE_MB)" ]; then
+  bad 7 "each merge loop must, from its head to its merge call, read the pull request again (hand a merge this workflow's token made to the check, leave a hand merge alone, stop on a closed pull request, a retarget or a head pushed since — red when a call before answered a 5xx or nothing), read the tip again and, when it moved, wait while the head is on the base branch already and stop if the merge base moved (against GATE_TIP and GATE_MB), fail on any failed read, with nothing else before the call"
 fi
 # After the last call, before calling the merge failed: the pull request read
 # once more, a merge this workflow's token made handed to the check, a merge by
@@ -862,7 +859,7 @@ last_read=$(printf '%s\n' '@@' 'sleep "$attempt"' 'done' "$STATE_READ" 'if [ -z 
   'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi' \
   'if [ "$NOW_MERGED" = "true" ]; then' 'exit 0' 'fi' 'if [ "$NOW_STATE" = "closed" ]; then' 'exit 0' 'fi' \
   'if [ "$NOW_HEAD" != "$HEAD_SHA" ]; then' 'if [ -n "${CALLED:-}" ]; then' 'exit 1' 'fi' 'exit 0' 'fi' 'exit 1')
-if [ "$after_loop" != "$(printf '%s\n%s' "$last_read" "$last_read")" ]; then
+if [ "$after_loop" != "$(per_job "$last_read")" ]; then
   bad 7 "after the last merge call, each merge step must read the pull request once more, hand a merge this workflow's token made to the check, leave a merge by anyone else, a closed pull request or a head pushed since as before a call (red when a call answered a 5xx or nothing), and otherwise fail — with nothing else between the loop and its end"
 fi
 reassigned=$(grep -cE '(^|[^A-Za-z0-9_])(ROWS|LISTED)\+?=' <<< "$am7_code" || true)
@@ -921,9 +918,9 @@ rechecked=$(grep -cxF '              if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "
 if [ "$rechecked" != "$merging" ]; then
   bad 7 "$merging merging job(s) but $rechecked re-read the base branch right before each merge call"
 fi
-foreign_base=$(grep -E '^ +(BASE_(SHA|REF)|TIP): ' "$AM" | grep -cvE '^ +BASE_REF: \$\{\{ (github\.event\.pull_request\.base\.ref|steps\.gate\.outputs\.base_ref) \}\}$' || true)
+foreign_base=$(grep -E '^ +(BASE_(SHA|REF)|TIP): ' "$AM" | grep -cvE '^ +BASE_REF: \$\{\{ steps\.gate\.outputs\.base_ref \}\}$' || true)
 if [ "$foreign_base" != "0" ]; then
-  bad 7 "BASE_REF must come from the triggering event or from the gate step's output, and no commit of the base may come from outside the job's own read of the tip"
+  bad 7 "BASE_REF must come from the gate step's output, and no commit of the base may come from outside the job's own read of the tip"
 fi
 pass 7 "the gate reads one immutable range per job from the base branch's tip, holds a listing of 300 files, reads the pull request, the tip and the merge base again before each merge call, and fails on a failed read"
 
@@ -1068,21 +1065,18 @@ step_of() { # the lines of the check step of job $1
   awk -F'\t' -v j="$1" -v c="$NAME" '$1 == j && $3 == c { s = $2 } $1 == j && s != "" && $2 == s { print $3 }' <<< "$steps_tsv"; }
 # Up to its `run:`, each check step is exactly this: it runs whenever its merge
 # happened, whatever failed before, and reads the commit its merge step wrote.
-for job in promote-from-ci promote-docs; do
-  case "$job" in
-    promote-docs) pr_from='${{ github.event.pull_request.number }}'; docs="'true'" ;;
-    *) pr_from='${{ steps.find-pr.outputs.pr }}'; docs="'false'" ;;
-  esac
+for job in promote-from-ci; do
+  pr_from='${{ steps.find-pr.outputs.pr }}'
   header=$(sed '/^        run: |$/,$d' <<< "$(step_of "$job")" | grep -vE '^[[:space:]]*(#|$)' || true)
   expected_header=$(printf '%s\n' "$NAME" '        id: check' \
     "        if: \${{ !cancelled() && steps.merge.outputs.merged == 'true' }}" \
     '        env:' '          GH_TOKEN: ${{ github.token }}' "          PR: $pr_from" \
-    '          MERGED: ${{ steps.merge.outputs.sha }}' "          DOCS_ONLY: $docs")
+    '          MERGED: ${{ steps.merge.outputs.sha }}')
   if [ "$header" != "$expected_header" ]; then
-    bad 10 "$job: the step '$CHECK' must run whenever its merge happened (if: \${{ !cancelled() && steps.merge.outputs.merged == 'true' }}), read the commit from MERGED: \${{ steps.merge.outputs.sha }}, set DOCS_ONLY: $docs, and nothing else before its run block"
+    bad 10 "$job: the step '$CHECK' must run whenever its merge happened (if: \${{ !cancelled() && steps.merge.outputs.merged == 'true' }}), read the commit from MERGED: \${{ steps.merge.outputs.sha }}, and nothing else before its run block"
   fi
 done
-# Its run block, in both jobs: comments, blank lines, indentation and plain
+# Its run block: comments, blank lines, indentation and plain
 # messages aside (a message is one double-quoted string with nothing after it
 # and no backslash, no `$(`, no backquote), exactly these lines. Every way out
 # but the last line is `exit 1`; the weakened files are the gate's own
@@ -1118,34 +1112,26 @@ WROTE_ROWS=$(jq -r '.files[] | @tsv' <<< "$WROTE")
 WROTE_COUNT=$(grep -c . <<< "$WROTE_ROWS" || true)
 WROTE_PATHS=$(tr '\t' '\n' <<< "$WROTE_ROWS" | grep . || true)
 HELD=0
-NON_DOCS=0
 if [ -n "$WROTE_PATHS" ]; then
 HELD=$(grep -i -E -c -e "$CLAUDE_GATE_RE" -e "$PROJECT_GATE_RE" <<< "$WROTE_PATHS" || true)
-DOCS_RULE@@
 fi
 WROTE_SHRUNK=@@
 WEAKENED=0
 if [ -n "$WROTE_SHRUNK" ]; then WEAKENED=$(grep -i -E -c -e "$TEST_HOLD_RE" <<< "$WROTE_SHRUNK" || true); fi
-if [ "$WROTE_COUNT" -ge 300 ] || [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then
+if [ "$WROTE_COUNT" -ge 300 ] || [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ]; then
 exit 1
 fi
 RUN
 expected_run=${expected_run%$'\n'}
-# The selection line and the docs rule are compared as strings, apart: each
-# must be the gate's, whatever the project made of the documentation set.
+# The selection line is compared as a string, apart: it must be the gate's.
 shrunk_line="WROTE_SHRUNK=\$(jq -r '$gate_filter' <<< \"\$WROTE\")"
-docs_set=$(sed -n "s/^ *NON_DOCS=\$(grep -E -v -c '\(.*\)' <<< \"\$PATHS\" || true)$/\1/p" "$AM")
-docs_line="if [ \"\$DOCS_ONLY\" = \"true\" ]; then NON_DOCS=\$(grep -E -v -c '$docs_set' <<< \"\$WROTE_PATHS\" || true); fi"
-for job in promote-from-ci promote-docs; do
+for job in promote-from-ci; do
   run=$(run_of "$(step_of "$job")")
   if [ -z "$gate_filter" ] || [ "$(grep -c . <<< "$gate_filter")" != "1" ] \
      || [ "$(grep -c '^WROTE_SHRUNK=' <<< "$run")" != "1" ] \
      || [ "$(grep '^WROTE_SHRUNK=' <<< "$run")" != "$shrunk_line" ] \
-     || [ -z "$docs_set" ] || [ "$(grep -c . <<< "$docs_set")" != "1" ] \
-     || [ "$(grep -c '^if \[ "\$DOCS_ONLY" = "true" \]; then ' <<< "$run")" != "1" ] \
-     || [ "$(grep '^if \[ "\$DOCS_ONLY" = "true" \]; then ' <<< "$run")" != "$docs_line" ] \
-     || [ "$(sed -e 's/^WROTE_SHRUNK=.*/WROTE_SHRUNK=@@/' -e 's/^if \[ "\$DOCS_ONLY" = "true" \]; then .*/DOCS_RULE@@/' <<< "$run")" != "$expected_run" ]; then
-    bad 10 "$job: the run block of '$CHECK' changed — comments and messages aside, it must read the merge commit's first parent, list compare/\${PARENT}...\${MERGED} whole, run the gate's patterns, its selection of weakened files and (docs job) promote-docs' own docs rule on it, and exit 1 on anything found or unreadable"
+     || [ "$(sed -e 's/^WROTE_SHRUNK=.*/WROTE_SHRUNK=@@/' <<< "$run")" != "$expected_run" ]; then
+    bad 10 "$job: the run block of '$CHECK' changed — comments and messages aside, it must read the merge commit's first parent, list compare/\${PARENT}...\${MERGED} whole, run the gate's patterns and its selection of weakened files on it, and exit 1 on anything found or unreadable"
   fi
 done
 # The merge steps hand it the commit GitHub created, or the one a merge already
@@ -1170,7 +1156,7 @@ put_block=$(awk '/^ *if OUT=\$\(gh api --method PUT / { on = 1; print "@@" }
 merge_call=$(printf '%s\n' '@@' 'if OUT=$(gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/merge" \' \
   '-f merge_method="$method" -f sha="$HEAD_SHA" 2>&1); then' 'echo "$OUT"' \
   'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=$(jq -r '"'"'.sha // empty'"'"' <<< "$OUT")" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi')
-if [ "$put_block" != "$(printf '%s\n%s' "$merge_call" "$merge_call")" ]; then
+if [ "$put_block" != "$(per_job "$merge_call")" ]; then
   bad 10 "each merge call must, on success, print its answer, write merged=true and the merge commit's sha, and exit 0 — nothing else, nothing before the hand-over"
 fi
 # And what follows its failure, from the success branch's `fi` to the loop's
@@ -1188,7 +1174,7 @@ fail_block=$(awk '/^ *if OUT=\$\(gh api --method PUT / { put = 1; next }
 on_failure=$(printf '%s\n' '@@' 'echo "$OUT"' 'case "$OUT" in' '*"(HTTP 409)"*)' 'if [ -n "${CALLED:-}" ]; then' 'exit 1' 'fi' 'exit 0 ;;' 'esac' \
   'case "$OUT" in' '*"(HTTP 4"[0-9][0-9]")"*) ;;' '*) CALLED=1 ;;' 'esac' \
   'if [ "$method" = squash ]; then' 'case "$OUT" in' '*"Squash merges are not allowed"*) ;;' '*) break ;;' 'esac' 'fi' 'done')
-if [ "$fail_block" != "$(printf '%s\n%s' "$on_failure" "$on_failure")" ]; then
+if [ "$fail_block" != "$(per_job "$on_failure")" ]; then
   bad 10 "each merge call must, on failure, leave only on a 409 (red after a call that answered a 5xx or nothing), note any failure but a 4xx refusal as a call that may have merged (CALLED), try a merge commit only when GitHub refuses squash as a method, and otherwise go on to the next read, which hands a merge that answered an error to the check — nothing else up to the loop's wait"
 fi
 # What the merge steps write to their outputs: the hand-over lines only.
@@ -1202,6 +1188,25 @@ if [ "$merge_outputs" != "$expected_outputs" ]; then
   bad 10 "the merge steps may write merged=true and sha= on their pinned hand-over lines only — found: $(tr '\n' ';' <<< "$merge_outputs")"
 fi
 pass 10 "what each merge wrote is listed and judged again by the gate's rules, right after the merge, and turns the run red"
+
+# ── AM-11 — every merge waits for CI ─────────────────────────────────────────
+# The triggers, comments and blank lines aside, are exactly these: workflow_run
+# on the CI workflow and the review, nothing else. A pull_request trigger runs
+# the file as the pull request writes it, and a job on it would merge what no
+# CI run judged — neither the secret scan nor the gate (a documentation fast
+# path did once). A flow form (`on: [...]`) or a second trigger fails too.
+on_block=$(awk '/^on:/ { f = 1; print; next } f && /^[^[:space:]#]/ { exit } f' "$AM" \
+  | grep -vE '^[[:space:]]*(#|$)' | sed -E 's/[[:space:]]+#.*$//' | neutral_ci)
+expected_on=$(printf '%s\n' 'on:' '  workflow_run:' '    workflows: ["CI", "Claude review"]' '    types: [completed]')
+if [ "$on_block" != "$expected_on" ] || [ "$(grep -cE "^[\"']?on[\"']?[[:space:]]*:" "$AM")" != "1" ]; then
+  bad 11 "the workflow's only trigger must be workflow_run on the CI workflow and the review (on: / workflow_run: / workflows: [...] / types: [completed]) — any other trigger can merge without a CI run"
+fi
+# One merge call, promote-from-ci's: the pins above are written per merging job,
+# and a file with none would pass them all.
+if [ "$merging" != "1" ]; then
+  bad 11 "$merging merge call(s) in the gated REST form, 1 expected: promote-from-ci's"
+fi
+pass 11 "every merge waits for a CI run: workflow_run is the only trigger, and promote-from-ci holds the one merge call"
 
 # Advisory: nothing merges code until the workflow waited for exists.
 ci_name=$(sed -n 's/^    workflows: \["\([^"]*\)", "Claude review"]$/\1/p' "$AM")
@@ -1222,7 +1227,7 @@ if [ -n "$ci_name" ]; then
     fi
   done
   if [ "$found" = 0 ]; then
-    note "no workflow named \"$ci_name\" under .github/workflows/ — until one exists, only docs-only pull requests are merged"
+    note "no workflow named \"$ci_name\" under .github/workflows/ — until one exists, nothing is merged"
   elif [ "${am9:-0}" = 0 ]; then
     ok "AM-9: the CI workflow runs again when a pull request is retargeted"
   fi

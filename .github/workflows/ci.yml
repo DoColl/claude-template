@@ -6,11 +6,16 @@ name: CI
 # request, last, the changelog fragment that a change to modules/, lib/ or
 # bin/ brings.
 #
-# The first job calls security.yml: gitleaks, then the kit's own gate
+# It runs on every pull request and push, documentation included. The first
+# job calls security.yml: gitleaks, then the kit's own gate
 # (scripts/security-checks.sh), since the kit installs part of itself at its
-# root. The documentation set is skipped, and what the tests read or the kit
-# ships is taken back: a Markdown file under modules/ is shipped content, and
-# the tests read CHANGELOG.md and the fragments under changes/.
+# root; it always runs. The `changes` job says whether the tests have anything
+# to judge: 'false' when every changed file is documentation and none is what
+# the tests read or the kit ships (a Markdown file under modules/ is shipped
+# content, the tests read README.md, CHANGELOG.md, docs/module-authoring.md
+# and the fragments under changes/, the gate the instruction files). The test
+# job is skipped then, which a required check counts as passed. The same shape
+# as the ci-workflow skeleton (docs/conventions/ci-workflow.md in a project).
 #
 # While a session is still at work on a pull request — a draft labelled
 # session-active — every job is skipped, and the run ends `skipped`, which
@@ -20,22 +25,6 @@ name: CI
 on:
   push:
     branches: [main]
-    paths:
-      - '**'
-      - '!docs/**'
-      - '!**.md'
-      - '!LICENSE'
-      - '!.gitignore'
-      - '.claude/**'
-      - '**/.claude/**'
-      - 'CLAUDE.md'
-      - '**/CLAUDE.md'
-      - 'modules/**'
-      - 'skills/**'
-      - 'README.md'
-      - 'docs/module-authoring.md'
-      - 'CHANGELOG.md'
-      - 'changes/**'
   pull_request:
     branches: [main]
     # `edited` too: a pull request retargeted to main is then tested against it
@@ -43,22 +32,6 @@ on:
     # `unlabeled` and `ready_for_review`: the session-active label coming off,
     # or a held draft lifted by hand, runs the jobs the label held back.
     types: [opened, synchronize, reopened, edited, unlabeled, ready_for_review]
-    paths:
-      - '**'
-      - '!docs/**'
-      - '!**.md'
-      - '!LICENSE'
-      - '!.gitignore'
-      - '.claude/**'
-      - '**/.claude/**'
-      - 'CLAUDE.md'
-      - '**/CLAUDE.md'
-      - 'modules/**'
-      - 'skills/**'
-      - 'README.md'
-      - 'docs/module-authoring.md'
-      - 'CHANGELOG.md'
-      - 'changes/**'
 
 permissions: {}
 
@@ -66,11 +39,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Every job carries the same `if:`, and a test in test/install.test.mjs holds
-# each job to it: with one job left to run, a held run would end `success`
-# with the tests skipped, and ready-on-green could lift the draft on it if the
-# label came off before it read the pull request. Drafts only: GitHub does not
-# merge a draft, while a skipped job counts as passed for a required check.
+# Every job carries the same hold in its `if:`, and a test in
+# test/install.test.mjs holds each job to it: with one job left to run, a held
+# run would end `success` with the tests skipped, and ready-on-green could lift
+# the draft on it if the label came off before it read the pull request.
+# Drafts only: GitHub does not merge a draft, while a skipped job counts as
+# passed for a required check. The test job adds the `changes` verdict.
 jobs:
   security:
     name: Security
@@ -82,10 +56,50 @@ jobs:
     permissions:
       contents: read
 
+  changes:
+    name: Changes the tests read
+    if: ${{ !(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active')) }}
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      # Fails closed, as the skeleton's: 'true' unless the diff was read. On a
+      # pull request, the merge commit against its first parent; on a push,
+      # the commit pushed when it is the only one. test/install.test.mjs runs
+      # this script on a table of changes.
+      - name: Anything the tests read?
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          code=true
+          docs='(\.md$|^docs/|^LICENSE$|^\.gitignore$)'
+          read='^(modules|skills|changes)/|^(README|CHANGELOG)\.md$|^docs/module-authoring\.md$|(^|/)\.claude/|(^|/)CLAUDE\.md$'
+          base=""
+          if [ "$EVENT" = pull_request ] && git rev-parse -q --verify 'HEAD^2' >/dev/null; then
+            base='HEAD^1'
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && [ "$(git rev-parse -q --verify 'HEAD^1' || true)" = "$BEFORE" ]; then
+            base='HEAD^1'
+          fi
+          if [ -n "$base" ] && files=$(git diff --no-renames --name-only "$base" HEAD) && [ -n "$files" ] \
+             && ! grep -E -v -q "$docs" <<< "$files" && ! grep -E -q "$read" <<< "$files"; then
+            code=false
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "Anything the tests read: $code"
+
   test:
     name: Tests and workflow lint
-    needs: [security]
-    if: ${{ !(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active')) }}
+    needs: [security, changes]
+    if: ${{ !(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active')) && needs.changes.outputs.code == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

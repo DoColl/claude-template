@@ -1,7 +1,7 @@
 {
   "id": "ci-workflow",
   "title": "A minimal CI workflow that calls the security gate",
-  "summary": "A seed .github/workflows/ci.yml whose first and only job calls security.yml, so the gate runs on every pull request — including one that only touches Claude instruction files. The project adds its build and test jobs behind it.",
+  "summary": "A seed .github/workflows/ci.yml that runs on every pull request and push, no path filter: its first job calls security.yml, so every change is scanned; a `changes` job lets the project's costly jobs skip when only documentation changed. Guard CW-1..3 keeps that shape.",
   "phase": "first-ci",
   "order": 31,
   "requires": ["core", "ci-security"],
@@ -11,7 +11,8 @@
   "seed": [".github/workflows/ci.yml"],
   "postInstall": [
     "Skip this module if the project already has a CI workflow under another file name: two workflows with the same `name:` confuse whatever waits for it. Add the call to security.yml to yours instead (docs/conventions/security-workflow.md § Wiring).",
-    "Add the project's jobs (lint, tests, build) to .github/workflows/ci.yml, each with `needs: [security]`. With no code yet, leave the TODO(harness) block as it is: the gate alone is a valid CI.",
-    "This workflow has not run in your repository yet: open one pull request that only touches CLAUDE.md and check that the CI run starts."
+    "Add the project's jobs (lint, tests, build) to .github/workflows/ci.yml, each with `needs: [security, changes]` and `if: needs.changes.outputs.code == 'true'`. With no code yet, leave the TODO(harness) block as it is: the gate alone is a valid CI.",
+    "Where a ruleset requires status checks, require the jobs of this workflow by their names (`Security / Enforcing (gitleaks + gate)` and yours): a job skipped because only documentation changed counts as passed.",
+    "This workflow has not run in your repository yet: open one pull request that only touches a Markdown file and check that the run starts, that `Security` runs and that your jobs are skipped."
   ]
 }

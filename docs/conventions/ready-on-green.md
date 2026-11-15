@@ -19,7 +19,7 @@ A session opens its pull requests as drafts, so that nothing takes one for merge
 - **Only the validated head.** The pull request is the open one, into the default branch, whose head is exactly the commit CI ran on; with two such pull requests, none is touched. The head is read again just before the call: a commit pushed since has its own run.
 - **Forks are out of scope.** The job takes runs whose head repository is this repository.
 - **A branch a CI Claude session wrote keeps its draft** (`claude/issue-*`, `claude/rework-*`): opening its pull request is not reading it.
-- **Documentation-only pull requests keep their draft.** Where the CI workflow skips documentation, no run ends, and nothing starts this workflow. The alternative is a `pull_request` trigger, which runs the workflow file as the pull request writes it, with a write token: RG-1 refuses it.
+- **Documentation-only pull requests keep their draft where the CI workflow skips documentation.** No run ends then, and nothing starts this workflow. The kit's CI skeleton runs on every pull request, so there they are lifted like any other. The alternative is a `pull_request` trigger, which runs the workflow file as the pull request writes it, with a write token: RG-1 refuses it.
 - **Not with `auto-merge`.** Both would lift the same draft; install one.
 
 ### A session still at work
