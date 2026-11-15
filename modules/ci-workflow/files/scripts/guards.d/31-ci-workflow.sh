@@ -10,16 +10,21 @@
 #         check the ruleset requires never reports, nothing waiting for CI
 #         merges it, and its files are never scanned.
 #   CW-2  the job that calls security.yml (the secret scan and the gate) runs
-#         on every one of them: it needs no other job and its `if:`, if any,
-#         does not read `changes`.
+#         on every one of them: it needs no other job and has no `if:`. It is
+#         found by `uses: $/.github/workflows/security.yml` (or ./…); a call to
+#         another repository's copy is not recognised.
 #   CW-3  the `changes` job, when there is one, fails closed. Its script, the
 #         lines between `# harness:changes-begin` and `# harness:changes-end`
 #         and the whole of its run block, is run on a table of changes built
 #         in scratch repositories: 'false' only when the diff was read and
 #         every file in it is documentation, 'true' for anything else (code,
 #         a rename out of code, a push of several commits, another event, no
-#         repository). The job's output, the step's id and its two env values
-#         are pinned, so that what is tested is what the jobs read.
+#         repository). The job's output and the step's header (its name, `id:
+#         diff`, its two env values, nothing else) are pinned, and the job has
+#         no `if`, `continue-on-error`, `shell` or `defaults` key: what is tested
+#         is what runs, and a step skipped or allowed to fail cannot hand the
+#         jobs an empty verdict. The jobs that read it test `!= 'false'`, so an
+#         empty verdict runs them anyway.
 . "$(dirname "$0")/_lib.sh"
 cd "$(dirname "$0")/../.." || exit 1
 set -uo pipefail
@@ -61,8 +66,8 @@ else
     if grep -qE '^    needs:' <<< "$lines"; then
       fail "CW-2: job '$j' calls security.yml but waits for another job — it must run first, on every change"; cw2=1
     fi
-    if grep -E '^    if:' <<< "$lines" | grep -q 'changes'; then
-      fail "CW-2: job '$j' calls security.yml but its if: reads changes — documentation must be scanned too"; cw2=1
+    if grep -qE "^    [\"']?if[\"']?[[:space:]]*:" <<< "$lines"; then
+      fail "CW-2: job '$j' calls security.yml but has an if: — the secret scan and the gate run on every change"; cw2=1
     fi
   done
   [ "$cw2" = 0 ] && ok "CW-2: security.yml runs on every change, documentation included"
@@ -81,10 +86,17 @@ if [ "$(grep -cxF '      code: ${{ steps.diff.outputs.code }}' <<< "$changes")" 
    || [ "$(grep -cE '^      [A-Za-z0-9_-]+:' <<< "$(awk '/^    outputs:/ { f = 1; next } f && /^    [^ ]/ { f = 0 } f' <<< "$changes")")" != "1" ]; then
   cw3 "the changes job must have one output, on the pinned line 'code: \${{ steps.diff.outputs.code }}'"
 fi
-if [ -z "$step" ] \
-   || ! grep -qxF '          EVENT: ${{ github.event_name }}' <<< "$step" \
-   || ! grep -qxF '          BEFORE: ${{ github.event.before }}' <<< "$step"; then
-  cw3 "the changes job's step 'id: diff' must set EVENT: \${{ github.event_name }} and BEFORE: \${{ github.event.before }}"
+# The step's header, comments aside: its name, its id, its env, then run.
+header=$(awk '/^        run: \|[[:space:]]*$/ { exit } { print }' <<< "$step" | grep -vE '^[[:space:]]*(#|$)' \
+  | sed -E '1s/^      - name: .+$/      - name: @@/')
+expected_header=$(printf '%s\n' '      - name: @@' '        id: diff' '        env:' \
+  '          EVENT: ${{ github.event_name }}' '          BEFORE: ${{ github.event.before }}')
+if [ -z "$step" ] || [ "$header" != "$expected_header" ]; then
+  cw3 "the changes job's step must be exactly '- name: …', 'id: diff', 'env:' with EVENT: \${{ github.event_name }} and BEFORE: \${{ github.event.before }}, then 'run: |'"
+fi
+# Nothing in the job may skip the step, let it fail quietly or run it another way.
+if grep -qE "^[[:space:]-]*[\"']?(if|continue-on-error|shell|defaults)[\"']?[[:space:]]*:" <<< "$(grep -vE '^[[:space:]]*#' <<< "$changes" | awk '/^        run: \|/ { skip = 1; next } skip && /^         / { next } { skip = 0; print }')"; then
+  cw3 "the changes job must have no if, continue-on-error, shell or defaults key — a skipped or failed step would hand the jobs an empty verdict"
 fi
 # The run block: from `run: |` to the first line indented no deeper than it. Outside the
 # markers, blank lines only: nothing after the script can write another value.
@@ -108,11 +120,11 @@ fi
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 printf '%s\n' "$script" > "$tmp/changes.sh"
-g() { git -c user.name=guard -c user.email=guard@example.invalid -c commit.gpgsign=false -c init.defaultBranch=main "$@"; }
+g() { git -c user.name=guard -c user.email=guard@example.invalid -c commit.gpgsign=false "$@"; }
 # A repository with code and documentation on main.
 base_repo() {
   mkdir -p "$1/src" "$1/docs" && cd "$1" || return 1
-  g init -q
+  g init -q && g symbolic-ref HEAD refs/heads/main
   echo a > src/app.js; echo a > docs/guide.md; echo a > README.md; echo a > LICENSE
   g add -A && g commit -q -m base
 }

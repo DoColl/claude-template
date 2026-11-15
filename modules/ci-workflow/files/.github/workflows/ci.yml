@@ -75,6 +75,7 @@ jobs:
           # read runs everything. Renames are listed as a deletion and an
           # addition, so code moved into docs/ counts as code; a quoted name
           # (an unusual character) never ends in .md and counts as code too.
+          # A grep that fails (status 2) prints no count: code stays true.
           code=true
           docs='(\.md$|^docs/|^LICENSE$|^\.gitignore$)'
           base=""
@@ -83,7 +84,7 @@ jobs:
           elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && [ "$(git rev-parse -q --verify 'HEAD^1' || true)" = "$BEFORE" ]; then
             base='HEAD^1'
           fi
-          if [ -n "$base" ] && files=$(git diff --no-renames --name-only "$base" HEAD) && [ -n "$files" ] && ! grep -E -v -q "$docs" <<< "$files"; then
+          if [ -n "$base" ] && files=$(git diff --no-renames --name-only "$base" HEAD) && [ -n "$files" ] && [ "$(grep -E -v -c "$docs" <<< "$files" || true)" = 0 ]; then
             code=false
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
@@ -92,7 +93,8 @@ jobs:
 
   # TODO(harness): the project's own jobs (lint, tests, build). Each one
   # declares `needs: [security, changes]`,
-  # `if: needs.changes.outputs.code == 'true'`, `runs-on`, `timeout-minutes`
+  # `if: needs.changes.outputs.code != 'false'` (an empty verdict runs it),
+  # `runs-on`, `timeout-minutes`
   # and its own minimal `permissions:`; its checkout is pinned to the commit
   # SHA security.yml uses and sets `persist-credentials: false`
   # (docs/conventions/github-actions-rules.md). A job that must run on

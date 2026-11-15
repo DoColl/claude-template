@@ -11,7 +11,7 @@
   "seed": [".github/workflows/ci.yml"],
   "postInstall": [
     "Skip this module if the project already has a CI workflow under another file name: two workflows with the same `name:` confuse whatever waits for it. Add the call to security.yml to yours instead (docs/conventions/security-workflow.md § Wiring).",
-    "Add the project's jobs (lint, tests, build) to .github/workflows/ci.yml, each with `needs: [security, changes]` and `if: needs.changes.outputs.code == 'true'`. With no code yet, leave the TODO(harness) block as it is: the gate alone is a valid CI.",
+    "Add the project's jobs (lint, tests, build) to .github/workflows/ci.yml, each with `needs: [security, changes]` and `if: needs.changes.outputs.code != 'false'`. With no code yet, leave the TODO(harness) block as it is: the gate alone is a valid CI.",
     "Where a ruleset requires status checks, require the jobs of this workflow by their names (`Security / Enforcing (gitleaks + gate)` and yours): a job skipped because only documentation changed counts as passed.",
     "This workflow has not run in your repository yet: open one pull request that only touches a Markdown file and check that the run starts, that `Security` runs and that your jobs are skipped."
   ]

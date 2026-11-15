@@ -182,6 +182,26 @@ export function readCiAlso(ciYml) {
 }
 
 /**
+ * Whether the CI workflow's triggers filter on paths (`paths` or `paths-ignore`
+ * anywhere under `on:`). Without a filter a docs-only pull request gets a run
+ * like any other, so a missing one is reported. Anything unread counts as a
+ * filter: the digest then keeps its older, quieter reading.
+ */
+export function readCiFilters(ciYml) {
+  const lines = ciYml.split(/\r?\n/).map((l) => l.replace(/(^|\s)#.*$/, ''));
+  const start = lines.findIndex((l) => /^["']?on["']?\s*:/.test(l));
+  if (start === -1) return true;
+  const end = lines.findIndex((l, i) => i > start && /^[^\s]/.test(l));
+  return lines.slice(start, end === -1 ? undefined : end).some((l) => /(^|[\s{,])["']?paths(-ignore)?["']?\s*:/.test(l));
+}
+
+/** Whether the CI workflow found by `ciWorkflow` filters on paths; true when none is found. */
+export function loadCiFilters(dir = join(ROOT, '.github/workflows'), settings = SETTINGS) {
+  const file = ciWorkflowFile(settings.ciWorkflow, dir);
+  return file ? readCiFilters(readFileSync(join(dir, file), 'utf8')) : true;
+}
+
+/**
  * The expression of the paths CI runs on although they are documentation: the
  * project's `ciAlsoRunsOn` setting when it has one, else what the trigger of
  * the CI workflow says. null: none, or no CI workflow. Throws on a pattern the
@@ -247,7 +267,7 @@ export function parseDeadline(body) {
  * `autoMerge`: auto-merge.yml is installed (green PRs are expected to merge on
  * their own). `hasCi`: a CI workflow exists (a run is expected on every PR).
  */
-export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, autoMerge = true, hasCi = true }, now) {
+export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, autoMerge = true, hasCi = true, ciFilters = true }, now) {
   const ageH = (now - new Date(pr.createdAt)) / HOUR;
   const { files } = pr;
   // A CI workflow that still filters its triggers skips docs-only PRs: no run
@@ -259,7 +279,9 @@ export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, aut
   // Markdown) — one such file and a run IS expected, so a missing one is
   // reported as missing, not as a hand merge that waits.
   const docsOnly = pr.filesComplete !== false && files.length > 0 && files.every((p) => docsRe.test(p));
-  const ciSkipped = !hasCi || (docsOnly && !(ciAlso && files.some((p) => ciAlso.test(p))));
+  // `ciFilters`: the CI workflow filters its triggers on paths; without a
+  // filter (the kit's skeleton) every PR gets a run, docs-only ones included.
+  const ciSkipped = !hasCi || (ciFilters && docsOnly && !(ciAlso && files.some((p) => ciAlso.test(p))));
   const gated = files.some((p) => gateRe.test(p)) || pr.headRef.startsWith('claude/issue-');
   const ci = pr.ci; // { status, conclusion } of the latest CI run on the head SHA, or null
 
@@ -303,7 +325,7 @@ export function prReason(pr, { gateRe, docsRe, testRe = null, ciAlso = null, aut
 }
 
 /** Pure: data in, { count, markdown } out. */
-export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, gateRe, docsRe, testRe = null, ciAlso = null, autoMerge = true, hasCi = true }) {
+export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, gateRe, docsRe, testRe = null, ciAlso = null, autoMerge = true, hasCi = true, ciFilters = true }) {
   const sections = [];
   let count = 0;
   const section = (title, lines) => {
@@ -315,7 +337,7 @@ export function buildDigest({ now, prs, alerts, deadlines, schedules, mainCi, ga
   const ageD = (d) => Math.floor((now - new Date(d)) / DAY);
 
   section('Pull requests', prs.flatMap((pr) => {
-    const why = prReason(pr, { gateRe, docsRe, testRe, ciAlso, autoMerge, hasCi }, now);
+    const why = prReason(pr, { gateRe, docsRe, testRe, ciAlso, autoMerge, hasCi, ciFilters }, now);
     return why ? [item(pr.number, pr.title, `— ${why} (${ageD(pr.createdAt)} d)`)] : [];
   }));
 
@@ -495,6 +517,7 @@ async function collect(gh, repo, now) {
     mainCi,
     ...rules,
     ciAlso: ciAlsoOrWarn(),
+    ciFilters: loadCiFilters(),
     hasCi: ciFile !== null,
   };
 }

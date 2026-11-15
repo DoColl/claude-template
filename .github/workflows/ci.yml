@@ -13,7 +13,9 @@ name: CI
 # to judge: 'false' when every changed file is documentation and none is what
 # the tests read or the kit ships (a Markdown file under modules/ is shipped
 # content, the tests read README.md, CHANGELOG.md, docs/module-authoring.md
-# and the fragments under changes/, the gate the instruction files). The test
+# and the fragments under changes/, and hold the root copies the kit installs
+# — docs/conventions, docs/adr, docs/runbook, SECURITY_REVIEW*.md — to their
+# modules; the gate checks the instruction files). The test
 # job is skipped then, which a required check counts as passed. The same shape
 # as the ci-workflow skeleton (docs/conventions/ci-workflow.md in a project).
 #
@@ -82,7 +84,7 @@ jobs:
         run: |
           code=true
           docs='(\.md$|^docs/|^LICENSE$|^\.gitignore$)'
-          read='^(modules|skills|changes)/|^(README|CHANGELOG)\.md$|^docs/module-authoring\.md$|(^|/)\.claude/|(^|/)CLAUDE\.md$'
+          read='^(modules|skills|changes)/|^(README|CHANGELOG)\.md$|^docs/module-authoring\.md$|^docs/(conventions|adr|runbook)/|^SECURITY_REVIEW|(^|/)\.claude/|(^|/)CLAUDE\.md$'
           base=""
           if [ "$EVENT" = pull_request ] && git rev-parse -q --verify 'HEAD^2' >/dev/null; then
             base='HEAD^1'
@@ -90,7 +92,7 @@ jobs:
             base='HEAD^1'
           fi
           if [ -n "$base" ] && files=$(git diff --no-renames --name-only "$base" HEAD) && [ -n "$files" ] \
-             && ! grep -E -v -q "$docs" <<< "$files" && ! grep -E -q "$read" <<< "$files"; then
+             && [ "$(grep -E -v -c "$docs" <<< "$files" || true)" = 0 ] && ! grep -E -q "$read" <<< "$files"; then
             code=false
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
@@ -99,7 +101,7 @@ jobs:
   test:
     name: Tests and workflow lint
     needs: [security, changes]
-    if: ${{ !(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active')) && needs.changes.outputs.code == 'true' }}
+    if: ${{ !(github.event.pull_request.draft && contains(github.event.pull_request.labels.*.name, 'session-active')) && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

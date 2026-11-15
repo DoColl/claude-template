@@ -536,6 +536,8 @@ test("CI: the changes job skips the tests only for documentation they do not rea
     ["documentation, pushed in one commit", "false", "push", pushOne((d) => write(d, "docs/a.md", "b\n"))],
     ["code", "true", "pull_request", pr((d) => write(d, "lib/a.mjs", "b\n"))],
     ["README.md, which the tests read", "true", "pull_request", pr((d) => write(d, "README.md", "b\n"))],
+    ["a convention page the kit installs at its root", "true", "pull_request", pr((d) => write(d, "docs/conventions/local-gate.md", "b\n"))],
+    ["the findings catalogue at the root", "true", "pull_request", pr((d) => write(d, "SECURITY_REVIEW.md", "b\n"))],
     ["a Markdown file a module ships", "true", "pull_request", pr((d) => write(d, "modules/x/files/docs/x.md", "b\n"))],
     ["a changelog fragment", "true", "pull_request", pr((d) => write(d, "changes/x.md", "b\n"))],
     ["CLAUDE.md, which the gate checks", "true", "pull_request", pr((d) => write(d, "CLAUDE.md", "b\n"))],
@@ -567,7 +569,7 @@ test("CI: every job is held while a draft is labelled session-active, and runs o
   for (const job of jobs) {
     const name = /^ {2}([A-Za-z0-9_-]+):/.exec(job)[1];
     // The test job also waits for the changes verdict; the security job and the changes job carry the hold alone.
-    const expected = name === "test" ? `    if: \${{ ${held} && needs.changes.outputs.code == 'true' }}` : hold;
+    const expected = name === "test" ? `    if: \${{ ${held} && needs.changes.outputs.code != 'false' }}` : hold;
     assert.deepEqual(job.split("\n").filter((l) => /^ {4}if:/.test(l)), [expected], `job ${name} carries the hold, as written, and no other condition`);
   }
   assert.doesNotMatch(ci.slice(0, ci.indexOf("\njobs:\n")), /\bpaths(-ignore)?:/, "no path filter: every pull request gets a run, so its required checks report");
@@ -1214,13 +1216,12 @@ test("ci-workflow: broken copies of ci.yml turn CW-1, CW-2 or CW-3 red; the ship
   });
   const securityUses = "    uses: $/.github/workflows/security.yml\n";
   const end = "          # harness:changes-end\n";
-  const projectJob = "\n  test:\n    needs: [security, changes]\n    if: needs.changes.outputs.code == 'true'\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    permissions:\n      contents: read\n    steps:\n      - run: echo test\n";
+  const projectJob = "\n  test:\n    needs: [security, changes]\n    if: needs.changes.outputs.code != 'false'\n    runs-on: ubuntu-latest\n    timeout-minutes: 10\n    permissions:\n      contents: read\n    steps:\n      - run: echo test\n";
   const changesJob = shipped.slice(shipped.indexOf("\n  # Whether anything outside"), shipped.indexOf("\n  # TODO(harness)"));
   const greens = [
     ["as shipped", undefined],
     ["a project job gated on changes, and one that runs on documentation too", shipped + projectJob + "\n  links:\n    needs: [security]\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    permissions: {}\n    steps:\n      - run: echo links\n"],
     ["no changes job: every job runs on every change", shipped.replace(changesJob, "")],
-    ["the security job held by a label, as the kit's own CI does", once(shipped, securityUses, "    if: ${{ !contains(github.event.pull_request.labels.*.name, 'hold') }}\n" + securityUses)],
     ["a comment that names paths in the triggers", once(shipped, "  push:\n", "  # no paths: filter here\n  push:\n")],
   ];
   const cases = [
@@ -1230,6 +1231,12 @@ test("ci-workflow: broken copies of ci.yml turn CW-1, CW-2 or CW-3 red; the ship
     ["no push trigger", "CW-1", once(shipped, "  push:\n    branches: [main]\n", "")],
     ["the security job waits for changes", "CW-2", once(shipped, securityUses, "    needs: [changes]\n" + securityUses)],
     ["the security job skipped on documentation", "CW-2", once(shipped, securityUses, "    if: needs.changes.outputs.code == 'true'\n" + securityUses)],
+    ["the security job run on pushes only", "CW-2", once(shipped, securityUses, "    if: github.event_name == 'push'\n" + securityUses)],
+    ["the diff step skipped", "CW-3", once(shipped, "        id: diff\n", "        id: diff\n        if: false\n")],
+    ["the diff step allowed to fail", "CW-3", once(shipped, "        id: diff\n", "        id: diff\n        continue-on-error: true\n")],
+    ["the changes job allowed to fail", "CW-3", once(shipped, "    timeout-minutes: 5\n", "    timeout-minutes: 5\n    continue-on-error: true\n")],
+    ["the diff step run by another shell", "CW-3", once(shipped, "        id: diff\n", "        id: diff\n        shell: sh {0}\n")],
+    ["the changes job skipped, key quoted", "CW-3", once(shipped, "    timeout-minutes: 5\n", "    timeout-minutes: 5\n    'if': false\n")],
     ["no job calls security.yml", "CW-2", once(shipped, securityUses, "    runs-on: ubuntu-latest\n    steps:\n      - run: echo none\n")],
     ["the script forced to false", "CW-3", once(shipped, "          code=true\n", "          code=false\n")],
     ["a value written after the script", "CW-3", once(shipped, end, end + "          echo \"code=false\" >> \"$GITHUB_OUTPUT\"\n")],

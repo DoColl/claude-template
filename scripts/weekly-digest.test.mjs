@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildDigest, prReason, parseDeadline, safeText, readGateRe, readTestRe, hasSchedule,
-  scheduledWorkflows, loadRules, workflowName, ciWorkflowFile, checkConfig, readCiAlso, ciAlsoRe, loadCiAlso,
+  scheduledWorkflows, loadRules, workflowName, ciWorkflowFile, checkConfig, readCiAlso, ciAlsoRe, loadCiAlso, readCiFilters,
   DEFAULT_DOCS_RE, MAX_AGE_DAYS, SELF, DEFAULT_BRANCH, CI_WORKFLOW,
 } from './weekly-digest.mjs';
 
@@ -365,4 +365,15 @@ test('digest: empty, then one item per section', () => {
   assert.match(blind.markdown, /No workflow named/);
   assert.equal(blind.count, 9);
   assert.equal(buildDigest({ ...base, hasCi: false, mainCi: null }).count, 0);
+});
+
+test('a CI workflow with no path filter expects a run on every PR, documentation included', () => {
+  assert.equal(readCiFilters('on:\n  push:\n    branches: [main]\n  pull_request:\n    types: [opened]\njobs:\n  x:\n    paths: not a trigger\n'), false);
+  assert.equal(readCiFilters("on:\n  pull_request:\n    paths-ignore: ['**.md']\n"), true);
+  assert.equal(readCiFilters("on:\n  push:\n    paths: ['src/**']\n  pull_request:\n"), true);
+  assert.equal(readCiFilters('on: { pull_request: { paths: [x] } }\n'), true, 'a flow mapping is read too');
+  assert.equal(readCiFilters('name: x\n'), true, 'no on: key read: the quieter reading');
+  const docsPr = pr({ ci: null, files: ['docs/x.md'], createdAt: daysAgo(1) });
+  assert.match(prReason(docsPr, { ...res, ciFilters: false }, now), /\*\*no CI run\*\*/, 'no filter: a missing run is reported after 1 h');
+  assert.equal(prReason(docsPr, { ...res, ciFilters: true }, now), null, 'a filter: no run expected, and young');
 });

@@ -169,7 +169,7 @@
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "b397883b9f4afdb22b167c608821597bc89573d19477d2a05add9b38f7c449cb"
+      "sha256": "8823d08e0d35d9f79031f7375c9a3fc5b08b9c8fa2c4c059423d3bc64c2ae316"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
@@ -181,11 +181,11 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "3ae8099c05c447523b5cf16df5a17898de5a7a34c34c07e574fdc669f8810607"
+      "sha256": "30586868ea9c21c2bf5a24be1d499cb8b0a7a8dfc333960ce2686f472a36382a"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",
-      "sha256": "7a49c5cb26fb22a3ebba6df46c8addf51e09dddab38817b410669132384b7a2a"
+      "sha256": "ef6bd9530225bec34b8ec88d74e90ec24f4de1815de42ad332d06bd444bb07cf"
     },
     ".github/workflows/eco-design.yml": {
       "module": "eco-design",
