@@ -19,7 +19,7 @@ Guidance for Claude Code when working **on the kit itself**. (The `CLAUDE.md` a 
 node --test test/*.test.mjs                     # everything; needs git and bash, no network
 node bin/harness.mjs list             # the modules
 node bin/harness.mjs init /tmp/try --modules <id>   # then, in /tmp/try: git init -q && git add -A && ./scripts/security-checks.sh --offline
-pipx run --spec 'zizmor==1.31.1' zizmor --offline <rendered project>/.github/workflows/
+uvx --from 'zizmor==1.31.1' zizmor --offline <rendered project>/.github/workflows/   # or: pipx run --spec 'zizmor==1.31.1' zizmor …
 node bin/release.mjs --dry-run        # the next release, from changes/; without --dry-run it writes it
 ```
 
