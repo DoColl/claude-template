@@ -1593,6 +1593,10 @@ test("auto-merge: broken copies of the workflow turn AM-1, AM-7, AM-8, AM-10 or 
     // The range, on copies the checks of the tip were written against.
     ["the range from base.sha", "AM-7", shipped.split("compare/${TIP}...${HEAD_SHA}\"").join("compare/${BASE_SHA}...${HEAD_SHA}\"")],
     ["a listing of 300 files trusted when the counts agree", "AM-7", edit(shipped, 'if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then', 1, 'if [ "$LISTED" != "$CHANGED" ]; then')],
+    ["a reversed range", "AM-7", once(shipped, "compare/${TIP}...${HEAD_SHA}\"", "compare/${HEAD_SHA}...${TIP}\"")],
+    ["the tip re-anchored on the pull request's stored base", "AM-7", once(shipped, `TIP=$(gh api "repos/\${GITHUB_REPOSITORY}/git/ref/heads/\${BASE_REF}" --jq '.object.sha') || TIP=""`, `TIP=$(gh api "repos/\${GITHUB_REPOSITORY}/pulls/\${PR}" --jq '.base.sha') || TIP=""`)],
+    ["a second listing that replaces the range", "AM-7", once(shipped, ind(10, `ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")`), ind(10, `RANGE=$(gh api "repos/\${GITHUB_REPOSITORY}/compare/\${HEAD_SHA}^...\${HEAD_SHA}" --jq '{base: (.merge_base_commit.sha // ""), total: .total_commits, commits: [], files: [.files[]? | [.filename, (.previous_filename // "")]], changes: []}')`) + ind(10, `ROWS=$(jq -r '.files[] | @tsv' <<< "$RANGE")`))],
+    ["the hold of a listing of 300 files without its exit", "AM-7", once(shipped, ind(12, 'echo "merge=false" >> "$GITHUB_OUTPUT"') + ind(12, "exit 0") + ind(10, "fi") + ind(10, "# The merge base the range was listed from: what the merge writes is"), ind(12, 'echo "merge=false" >> "$GITHUB_OUTPUT"') + ind(10, "fi") + ind(10, "# The merge base the range was listed from: what the merge writes is"))],
     // What the merge wrote, judged again.
     ["promote-from-ci without the check", "AM-10", shipped.slice(0, firstCheck) + shipped.slice(slot)],
     ["a step between the merge and the check", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"), ind(6, "- name: Something else") + ind(8, "run: echo hi") + "\n" + checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"))],
@@ -1709,4 +1713,261 @@ test("auto-merge: broken copies of the workflow turn AM-1, AM-7, AM-8, AM-10 or 
     assert.equal(r.status, 1, `${r.label}: the guard must fail\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, new RegExp(`FAIL\\s+${cases[i][1]}:`), `${r.label}\n${r.stdout}\n${r.stderr}`);
   }
+});
+
+// ---- auto-merge's merge steps, replayed on git histories ----------------------------------------------------------
+// AM-7 and AM-8 read the workflow's text. These replays run its steps, as bash runs them on a runner, against a
+// stand-in for the API that answers from a scratch git repository (test/auto-merge-fake-gh.mjs), and look at what
+// they decide: the gate's `merge` output, whether the merge call is made, and whether the check of what the merge
+// wrote ends red. Each history runs twice, with the pull request's `changed_files` counted from its stored base and
+// from the tip. jq is called by the steps themselves: without it, nothing to run, as for AM-8.
+const REPLAY = {
+  gate: "Merge gate (Claude config, Dependabot breaking bumps and Action minors)",
+  merge: "Squash-merge",
+  check: "Check what the merge wrote",
+};
+const FAKE_GH = path.join(KIT_ROOT, "test", "auto-merge-fake-gh.mjs");
+
+// A step of the rendered workflow: its env (name → value as written) and its run block, dedented.
+function workflowStep(text, name) {
+  const lines = text.split("\n");
+  const start = lines.indexOf(`      - name: ${name}`);
+  assert.ok(start >= 0, `the workflow has no step "${name}"`);
+  let end = start + 1;
+  while (end < lines.length && !/^ {0,6}\S/.test(lines[end])) end++;
+  const step = lines.slice(start + 1, end);
+  const env = {};
+  const envAt = step.indexOf("        env:");
+  if (envAt >= 0) for (const l of step.slice(envAt + 1)) { const kv = /^ {10}([A-Z_]+): (.*)$/.exec(l); if (!kv) break; env[kv[1]] = kv[2]; }
+  const condition = step.find((l) => l.startsWith("        if: "))?.slice(12) ?? null;
+  const runAt = step.indexOf("        run: |");
+  assert.ok(runAt >= 0, `step "${name}" has no run block`);
+  const body = [];
+  for (const l of step.slice(runAt + 1)) { if (l.trim() && !l.startsWith(" ".repeat(10))) break; body.push(l.slice(10)); }
+  return { env, condition, script: `${body.join("\n")}\n` };
+}
+
+// The workflow-level env: the patterns, single-quoted YAML scalars.
+function workflowEnv(text) {
+  const env = {};
+  for (const m of text.matchAll(/^  ([A-Z_]+): '((?:[^']|'')*)'$/gm)) env[m[1]] = m[2].replaceAll("''", "'");
+  return env;
+}
+
+// A scratch history. Every commit gets its own date, a minute after the last one, unless one is given.
+function history() {
+  const dir = tmp("auto-merge-replay-");
+  let minute = 0;
+  const g = (args, date) => {
+    const when = date ?? new Date(Date.UTC(2026, 0, 1, 0, ++minute)).toISOString();
+    const r = run(dir, "git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args], { env: { ...ENV, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } });
+    assert.equal(r.status, 0, `git ${args.join(" ")}\n${output(r)}`);
+    return r.stdout.trim();
+  };
+  const h = {
+    dir,
+    put: (files) => { for (const [rel, text] of Object.entries(files)) { if (text === null) fs.rmSync(path.join(dir, rel)); else write(dir, rel, text); } },
+    commit: (message, files = {}, date) => { h.put(files); g(["add", "-A"]); g(["commit", "-q", "--allow-empty", "-m", message], date); return g(["rev-parse", "HEAD"]); },
+    branch: (name, from = "main") => g(["switch", "-q", "-c", name, from]),
+    on: (name) => g(["switch", "-q", name]),
+    merge: (name, date) => { g(["merge", "-q", "--no-ff", "-m", `merge ${name}`, name], date); return g(["rev-parse", "HEAD"]); },
+    sha: (rev) => g(["rev-parse", rev]),
+    ref: (name, rev) => g(["branch", name, rev]),
+  };
+  g(["init", "-q", "-b", "main"]);
+  return h;
+}
+
+// The start of every history: a held settings file, a convention page, ordinary sources.
+const seed = (h) => h.commit("M0", { ".claude/settings.json": "S0\n", "docs/conventions/page.md": "P0\n", "CLAUDE.md": "rules\n", "src/a.txt": "a\n", "src/b.txt": "b\n", "src/c.txt": "c\n", "tests/a.test.txt": "t1\nt2\n", "tools/deploy.sh": "d\n" });
+// One commit on a branch off main: the usual pull request.
+const onBranch = (files) => { const h = history(); const base = seed(h); h.branch("h"); const head = h.commit("h", files); return { h, base, head }; };
+const many = (n, dir) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`${dir}/f${String(i + 1).padStart(3, "0")}.txt`, `${i}\n`]));
+
+// The history of a branch that landed while the head, which had merged it, set a held path back.
+function setBack(heldPath, before, after) {
+  const h = history();
+  const base = seed(h);
+  h.branch("y"); h.commit("y: a held file changed, merged by hand", { [heldPath]: after });
+  h.branch("h", "main"); h.merge("y"); const head = h.commit("h: the held file set back", { [heldPath]: before, "src/a.txt": "a2\n" });
+  h.on("main"); h.merge("y");
+  return { h, base, head };
+}
+
+// A criss-cross: the head and the tip have two merge bases, y1 and y2; y2 changed a held path, merged by hand, and
+// the head sets it back. git takes one of the two bases for a three-dot listing, by committer date, while the merge
+// starts from a virtual base built from both.
+function crissCross(y2Later) {
+  const h = history();
+  const base = seed(h);
+  const [early, late] = ["2026-03-01T10:00:00Z", "2026-03-02T10:00:00Z"];
+  h.branch("y2"); h.commit("y2: a held file changed, merged by hand", { ".claude/settings.json": "S1\n" }, y2Later ? late : early);
+  h.branch("y1", "main"); h.commit("y1: harmless", { "src/b.txt": "b2\n", "src/c.txt": "c2\n" }, y2Later ? early : late);
+  h.branch("h", "main"); h.merge("y2", "2026-03-03T10:00:00Z"); h.merge("y1", "2026-03-03T11:00:00Z");
+  const head = h.commit("h: the held file set back", { ".claude/settings.json": "S0\n", "src/a.txt": "a2\n", "src/c.txt": "c\n" }, "2026-03-03T12:00:00Z");
+  h.on("main"); h.merge("y2", "2026-03-04T10:00:00Z"); h.merge("y1", "2026-03-04T11:00:00Z");
+  return { h, base, head };
+}
+
+// gate: the gate's `merge` output ("" when it wrote none); called: a merge call was made; check: the exit status of
+// the check of what the merge wrote (null when it does not run). An expectation may differ with the way the pull
+// request's files are counted: { stored, tip }. Each history: { h, base, head, validated?, between? }, `between`
+// moving the base branch after the gate and before the merge step. The replays render the workflow with
+// TEST_HOLD_RE = (^|/)tests/ and PROJECT_GATE_RE = ^tools/deploy\.sh$.
+const SCENARIOS = [
+  ["an ordinary pull request whose base moved on", { gate: "true", called: true, check: 0 }, () => {
+    const h = history(); const base = seed(h);
+    h.branch("h"); const head = h.commit("h: a source change", { "src/a.txt": "a2\n" });
+    h.on("main"); h.commit("main moves on", { "src/b.txt": "b2\n" });
+    return { h, base, head };
+  }],
+  ["a branch the head had merged landed since, and the head sets a held path back", { gate: "false", called: false, check: null }, () => setBack(".claude/settings.json", "S0\n", "S1\n")],
+  ["a documentation-only pull request that sets a convention page back", { gate: "false", called: false, check: null }, () => setBack("docs/conventions/page.md", "P0\n", "P1\n")],
+  ["a stacked pull request whose lower branch, with a held change, landed with a merge commit", { gate: "true", called: true, check: 0 }, () => {
+    const h = history(); seed(h);
+    h.branch("lower"); const base = h.commit("lower: a held change, merged by hand", { ".claude/settings.json": "S1\n", "src/l.txt": "l\n" });
+    h.branch("upper"); const head = h.commit("upper: a source change", { "src/u.txt": "u\n" });
+    h.on("main"); h.merge("lower");
+    return { h, base, head };
+  }],
+  ["a held path renamed away", { gate: "false", called: false, check: null }, () => {
+    const h = history(); const base = seed(h);
+    h.branch("h"); const head = h.commit("h: a rename out of a held path", { "CLAUDE.md": null, "docs/legacy.md": "rules\n" });
+    return { h, base, head };
+  }],
+  // The count is the only thing that holds: the head merged a branch that landed since, nothing held in either.
+  // From the stored base the pull request counts that branch's file too, and the gap holds it; from the tip, the
+  // counts agree and it merges.
+  ["a branch the head had merged landed since, nothing held", { stored: { gate: "false", called: false, check: null }, tip: { gate: "true", called: true, check: 0 } }, () => {
+    const h = history(); const base = seed(h);
+    h.branch("y"); h.commit("y: a source file", { "src/y.txt": "y\n" });
+    h.branch("h", "main"); h.merge("y"); const head = h.commit("h: a source change", { "src/a.txt": "a2\n" });
+    h.on("main"); h.merge("y");
+    return { h, base, head };
+  }],
+  ["a test that only gains lines", { gate: "true", called: true, check: 0 }, () => onBranch({ "tests/a.test.txt": "t1\nt2\nt3\n" })],
+  ["a test line rewritten", { gate: "false", called: false, check: null }, () => onBranch({ "tests/a.test.txt": "t1\nt2 weaker\n" })],
+  ["a test deleted", { gate: "false", called: false, check: null }, () => onBranch({ "tests/a.test.txt": null })],
+  ["a test renamed, unchanged", { gate: "false", called: false, check: null }, () => onBranch({ "tests/a.test.txt": null, "tests/b.test.txt": "t1\nt2\n" })],
+  ["a path of PROJECT_GATE_RE changed", { gate: "false", called: false, check: null }, () => onBranch({ "tools/deploy.sh": "d2\n" })],
+  // The merge step reads the tip again before its call: an unrelated landing changes nothing, a commit of the head
+  // landed meanwhile moves the merge base and stops it.
+  ["the base branch moved on between the gate and the merge", { gate: "true", called: true, check: 0 }, () => {
+    const h = history(); const base = seed(h);
+    h.branch("other"); h.commit("other: a source change", { "src/c.txt": "c2\n" });
+    h.branch("h", "main"); const head = h.commit("h: a source change", { "src/a.txt": "a2\n" });
+    return { h, base, head, between: (git) => { git(["switch", "-q", "main"]); git(["merge", "-q", "--no-ff", "-m", "other lands", "other"]); } };
+  }],
+  ["a commit of the head landed between the gate and the merge", { gate: "true", called: false, check: null }, () => {
+    const h = history(); const base = seed(h);
+    h.branch("h"); const first = h.commit("h: first", { "src/a.txt": "a2\n" }); const head = h.commit("h: second", { "src/b.txt": "b2\n" });
+    h.ref("part", first);
+    return { h, base, head, between: (git) => { git(["switch", "-q", "main"]); git(["merge", "-q", "--no-ff", "-m", "part lands", "part"]); } };
+  }],
+  ["a range of 299 files", { gate: "true", called: true, check: 0 }, () => {
+    const h = history(); const base = seed(h);
+    h.branch("h"); const head = h.commit("h: 299 files", many(299, "gen"));
+    return { h, base, head };
+  }],
+  ["a range of 300 files, none held", { gate: "false", called: false, check: null }, () => {
+    const h = history(); const base = seed(h);
+    h.branch("h"); const head = h.commit("h: 300 files", many(300, "gen"));
+    return { h, base, head };
+  }],
+  ["a range of 301 files whose last one is held", { gate: "false", called: false, check: null }, () => {
+    const h = history(); const base = seed(h);
+    h.branch("h"); const head = h.commit("h: 301 files", { ...many(300, "gen"), "zz/CLAUDE.md": "nested rules\n" });
+    return { h, base, head };
+  }],
+  ["a head pushed since the validated commit", { gate: "", called: false, check: null }, () => {
+    const h = history(); const base = seed(h);
+    h.branch("h"); const validated = h.commit("h: validated", { "src/a.txt": "a2\n" }); const head = h.commit("h: pushed since", { "src/b.txt": "b2\n" });
+    return { h, base, head, validated };
+  }],
+  // Two merge bases. Listed from the one git takes, the held path is seen and held, or missed: then the merge
+  // writes it, and the check after the merge turns the run red (docs/conventions/auto-merge-policy.md § Residual risks).
+  ["two merge bases, git taking the one that changed the held path", { gate: "false", called: false, check: null }, () => crissCross(true)],
+  ["two merge bases, git taking the other one", { gate: "true", called: true, check: 1 }, () => crissCross(false)],
+];
+
+async function runStep(step, { cwd, bin, scenarioEnv, context, wfEnv }) {
+  const env = { ...ENV, ...wfEnv, ...scenarioEnv, PATH: `${bin}${path.delimiter}${ENV.PATH}`, GITHUB_REPOSITORY: "o/r", GITHUB_OUTPUT: path.join(cwd, "output") };
+  delete env.NODE_TEST_CONTEXT;
+  for (const [k, v] of Object.entries(step.env)) {
+    const expr = /^\$\{\{ (.+) \}\}$/.exec(v)?.[1];
+    if (expr === undefined) { env[k] = v.replace(/^'(.*)'$/, "$1"); continue; }
+    assert.ok(Object.hasOwn(context, expr), `the replay does not know the step's \${{ ${expr} }} (${k})`);
+    env[k] = context[expr];
+  }
+  fs.writeFileSync(path.join(cwd, "output"), "");
+  fs.writeFileSync(path.join(cwd, "step.sh"), step.script);
+  const r = await new Promise((resolve) => {
+    const child = spawn("bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", path.join(cwd, "step.sh")], { cwd, env });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", (d) => { stdout += d; });
+    child.stderr.on("data", (d) => { stderr += d; });
+    child.on("close", (status) => resolve({ status, stdout, stderr }));
+  });
+  const outputs = Object.fromEntries(read(cwd, "output").split("\n").filter(Boolean).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
+  return { status: r.status, log: output(r), outputs };
+}
+
+// One history, one way of counting: the gate, then the merge if the gate says so, then the check if it merged.
+async function replay(wf, history, count) {
+  const cwd = tmp("auto-merge-replay-run-");
+  const repo = path.join(cwd, "repo");
+  fs.cpSync(history.h.dir, repo, { recursive: true });
+  const bin = path.join(cwd, "bin");
+  write(bin, "gh", `#!/usr/bin/env bash\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE_GH)} "$@"\n`, 0o755);
+  write(bin, "sleep", "#!/usr/bin/env bash\nexit 0\n", 0o755);
+  write(cwd, "state.json", JSON.stringify({ merged: false }));
+  const scenarioEnv = { SCEN_REPO: repo, SCEN_HEAD: history.head, SCEN_BASE_SHA: history.base, SCEN_PR_MB: count, SCEN_AUTHOR: "someone", SCEN_STATE: path.join(cwd, "state.json"), SCEN_LOG: path.join(cwd, "calls.log") };
+  const steps = Object.fromEntries(Object.entries(REPLAY).map(([k, name]) => [k, workflowStep(wf, name)]));
+  const wfEnv = workflowEnv(wf);
+  const context = { "github.token": "x", "steps.find-pr.outputs.pr": "7", "steps.event.outputs.head_sha": history.validated ?? history.head, "github.event.repository.default_branch": "main" };
+  const at = { cwd, bin, scenarioEnv, context, wfEnv };
+  const result = { gate: await runStep(steps.gate, at), merge: null, check: null };
+  if (result.gate.outputs.merge === "true") {
+    if (history.between) history.between((args) => { const r = run(repo, "git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", ...args]); assert.equal(r.status, 0, output(r)); });
+    Object.assign(context, { "steps.gate.outputs.base_ref": result.gate.outputs.base_ref ?? "", "steps.gate.outputs.tip": result.gate.outputs.tip ?? "", "steps.gate.outputs.merge_base": result.gate.outputs.merge_base ?? "" });
+    result.merge = await runStep(steps.merge, at);
+    if (result.merge.outputs.merged === "true") {
+      context["steps.merge.outputs.sha"] = result.merge.outputs.sha ?? "";
+      result.check = await runStep(steps.check, at);
+    }
+  }
+  result.called = fs.existsSync(path.join(cwd, "calls.log")) && read(cwd, "calls.log").split("\n").some((l) => l.includes('"PUT"'));
+  return result;
+}
+
+// The order the replay runs the steps in is the one their conditions give: a change to a condition must change the
+// replay with it.
+const REPLAY_CONDITIONS = {
+  gate: "steps.find-pr.outputs.pr != '' && steps.signoff.outputs.ok == 'true'",
+  merge: "steps.find-pr.outputs.pr != '' && steps.gate.outputs.merge == 'true'",
+  check: "${{ !cancelled() && steps.merge.outputs.merged == 'true' }}",
+};
+
+test("auto-merge: the merge steps, replayed on git histories, hold or merge as the policy says", async (t) => {
+  if (!kit.modules.has("auto-merge")) return;
+  if (run(KIT_ROOT, "jq", ["--version"]).status !== 0) { t.skip("jq is not installed: the steps call it"); return; }
+  const dir = tmp();
+  install(dir, ["auto-merge"], { given: { PROJECT_NAME: "demo-app", TEST_HOLD_RE: "(^|/)tests/", PROJECT_GATE_RE: "^tools/deploy\\.sh$" } });
+  const wf = read(dir, ".github/workflows/auto-merge.yml");
+  assert.doesNotMatch(wf, /__HARNESS_/, "the workflow is rendered");
+  for (const [k, name] of Object.entries(REPLAY)) assert.equal(workflowStep(wf, name).condition, REPLAY_CONDITIONS[k], `the condition of "${name}" changed: update the replay`);
+  const runs = SCENARIOS.flatMap(([label, expected, build]) => { const h = build(); return ["stored", "tip"].map((count) => ({ label, expected, h, count })); });
+  const results = await Promise.all(runs.map(({ h, count }) => replay(wf, h, count)));
+  const wrong = [];
+  for (const [i, { label, expected, count }] of runs.entries()) {
+    const r = results[i];
+    const where = `${label} (changed_files from the ${count === "stored" ? "stored base" : "tip"})`;
+    const want = expected.stored ? expected[count] : expected;
+    const seen = { gate: r.gate.outputs.merge ?? "", called: r.called, check: r.check?.status ?? null };
+    const logs = [r.gate, r.merge, r.check].filter(Boolean).map((s) => s.log).join("\n----\n");
+    const failed = r.gate.status !== 0 ? "the gate failed" : r.merge && r.merge.status !== 0 ? "the merge step failed" : null;
+    if (failed || JSON.stringify(seen) !== JSON.stringify(want)) wrong.push(`${where}: ${failed ?? `expected ${JSON.stringify(want)}, saw ${JSON.stringify(seen)}`}\n${logs}`);
+  }
+  // Every scenario that went wrong, not the first one only: a broken step shows which histories it lets through.
+  assert.equal(wrong.length, 0, `${wrong.length} replay(s) went wrong:\n\n${wrong.join("\n\n")}`);
 });
