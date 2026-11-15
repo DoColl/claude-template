@@ -54,7 +54,7 @@
     },
     "docs/conventions/claude-md.md": {
       "module": "core",
-      "sha256": "03fa6892b46fdd6917ae020b7ea5fb371a52b8e37f37c7fb6fa0f40434593145"
+      "sha256": "7f5057588b6eadd13aca47aa9193123402431dcbb449ac6bda33175468a56b58"
     },
     "docs/conventions/local-gate.md": {
       "module": "core",

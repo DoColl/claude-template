@@ -17,6 +17,7 @@ A size target written in a document does not hold either. The budget is therefor
 - **Slots**: lines such as `<!-- harness:slot delegation -->` or `<!-- harness:rows conventions -->` mark where a kit module inserts its section or bullet when it is added later. Keep them; they are comments.
 - **Line count**: the Claude Code documentation recommends keeping each `CLAUDE.md` short (it gives a line target rather than a byte one). The byte budget is this kit's choice of something a script can enforce; set it to what your project can defend.
 - **Nested `CLAUDE.md` files** (per directory) are not covered by CM-1. If you add one, give it its own budget line and extend the guard.
+- **A directory that is not for this session** — templates the project ships to others, vendored code, a fixture repository: Claude Code loads its `CLAUDE.md` and its `.claude/rules/` once a session reads a file there. List it under `claudeMdExcludes` in `.claude/settings.json` (globs matched against absolute paths, so start them with `**/`). That setting does not reach skills: a `.claude/skills/` below the root is still offered as a directory-scoped variant, so say in `CLAUDE.md` which skills are this project's.
 
 ### Path-scoped rules
 
@@ -43,7 +44,7 @@ The rule, as short as a bullet. → `docs/conventions/<slug>.md`
 
 ### Limits
 
-- The definitions above come from the Claude Code documentation. The kit's authors have not watched a path-scoped rule load in a live session, in a sub-agent or in a CI session; the guard and the tests check the files, not the runtime. Check once: open a file a rule names and ask the session which rules it was given.
+- The definitions above come from the Claude Code documentation. The kit's authors have not watched a path-scoped rule load in a live session, in a sub-agent or in a CI session; the guard and the tests check the files, not the runtime. Check once: open a file a rule names and ask the session which rules it was given. The same holds for `claudeMdExcludes`: its behaviour is taken from the documentation (code.claude.com, "Exclude specific CLAUDE.md files", read 2026-11-15).
 - A reviewer that is told to judge a diff against `CLAUDE.md` reads the path-scoped rules only if its session loads them. The rules the kit moved there are each backed by a guard of the gate.
 
 ## Checks

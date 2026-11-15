@@ -9,7 +9,7 @@ Guidance for Claude Code when working **on the kit itself**. (The `CLAUDE.md` a 
 `claude-template` is a modular Claude Code harness: instruction files, sub-agents, hooks, a local gate and CI workflows, installed into a project module by module by `bin/harness.mjs`. Read `README.md` for the idea and `docs/module-authoring.md` for the contract every module follows.
 
 - `bin/harness.mjs` — the CLI (`list`, `init`, `add`, `status`, `update`). `bin/release.mjs` — cuts a release from the changelog fragments in `changes/`. `lib/` — their logic: `kit.mjs` (manifests, dependency resolution), `render.mjs` (placeholders, slots, appended blocks), `install.mjs` (plan, apply, manifest), `release.mjs` (fragments, next version, changelog entry).
-- `modules/<id>/` — `module.json`, `files/` (copied as is), `fragments/` (inserted at slots of seed files), `append/`.
+- `modules/<id>/` — `module.json`, `files/` (copied as is), `fragments/` (inserted at slots of seed files), `append/`. Everything under `modules/*/files/` is a template for projects, never an instruction for this session: `.claude/settings.json` keeps its `CLAUDE.md` and rules from loading, and a skill listed as `modules/<id>/files:<name>` is not the kit's. The kit's skills are those of `.claude/skills/` and `skills/`.
 - `test/` — `engine.test.mjs` (pure functions, the static rules on every module, the changelog fragments), `install.test.mjs` (installs every module into a scratch project and runs its gate; cuts a release in a copy of the kit).
 - `skills/harness-init/` — a skill to run the installer from a Claude Code session.
 
