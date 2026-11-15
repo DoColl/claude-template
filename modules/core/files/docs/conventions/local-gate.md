@@ -21,6 +21,14 @@ That second place is not installed with this page. The gate is local until a CI 
 - **Cheap on purpose**: guards are grep-level or a small script. They do not re-test the fix (that is the regression test's job); they catch the fix being removed, renamed away or bypassed.
 - **`50-project.sh` is yours**: the kit never overwrites it. The other guards belong to the kit and are refreshed by its `update` command as long as you have not edited them.
 
+### Conflict markers
+
+A rebase or a merge that stops on a conflict leaves the markers in the file. When the commands that follow stage it and go on — a script meant to resolve the conflict that failed before writing, a chain of commands that does not stop on the first error — the conflict is committed as text, and every other check can stay green on it. `scripts/guards.d/10-conflict-markers.sh` (CF-1) refuses, in every tracked text file, a line that starts with an opening, base or closing marker: `<<<<<<<`, `|||||||` or `>>>>>>>`, then a space or the end of the line.
+
+- The separator `=======` is not looked for: it underlines a Markdown heading, and a conflict always carries an opening and a closing marker as well.
+- A marker shown as an example is indented, even inside a fenced block; at the start of a line it is refused wherever it is.
+- Binary files are not read. The markers are the default seven characters: a `conflict-marker-size` set in `.gitattributes` makes longer ones, which CF-1 does not see.
+
 ### Kit files and their hashes
 
 `.claude/harness.json` records what the installer wrote. A kit-owned file (a guard, a hook, a workflow, a convention page) is recorded with the sha256 of its content at installation; a seed (`CLAUDE.md`, an index, a config: yours to fill) is recorded with `"seed": true` and no hash.
@@ -52,6 +60,7 @@ Status: written for the kit. Its closing form ran once, at the end of a session 
 
 The gate checks itself only in the obvious way: with no guard to run, it fails rather than report success.
 
+- **CF-1** — no tracked text file holds a line that starts with a git conflict marker (`scripts/guards.d/10-conflict-markers.sh`, § Conflict markers).
 - **HD-1** (advisory) — the kit-owned files that differ from the hash recorded in `.claude/harness.json` (`scripts/guards.d/91-harness-drift.sh`).
 
 ## History
@@ -60,3 +69,4 @@ The gate checks itself only in the obvious way: with no guard to run, it fails r
 - The `/retro` skill added, to turn a session's mistakes into findings.
 - `/retro` gets a closing form, run at the end of a session, and a destination for what concerns the kit: a drafted issue for the kit's repository, posted on the user's yes.
 - The gate and `_lib.sh` clear `NODE_TEST_CONTEXT`, and the gate stops at three levels of itself. With the gate started from a Node test run, the self-tests that four guards run with `node --test` reported `ok` while failing; the kit's own tests had met it and worked around it on their side only.
+- CF-1 added: a rebase stopped on a conflict, the file was staged and the rebase continued, and the commit held the conflict's markers with every guard green. Tested in the kit's suite (two-way and diff3 conflicts refused; a heading underlined with `=======` and an indented example kept); not yet run on a conflict in a live project.

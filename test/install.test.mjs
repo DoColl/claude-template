@@ -722,6 +722,36 @@ test("the gate: a failing guard fails it, a skipped one does not, an empty one i
   r = gate(dir); assert.equal(r.status, 1); assert.match(r.stderr, /checked nothing/);
 });
 
+// A conflict committed as text — a rebase stopped, then the file staged and the rebase continued — passes every
+// other guard. CF-1 refuses a marker at the start of a line; a heading underlined with `=======` and a marker
+// shown indented stay green.
+test("CF-1: a tracked file that holds a git conflict marker turns the gate red", () => {
+  const dir = tmp();
+  install(dir, []);
+  const marker = (c) => c.repeat(7); // built here so that this file holds no marker at the start of a line
+  const [open, base, sep, close] = [marker("<"), marker("|"), marker("="), marker(">")];
+  for (const [text, why] of [
+    [`a\n${open} HEAD\nours\n${sep}\ntheirs\n${close} topic\n`, "a two-way conflict"],
+    [`a\n${open} HEAD\nours\n${base} parent of 1234567 (x)\nbase\n${sep}\ntheirs\n${close} 1234567 (x)\n`, "a diff3 conflict"],
+    [`${open}\n`, "a marker alone on its line"],
+    ["```\n" + `${close} topic\n` + "```\n", "a marker at column 0 inside a fenced block"],
+  ]) {
+    write(dir, "docs/page.md", text);
+    const r = gate(dir); assert.equal(r.status, 1, `${why} is refused`); assert.match(r.stderr, /CF-1: \d+ line\(s\) start with a git conflict marker/);
+    assert.match(r.stderr, /docs\/page\.md:2|docs\/page\.md:1/, "the file and the line are named");
+  }
+  for (const [text, why] of [
+    [`Title\n${sep}\n\nText.\n`, "a heading underlined with seven `=`"],
+    ["```\n" + `    ${open} HEAD\n    ${close} topic\n` + "```\n", "an indented example"],
+    [`${open}${open}\n> quoted ${close}\n`, "a longer run, and a marker that does not start its line"],
+  ]) {
+    write(dir, "docs/page.md", text);
+    const r = gate(dir); assert.equal(r.status, 0, `${why} passes: ${output(r)}`);
+  }
+  fs.writeFileSync(path.join(dir, "docs/blob.bin"), Buffer.from(`\0${open} HEAD\n`));
+  assert.equal(gate(dir).status, 0, "a binary file is not read");
+});
+
 test("CM-1 and CM-2: the budget and the pointers of CLAUDE.md are enforced", () => {
   const dir = tmp();
   install(dir, []);
