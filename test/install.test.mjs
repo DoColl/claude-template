@@ -1019,6 +1019,52 @@ test("parallel-sessions: the report compares the branches pushed from elsewhere,
   assert.equal(report("--check").stdout, "");
 });
 
+// A guard that proves a workflow step's behaviour by running its script — the lines between `# harness:<x>-begin`
+// and `# harness:<x>-end` — must also pin how that step runs. A key that skips the step, lets it fail or runs it
+// under another shell hands the jobs that read its output an empty value, which the guard's table never sees.
+// Every marked step of every module is checked: installed alone, its gate is green; with each such key added to
+// the step, its job or the workflow, in a plain or a quoted spelling, the gate goes red.
+test("a guard that runs a workflow step's script pins how the step runs: if, continue-on-error, shell, defaults", () => {
+  let marked = 0;
+  for (const [id, mod] of kit.modules) {
+    for (const rel of walk(path.join(mod.dir, "files")).filter((r) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(r))) {
+      const src = read(path.join(mod.dir, "files"), rel);
+      const begin = /^( *)# harness:([a-z0-9-]+)-begin$/m.exec(src);
+      if (!begin) continue;
+      marked++;
+      const dir = tmp();
+      install(dir, [id]);
+      const yml = read(dir, rel), lines = yml.split("\n");
+      const at = lines.findIndex((l) => l === `${begin[1]}# harness:${begin[2]}-begin`);
+      let step = at; while (step > 0 && !/^ *- /.test(lines[step])) step--;
+      const stepKey = " ".repeat(lines[step].indexOf("-") + 2);
+      let job = step; while (job > 0 && !/^  [A-Za-z0-9_-]+:\s*$/.test(lines[job])) job--;
+      const top = lines.findIndex((l) => l === "jobs:");
+      assert.ok(at > 0 && step > job && job > top && top > 0, `${id}: ${rel} — the marked step, its job and jobs: are found`);
+      const r0 = gate(dir); assert.equal(r0.status, 0, `${id}: installed alone, the gate is green\n${output(r0)}`);
+      const insert = (after, text) => [...lines.slice(0, after + 1), ...text.split("\n"), ...lines.slice(after + 1)].join("\n");
+      const copies = [
+        ["the step: if: false", insert(step, `${stepKey}if: false`)],
+        ["the step: 'if': false", insert(step, `${stepKey}'if': false`)],
+        ["the step: continue-on-error", insert(step, `${stepKey}continue-on-error: true`)],
+        ["the step: \"continue-on-error\"", insert(step, `${stepKey}"continue-on-error": true`)],
+        ["the step: shell", insert(step, `${stepKey}shell: sh {0}`)],
+        ["the job: if: false", insert(job, "    if: false")],
+        ["the job: continue-on-error", insert(job, "    continue-on-error: true")],
+        ["the job: defaults", insert(job, "    defaults:\n      run:\n        shell: sh {0}")],
+        ["the workflow: defaults", insert(top - 1, "defaults:\n  run:\n    shell: sh {0}")],
+      ];
+      for (const [why, text] of copies) {
+        write(dir, rel, text);
+        const r = gate(dir);
+        assert.equal(r.status, 1, `${id}: ${rel} — a key added to ${why} must turn the gate red\n${output(r)}`);
+      }
+      write(dir, rel, yml);
+    }
+  }
+  assert.ok(marked >= 1, "the scan found the marked steps it is meant to check");
+});
+
 // ready-on-green: the step that picks the pull request whose draft green CI lifts, run as the runner runs it, with
 // `gh` answering from a table — the pull requests it lifts, and the nearby ones that keep their draft. The step
 // calls jq, as the runner provides it: without jq here, the test has nothing to run.

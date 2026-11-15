@@ -20,9 +20,10 @@
 #         every file in it is documentation, 'true' for anything else (code,
 #         a rename out of code, a push of several commits, another event, no
 #         repository). The job's output and the step's header (its name, `id:
-#         diff`, its two env values, nothing else) are pinned, and the job has
-#         no `if`, `continue-on-error`, `shell` or `defaults` key: what is tested
-#         is what runs, and a step skipped or allowed to fail cannot hand the
+#         diff`, its two env values, nothing else) are pinned, the job has no
+#         `if`, `continue-on-error`, `shell` or `defaults` key, and the workflow
+#         no `defaults` key, whose `run.shell` would reach the step: what is
+#         tested is what runs, and a step skipped or allowed to fail cannot hand the
 #         jobs an empty verdict. The jobs that read it test `!= 'false'`, so an
 #         empty verdict runs them anyway.
 . "$(dirname "$0")/_lib.sh"
@@ -97,6 +98,10 @@ fi
 # Nothing in the job may skip the step, let it fail quietly or run it another way.
 if grep -qE "^[[:space:]-]*[\"']?(if|continue-on-error|shell|defaults)[\"']?[[:space:]]*:" <<< "$(grep -vE '^[[:space:]]*#' <<< "$changes" | awk '/^        run: \|/ { skip = 1; next } skip && /^         / { next } { skip = 0; print }')"; then
   cw3 "the changes job must have no if, continue-on-error, shell or defaults key — a skipped or failed step would hand the jobs an empty verdict"
+fi
+# Nor the workflow: its `defaults: run: shell` applies to every step it does not override.
+if grep -qE "^[\"']?defaults[\"']?[[:space:]]*:" "$CIWF"; then
+  cw3 "$CIWF must have no workflow-level defaults key — its run.shell would run the changes step under another shell; set defaults on the jobs that need them"
 fi
 # The run block: from `run: |` to the first line indented no deeper than it. Outside the
 # markers, blank lines only: nothing after the script can write another value.
