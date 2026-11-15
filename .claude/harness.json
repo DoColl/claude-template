@@ -98,7 +98,7 @@
     },
     ".claude/skills/parallel-sessions/SKILL.md": {
       "module": "parallel-sessions",
-      "sha256": "528536fcc0218a075fd97f63c63d0edb94780e38fceb0658c68ce5d538ad908b"
+      "sha256": "f04aa45778d538742287b36d0cae1faff1158142faa7a920bfe04045c7edf9be"
     },
     ".worktreeinclude": {
       "module": "parallel-sessions",
@@ -106,7 +106,7 @@
     },
     "docs/conventions/parallel-sessions.md": {
       "module": "parallel-sessions",
-      "sha256": "f4cc666d64d36998d8c49d20d13cad0dd09af80adcf595496ce2bd65c1908f08"
+      "sha256": "cb0a735af8822380589e0b4813706385fc51e25b56c9f639de97bf74b9b7207b"
     },
     "scripts/guards.d/18-parallel-sessions.sh": {
       "module": "parallel-sessions",
