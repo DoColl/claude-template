@@ -17,9 +17,13 @@
 #         listing of 300 files holds whatever the count. Before each merge
 #         call, retries included, the pull request, the tip and, when the tip
 #         moved, the merge base are read again: a merge this workflow's token
-#         made goes to the check (AM-10), a hand merge is left alone, a
-#         retarget or a moved merge base stops the merge; after the last call
-#         the pull request is read once more.
+#         made goes to the check (AM-10), a hand merge is left alone, a closed
+#         pull request, a retarget, a head pushed since or a moved merge base
+#         stops the merge — a head pushed since a call that answered a 5xx or
+#         nothing, red; after the last call the pull request is read once
+#         more. From the loop's head to the step's end, nothing else runs
+#         (the merge call and what follows its success or its failure, up
+#         to the loop's wait, are pinned by AM-10).
 #         A pull request that cannot be read fails the job instead of passing
 #         for a moved head.
 #   AM-4  marking a pull request ready never merges it. The two ready lines are
@@ -56,9 +60,14 @@
 #         runs the gate's rules on it (held paths, weakened tests, and outside
 #         the docs for the docs job): red when anything matches, when the
 #         listing is cut short or cannot be read. Its run block is pinned,
-#         the same in both jobs, and the merge steps hand it the commit. No
-#         continue-on-error, defaults, shell, GITHUB_ENV or GITHUB_PATH in
-#         the file, and no ${{ }} inside a run: script (comments included).
+#         the same in both jobs, and the merge steps hand it the commit; a
+#         failed merge call leaves only on a 409 (red after a call that may
+#         have merged), notes a 5xx or no answer as a call that may have
+#         merged, and tries a merge commit only when GitHub refuses squash.
+#         No continue-on-error, defaults, shell, GITHUB_ENV or GITHUB_PATH in
+#         the file, no key YAML builds another way (an alias, an explicit
+#         `?`, an escape), and no ${{ }} inside a run: script (comments
+#         included).
 #
 # AM-2 and AM-3 are unused on purpose. In the workflow this guard was first
 # written for, they covered a post-merge deploy dispatch: whether the default
@@ -79,6 +88,30 @@ if [ ! -f "$AM" ]; then
   fail "AM-1: $AM is missing"
   finish
 fi
+
+# The CI workflow's name is a value of the installation (--set CI_WORKFLOW),
+# written on three fixed lines. The checks that read the workflow as text see a
+# neutral word there, and there only, so that a name the installer accepts
+# cannot turn them red: each line is matched whole, and anything else on it, or
+# on a line next to it, is read as it stands. A second line in one of those
+# shapes would be read as neutral too: AM-6 and AM-10 hold each to one.
+CI_VALUE='[A-Za-z0-9][A-Za-z0-9 ._-]{0,40}' # the pattern module.json gives CI_WORKFLOW
+neutral_ci() {
+  sed -E -e "s/^(    workflows: \[\")$CI_VALUE(\", \"Claude review\"])\$/\1CI\2/" \
+    -e "s/^(      # CI: every run of a workflow named )$CI_VALUE( for this commit)\$/\1CI\2/" \
+    -e "s/^(          CI_NAME: ')$CI_VALUE(')\$/\1CI\2/"
+}
+# The workflow without its comment lines.
+code=$(grep -vE '^[[:space:]]*#' "$AM" | neutral_ci)
+# Every line of the jobs, tagged with its job and its step (a step starts at any
+# `- ` item of a job's steps, named or not). A tab in a line is shown as <TAB>:
+# the fields are split on tabs, and a line cut at its first one would hide its
+# end from the checks that read the steps.
+steps_tsv=$(awk '/^jobs:$/ { on = 1; next }
+  !on { next }
+  /^  [A-Za-z0-9_-]+:$/ { job = $1; sub(/:$/, "", job); step = "-"; next }
+  /^      -([[:space:]]|$)/ { n++; step = n }
+  { line = $0; gsub(/\t/, "<TAB>", line); print job "\t" step "\t" line }' "$AM")
 
 # ── AM-1 — Claude-config gate ────────────────────────────────────────────────
 RE=$(sed -n "s/^  CLAUDE_GATE_RE: '\(.*\)'$/\1/p" "$AM")
@@ -163,8 +196,19 @@ if [ -n "$RE" ] && [ -n "$PROJECT_RE" ] && [ -f "$TABLE" ]; then
 fi
 # One definition, at the workflow level: a job- or step-level `env:` could
 # otherwise shadow it with a weaker pattern and this check would not see it.
+# Counted on every line that is not a comment, wherever YAML can start a key
+# (KEY_POS: a line's start, after `- `, after the `{` or `,` of a flow mapping —
+# a `{` right after a `$` opens none YAML would read —; then an explicit `?` and
+# node properties such as `&a` or `!!str`), quoted or not, spaced or not, before
+# its `:` or at the line's end (a key whose `:` comes on the next line). A
+# message or a JSON body in a run script holds the name elsewhere and is not
+# counted (`echo "NAME: …"`, `${NAME:-…}`). AM-10 refuses the other ways YAML
+# builds a key: an escape (`"\x43…"`), an explicit `?`, an alias (`*k :`).
+KEY_POS='(^[[:space:]]*(-[[:space:]]+)*|((^|[^$])[{]|,)[[:space:]]*)'
+KEY_AT="$KEY_POS([?][[:space:]]+)?([&!][^[:space:]]*[[:space:]]+)*"
+defines() { grep -cE "$KEY_AT[\"']?$1[\"']?[[:space:]]*(:|#|\$)" <<< "$code" || true; }
 for var in CLAUDE_GATE_RE PROJECT_GATE_RE; do # TEST_HOLD_RE: AM-8
-  defined=$(grep -cE "^ *$var:" "$AM" || true)
+  defined=$(defines "$var")
   if [ "$defined" != "1" ]; then
     bad 1 "$var is defined $defined time(s) in $AM — exactly one definition, in the workflow-level env"
   fi
@@ -209,7 +253,6 @@ if [ "$(grep -cxF "$docs_line" "$AM")" != "1" ] || ! grep -qxF "$docs_line" <<< 
 fi
 # Every merge call in the file (any spelling, comments excluded) is one of the
 # gated REST PUTs AM-1 counts — so no ready step can merge either.
-code=$(grep -vE '^[[:space:]]*#' "$AM")
 calls=$(grep -ciE "$MERGE_RE" <<< "$code" || true)
 counted=$(grep -cF 'pulls/${PR}/merge"' <<< "$code" || true)
 if [ "$calls" != "$counted" ] || [ "$counted" != "$merging" ]; then
@@ -712,7 +755,22 @@ fi
 # Counted on the jobs' code only: the patterns of the workflow-level env are the
 # project's values (--set), and may name anything. A message or a comment at
 # the end of a code line counts.
-jobs_code=$(sed -n '/^jobs:/,$p' "$AM" | grep -vE '^[[:space:]]*#')
+jobs_code=$(sed -n '/^jobs:/,$p' "$AM" | grep -vE '^[[:space:]]*#' | neutral_ci)
+# The names below are counted in the steps that hold them: the gate and the
+# merge step of each job (`id: gate`, `id: merge`). Each step runs in a shell
+# of its own, so another step may use the same names — a project's dispatch
+# after the merge, say (auto-merge-policy.md § After the merge).
+am7_code=$(awk -F'\t' '$3 == "        id: gate" || $3 == "        id: merge" { holds[$1 "\t" $2] = 1 }
+  { job[NR] = $1; step[NR] = $2; text[NR] = $3 }
+  END { for (i = 1; i <= NR; i++) if ((job[i] "\t" step[i]) in holds) print text[i] }' <<< "$steps_tsv" \
+  | grep -vE '^[[:space:]]*#' || true)
+# The lines of the merge steps alone (`id: merge`), comments included: the pins
+# of the merge loop below read them there, so that a loop in another step — a
+# project's dispatch after the merge, retried in the same words — opens none of
+# their regions.
+merge_code=$(awk -F'\t' '$3 == "        id: merge" { holds[$1 "\t" $2] = 1 }
+  { job[NR] = $1; step[NR] = $2; text[NR] = $3 }
+  END { for (i = 1; i <= NR; i++) if ((job[i] "\t" step[i]) in holds) print text[i] }' <<< "$steps_tsv")
 # Three compare calls per merging job: the gate's listing from the tip, the
 # merge base read again before a merge call when the tip moved, and the listing
 # of what the merge wrote (AM-10, pinned there). The tip named on four lines of
@@ -725,15 +783,15 @@ compares=$(grep -o 'compare/' <<< "$jobs_code" | grep -c . || true)
 if [ "$compares" != "$((3 * merging))" ]; then
   bad 7 "$compares compare call(s) in the jobs for $merging merging job(s) — per job, one listing from the tip, one read of the merge base before a merge call, one listing of what the merge wrote (AM-10)"
 fi
-tip_lines=$(grep -cE '(^|[^A-Za-z0-9_])TIP([^A-Za-z0-9_]|$)' <<< "$jobs_code" || true)
+tip_lines=$(grep -cE '(^|[^A-Za-z0-9_])TIP([^A-Za-z0-9_]|$)' <<< "$am7_code" || true)
 if [ "$tip_lines" != "$((4 * merging))" ]; then
-  bad 7 "$tip_lines code line(s) of the jobs name TIP, $((4 * merging)) expected — the tip is read once per merging job, by its full ref, and named only by its check, the listing and its hand-over to the merge loop (a message or a comment on a code line counts)"
+  bad 7 "$tip_lines code line(s) of the gate and merge steps name TIP, $((4 * merging)) expected — the tip is read once per merging job, by its full ref, and named only by its check, the listing and its hand-over to the merge loop (a message or a comment on a code line counts)"
 fi
 # The gate hands the tip and the merge base it judged to the merge step, each on
 # one pinned line; the merge step receives them on one pinned env line each, and
 # names them nowhere but in its comparisons — no line takes them again. The same
 # for the merge base in the gates, and for the values read before each call.
-names() { grep -cE "(^|[^A-Za-z0-9_])$1([^A-Za-z0-9_]|\$)" <<< "$jobs_code" || true; }
+names() { grep -cE "(^|[^A-Za-z0-9_])$1([^A-Za-z0-9_]|\$)" <<< "$am7_code" || true; }
 if [ "$(grep -cxF '          echo "tip=${TIP}" >> "$GITHUB_OUTPUT"' <<< "$jobs_code" || true)" != "1" ] \
    || [ "$(grep -cxF '          echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"' <<< "$jobs_code" || true)" != "1" ] \
    || [ "$(grep -cE '^ +[A-Z_]*(TIP|MB): ' "$AM" || true)" != "2" ] \
@@ -741,9 +799,9 @@ if [ "$(grep -cxF '          echo "tip=${TIP}" >> "$GITHUB_OUTPUT"' <<< "$jobs_c
    || ! grep -qxF '          GATE_MB: ${{ steps.gate.outputs.merge_base }}' "$AM"; then
   bad 7 "the gate hands the tip and the merge base it judged to the merge step on one pinned line each (echo \"tip=\${TIP}\", echo \"merge_base=\${MB}\" >> \"\$GITHUB_OUTPUT\"; GATE_TIP: \${{ steps.gate.outputs.tip }}, GATE_MB: \${{ steps.gate.outputs.merge_base }}), and no other env value names a tip or a merge base"
 fi
-counts="$(names GATE_TIP) $(names GATE_MB) $(names MB) $(names NOW_TIP) $(names NOW_MB) $(names STATE) $(names NOW_MERGED) $(names NOW_COMMIT) $(names NOW_BY)"
-if [ "$counts" != "2 2 $((3 * merging)) $((4 * merging)) $((4 * merging)) $((6 * merging)) $((4 * merging)) $((4 * merging)) $((4 * merging))" ]; then
-  bad 7 "lines naming GATE_TIP GATE_MB MB NOW_TIP NOW_MB STATE NOW_MERGED NOW_COMMIT NOW_BY: $counts — each is assigned and compared on its pinned lines only"
+counts="$(names GATE_TIP) $(names GATE_MB) $(names MB) $(names NOW_TIP) $(names NOW_MB) $(names STATE) $(names NOW_STATE) $(names NOW_HEAD) $(names NOW_MERGED) $(names NOW_COMMIT) $(names NOW_BY) $(names CALLED)"
+if [ "$counts" != "2 2 $((3 * merging)) $((4 * merging)) $((4 * merging)) $((6 * merging)) $((4 * merging)) $((4 * merging)) $((5 * merging)) $((4 * merging)) $((4 * merging)) $((4 * merging))" ]; then
+  bad 7 "lines of the gate and merge steps naming GATE_TIP GATE_MB MB NOW_TIP NOW_MB STATE NOW_STATE NOW_HEAD NOW_MERGED NOW_COMMIT NOW_BY CALLED: $counts — each is assigned and compared on its pinned lines only"
 fi
 mbs=$(grep -cxF "          MB=\$(jq -r '.base' <<< \"\$RANGE\")" <<< "$jobs_code" || true)
 mb_held=$(awk '/^          if ! \[\[ "\$MB" =~ \^\[0-9a-f\]\{40,64\}\$ \]\]; then$/ { armed = 1; regions++; next }
@@ -758,22 +816,28 @@ if [ "$mbs" != "$merging" ] || [ "$mb_held" != "$merging $merging 0" ] || [ "$ba
   bad 7 "each gate reads the merge base of its range on pinned lines, and holds when it is not a commit (found: $mbs reads, $based listings asking for it, branches, exits, other lines = $mb_held)"
 fi
 # Before each merge call, retries included: the pull request read again (merged
-# already: its commit handed to the check; retargeted: stop), the tip read again
-# and, when it moved, the merge base: moved, stop; unreadable, fail. From the
-# loop's head to the merge call, nothing else runs: comments, blank lines and
-# plain messages aside, each job's lines are exactly these.
-pre_put=$(awk '/^ *for method in squash merge; do$/ { on = 1; print "@@" }
+# already by this workflow's token: its commit handed to the check; merged by
+# anyone else, closed, retargeted, or its head moved: stop — its head moved
+# after a call that answered a 5xx or nothing, CALLED, which may have merged:
+# red), the tip read again and, when it moved, the merge base: moved, stop;
+# unreadable, fail. Every field of that read is a word, "-" for one GitHub does
+# not send: split on tabs, an empty field would shift the next ones. From the
+# head of the attempts' loop to the merge call, nothing else runs: comments,
+# blank lines and plain messages aside, each merge step's lines are exactly these.
+pre_put=$(awk '/^ *for attempt in 1 2 3 4 5; do$/ { on = 1; print "@@" }
   on && /^ *if OUT=\$\(gh api --method PUT / { on = 0 }
-  on { sub(/^ */, ""); print }' "$AM" \
+  on { sub(/^ */, ""); print }' <<< "$merge_code" \
   | grep -vE '^(#|$)' | grep -vE '^echo "([^"$`\\]|\$\{[A-Za-z_][A-Za-z0-9_]*(:[0-9]+:[0-9]+)?\})*"$' || true)
-STATE_READ='STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '"'"'[.base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv'"'"') || STATE=""'
-STATE_SPLIT='IFS=$'"'"'\t'"'"' read -r NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"'
+STATE_READ='STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '"'"'[.state, .head.sha, .base.ref, .merged, .merge_commit_sha, .merged_by.login] | map(if . == null or . == "" then "-" else tostring end) | @tsv'"'"') || STATE=""'
+STATE_SPLIT='IFS=$'"'"'\t'"'"' read -r NOW_STATE NOW_HEAD NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"'
 before_call() { # before_call <the variable holding the tip the gate judged> <the one holding its merge base>
-  printf '%s\n' '@@' 'for method in squash merge; do' "$STATE_READ" \
+  printf '%s\n' '@@' 'for attempt in 1 2 3 4 5; do' 'for method in squash merge; do' "$STATE_READ" \
     'if [ -z "$STATE" ]; then' 'exit 1' 'fi' "$STATE_SPLIT" \
     'if [ "$NOW_MERGED" = "true" ]; then' 'if [ "$NOW_BY" != "github-actions[bot]" ]; then' 'exit 0' 'fi' \
     'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi' \
+    'if [ "$NOW_STATE" = "closed" ]; then' 'exit 0' 'fi' \
     'if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then' 'exit 0' 'fi' \
+    'if [ "$NOW_HEAD" != "$HEAD_SHA" ]; then' 'if [ -n "${CALLED:-}" ]; then' 'exit 1' 'fi' 'exit 0' 'fi' \
     'NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '"'"'.object.sha'"'"') || NOW_TIP=""' \
     'if ! [[ "$NOW_TIP" =~ ^[0-9a-f]{40,64}$ ]]; then' 'exit 1' 'fi' \
     "if [ \"\$NOW_TIP\" != \"\$$1\" ]; then" \
@@ -783,24 +847,27 @@ before_call() { # before_call <the variable holding the tip the gate judged> <th
     "if [ \"\$NOW_MB\" != \"\$$2\" ]; then" 'exit 0' 'fi' 'fi'
 }
 if [ "$pre_put" != "$(before_call GATE_TIP GATE_MB; before_call TIP MB)" ]; then
-  bad 7 "each merge loop must, before its merge call, read the pull request again (hand a merge this workflow's token made to the check, leave a hand merge alone, stop on a retarget), read the tip again and, when it moved, wait while the head is on the base branch already and stop if the merge base moved (promote-from-ci against GATE_TIP and GATE_MB, promote-docs against TIP and MB), fail on any failed read, with nothing else before the call"
+  bad 7 "each merge loop must, from its head to its merge call, read the pull request again (hand a merge this workflow's token made to the check, leave a hand merge alone, stop on a closed pull request, a retarget or a head pushed since — red when a call before answered a 5xx or nothing), read the tip again and, when it moved, wait while the head is on the base branch already and stop if the merge base moved (promote-from-ci against GATE_TIP and GATE_MB, promote-docs against TIP and MB), fail on any failed read, with nothing else before the call"
 fi
 # After the last call, before calling the merge failed: the pull request read
-# once more, a merge this workflow's token made handed to the check. From the
-# loop's last wait to the step's end, nothing else runs.
+# once more, a merge this workflow's token made handed to the check, a merge by
+# anyone else, a closed pull request or a head pushed since left as before a
+# call. From the loop's last wait to the step's end, nothing else runs.
 after_loop=$(awk '/^            sleep "\$attempt"$/ { on = 1; print "@@" }
   on && /^          exit 1$/ { print "exit 1"; on = 0; next }
-  on { line = $0; sub(/^ */, "", line); print line }' "$AM" \
+  on { line = $0; sub(/^ */, "", line); print line }' <<< "$merge_code" \
   | grep -vE '^(#|$)' | grep -vE '^echo "([^"$`\\]|\$\{[A-Za-z_][A-Za-z0-9_]*(:[0-9]+:[0-9]+)?\})*"$' || true)
 last_read=$(printf '%s\n' '@@' 'sleep "$attempt"' 'done' "$STATE_READ" 'if [ -z "$STATE" ]; then' 'exit 1' 'fi' "$STATE_SPLIT" \
   'if [ "$NOW_MERGED" = "true" ] && [ "$NOW_BY" = "github-actions[bot]" ]; then' \
-  'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi' 'exit 1')
+  'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi' \
+  'if [ "$NOW_MERGED" = "true" ]; then' 'exit 0' 'fi' 'if [ "$NOW_STATE" = "closed" ]; then' 'exit 0' 'fi' \
+  'if [ "$NOW_HEAD" != "$HEAD_SHA" ]; then' 'if [ -n "${CALLED:-}" ]; then' 'exit 1' 'fi' 'exit 0' 'fi' 'exit 1')
 if [ "$after_loop" != "$(printf '%s\n%s' "$last_read" "$last_read")" ]; then
-  bad 7 "after the last merge call, each merge step must read the pull request once more, hand a merge this workflow's token made to the check, and otherwise fail — with nothing else between the loop and its end"
+  bad 7 "after the last merge call, each merge step must read the pull request once more, hand a merge this workflow's token made to the check, leave a merge by anyone else, a closed pull request or a head pushed since as before a call (red when a call answered a 5xx or nothing), and otherwise fail — with nothing else between the loop and its end"
 fi
-reassigned=$(grep -cE '(^|[^A-Za-z0-9_])(ROWS|LISTED)\+?=' <<< "$jobs_code" || true)
+reassigned=$(grep -cE '(^|[^A-Za-z0-9_])(ROWS|LISTED)\+?=' <<< "$am7_code" || true)
 if [ "$reassigned" != "$((2 * merging))" ]; then
-  bad 7 "$reassigned assignment(s) of ROWS or LISTED in the jobs, $((2 * merging)) expected — the listing is counted on its pinned lines only"
+  bad 7 "$reassigned assignment(s) of ROWS or LISTED in the gate and merge steps, $((2 * merging)) expected — the listing is counted on its pinned lines only"
 fi
 stale=$(grep -ciE 'base[._]sha|compare/\$\{?(BASE|DEFAULT)' <<< "$jobs_code" || true)
 if [ "$stale" != "0" ]; then
@@ -866,7 +933,7 @@ pass 7 "the gate reads one immutable range per job from the base branch's tip, h
 # something: the selection below is the workflow's own, run on the shapes of
 # a compare listing.
 TEST_RE=$(sed -n "s/^  TEST_HOLD_RE: '\(.*\)'$/\1/p" "$AM")
-defined=$(grep -cE "^ *TEST_HOLD_RE:" "$AM" || true)
+defined=$(defines TEST_HOLD_RE) # counted as AM-1 counts its two
 if [ -z "$TEST_RE" ] || [ "$defined" != "1" ]; then
   bad 8 "TEST_HOLD_RE must be defined exactly once (single-quoted, non-empty; '^\$' holds nothing) in the workflow-level env of $AM — found $defined"
 else
@@ -929,60 +996,69 @@ pass 8 "a pull request that deletes, renames or rewrites lines of an existing fi
 # These pins read the file as text. Nothing in it may make what GitHub runs
 # differ from that text, let a failing step pass, or change the environment,
 # the shell or the commands of a later step. Refused anywhere in the file:
-# - a carriage return or a NEL (U+0085): YAML breaks a line there, the text
-#   tools below do not, so a line could hide behind a comment;
+# - a carriage return, a NEL (U+0085), U+2028 or U+2029: YAML breaks a line
+#   there, the text tools below do not, so a line could hide behind a comment;
 # - continue-on-error, BASH_ENV (bash sources it before each step's script),
 #   GITHUB_ENV, GITHUB_PATH, an indirect expansion ${!…}, sudo, a PATH or
 #   HOME assignment, a jq library file (.jq), a `defaults` or `shell` key
-#   however quoted or spaced, an explicit `?` key;
+#   however quoted or spaced, an explicit `?` key at a line's start;
+# - outside comment lines, where YAML can start a key (KEY_POS, AM-1): a
+#   double-quoted key holding a backslash other than `\"`, `\\` or `\(` —
+#   `"\x64efaults":` is `defaults:` to YAML, not to grep, while those three
+#   only put a quote or a backslash in a name, or are no YAML escape, so a
+#   script's JSON and jq keys pass —, an explicit `?` key in a flow mapping,
+#   and an alias used as a key (`*k :`, its anchor `&k defaults` elsewhere);
 # - a function other than the three the workflow defines, an alias, enable,
 #   shopt or unset; an empty pair of quotes inside a word (`mer""ge`); a line
 #   continuation that does not go on with an option, `&&` or `||`; a PUT
 #   beyond the merge calls;
-# - a ${{ }} anywhere but in the value of an `if`, a `group` or an upper-case
-#   env key, and inside any block scalar (`run: |`, `- run: >`, `run: &a |`):
-#   GitHub expands it before the shell reads the script, comments included.
+# - a ${{ }} anywhere but in the value of an `if` (`- if:` opening a step
+#   included), a `group` or an upper-case env key, and inside any block scalar
+#   (`run: |`, `- run: >`, `run: &a |`, a folded `if: >-` too): GitHub expands
+#   it before the shell reads the script, comments included.
 # A deliberate rewrite can still find another way: these catch a regression
 # and the simple ways round the pins. The workflow is a held path, merged by
 # hand, and the ruleset of the policy page stands against the rest. The four
 # patterns of the workflow-level env are data (the project's values, --set),
-# tested by AM-1 and AM-8: the words below are not looked for in them.
-breaks=$(LC_ALL=C grep -cE $'\r|\xc2\x85' "$AM" || true)
-not_patterns=$(grep -vE "^  (CLAUDE_GATE_RE|PROJECT_GATE_RE|TEST_HOLD_RE|MAJOR_HOLD_RE): '" "$AM")
+# tested by AM-1 and AM-8: the words below are not looked for in them, nor in
+# the CI workflow's name on its three lines (neutral_ci) — which holds only if
+# each of those lines is there once: `workflows:` (AM-6), `CI_NAME` (counted
+# below) and its comment, at most once.
+breaks=$(LC_ALL=C grep -cE $'\r|\xc2\x85|\xe2\x80\xa8|\xe2\x80\xa9' "$AM" || true)
+not_patterns=$(grep -vE "^  (CLAUDE_GATE_RE|PROJECT_GATE_RE|TEST_HOLD_RE|MAJOR_HOLD_RE): '" "$AM" | neutral_ci)
 FORBIDDEN_RE='continue-on-error|BASH_ENV|GITHUB_ENV|GITHUB_PATH|[$][{]!|sudo|(^|[^A-Za-z0-9_])(PATH|HOME)[[:space:]]*[:=]|[.]jq([^A-Za-z0-9_]|$)|(^|[[:space:]'"'"'"])(defaults|shell)['"'"'"]?[[:space:]]*:|^[[:space:]]*(-[[:space:]]+)?[?]([[:space:]]|$)'
 forbidden=$(grep -cE "$FORBIDDEN_RE" <<< "$not_patterns" || true)
 quotes=$(grep -cE '[A-Za-z0-9_](""|'"''"')[A-Za-z0-9_]' <<< "$not_patterns" || true)
+not_comments=$(grep -vE '^[[:space:]]*#' <<< "$not_patterns" || true)
+escaped=$(grep -cE "$KEY_AT"'"[^"]*\\[^"(\\][^"]*"[[:space:]]*(:|#|$)' <<< "$not_comments" || true)
+yaml_keys=$(grep -cE "$KEY_POS"'([?]([[:space:]]|$)|[*][^][{},[:space:]]+[[:space:]]*:)' <<< "$not_comments" || true)
+ci_names=$(defines CI_NAME)
+ci_notes=$(grep -cE "^      # CI: every run of a workflow named $CI_VALUE for this commit\$" "$AM" || true)
 defs=$(grep -cE '\(\)[[:space:]]*\{|(^|[^A-Za-z0-9_.-])function[[:space:]]' <<< "$jobs_code" || true)
 known_defs=$(grep -cE '^ *(signoff_state|dependabot_verdict|bump_level)\(\) \{$' "$AM" || true)
 builtins=$(grep -cE '(^|[;&|[:space:]])(alias|enable|shopt|unset)[[:space:]]' <<< "$jobs_code" || true)
 continued=$(awk 'held { line = $0; sub(/^ */, "", line); if (line !~ /^(-|&&|[|][|])/) bad++; held = 0 } /\\$/ { held = 1 } END { print bad + 0 }' <<< "$not_patterns")
 puts=$(grep -cE '(^|[^A-Za-z0-9_])PUT([^A-Za-z0-9_]|$)' <<< "$jobs_code" || true)
-if [ "$breaks" != "0" ] || [ "$forbidden" != "0" ] || [ "$quotes" != "0" ] || [ "$defs" != "3" ] || [ "$known_defs" != "3" ] \
+if [ "$breaks" != "0" ] || [ "$forbidden" != "0" ] || [ "$quotes" != "0" ] || [ "$escaped" != "0" ] || [ "$yaml_keys" != "0" ] \
+   || [ "$ci_names" != "1" ] || [ "$ci_notes" -gt 1 ] || [ "$defs" != "3" ] || [ "$known_defs" != "3" ] \
    || [ "$builtins" != "0" ] || [ "$continued" != "0" ] || [ "$puts" != "$merging" ]; then
-  bad 10 "the workflow must hold nothing that makes what runs differ from its text or lets a check pass (found: line breaks $breaks, refused words or keys $forbidden, empty quotes in a word $quotes, function definitions $defs (3 known: $known_defs), alias/enable/shopt/unset $builtins, continuations not followed by an option $continued, PUT calls $puts for $merging merge call(s))"
+  bad 10 "the workflow must hold nothing that makes what runs differ from its text or lets a check pass (found: line breaks $breaks, refused words or keys $forbidden, empty quotes in a word $quotes, keys with a YAML escape $escaped, explicit or alias keys $yaml_keys, CI_NAME lines $ci_names (1 expected: the CI workflow's name is read as a neutral word there) and comments naming it $ci_notes (at most 1), function definitions $defs (3 known: $known_defs), alias/enable/shopt/unset $builtins, continuations not followed by an option $continued, PUT calls $puts for $merging merge call(s))"
 fi
 expressions=$(awk '
   inblock && /^[[:space:]]*$/ { next }
   inblock { match($0, /^ */); if (RLENGTH > keycol) { if (index($0, "${{")) n++; next } inblock = 0 }
-  index($0, "${{") && $0 !~ /^ +(if|group|[A-Z][A-Z0-9_]*): / { n++ }
+  index($0, "${{") && $0 !~ /^ +((-[[:space:]]+)?if|group|[A-Z][A-Z0-9_]*): / { n++ }
   /:[[:space:]]+([&!][^[:space:]]*[[:space:]]+)*[|>][-+0-9]*[[:space:]]*(#.*)?$/ { match($0, /^[ -]*/); keycol = RLENGTH; inblock = 1 }
   END { print n + 0 }' "$AM")
 if [ "$expressions" != "0" ]; then
-  bad 10 "$expressions line(s) carry \${{ }} outside the value of an if, a group or an upper-case env key, or inside a block scalar (a run: script, comments included) — pass values through env:"
+  bad 10 "$expressions line(s) carry \${{ }} outside the value of an if, a group or an upper-case env key, or inside a block scalar (a run: script, comments included) — pass values through env:, and write a folded if (if: >-) without \${{ }}, as the job conditions are"
 fi
-# Every line of the jobs, tagged with its job and its step (a step starts at any
-# `- ` item of a job's steps, named or not).
-steps_tsv=$(awk '/^jobs:$/ { on = 1; next }
-  !on { next }
-  /^  [A-Za-z0-9_-]+:$/ { job = $1; sub(/:$/, "", job); step = "-"; next }
-  /^      -([[:space:]]|$)/ { n++; step = n }
-  { print job "\t" step "\t" $0 }' "$AM")
 CHECK='Check what the merge wrote'
 NAME="      - name: $CHECK"
 checks=$(awk -F'\t' -v c="$NAME" '$3 == c' <<< "$steps_tsv" | grep -c . || true)
 # The step right after the one whose id is `merge`, in each merging job: its
-# first line is the check's name.
-after_merge=$(awk -F'\t' -v c="$NAME" '$3 ~ /^      -([[:space:]]|$)/ { if (want != "") { if ($1 == want && $3 == c) good++; else other++ } want = "" }
+# first line is the check's name. A step starts where its number changes.
+after_merge=$(awk -F'\t' -v c="$NAME" '$2 != prev { if (want != "") { if ($1 == want && $3 == c) good++; else other++ } want = ""; prev = $2 }
   $3 == "        id: merge" { want = $1 }
   END { print good + 0, other + 0 }' <<< "$steps_tsv")
 if [ "$checks" != "$merging" ] || [ "$after_merge" != "$merging 0" ]; then
@@ -1096,6 +1172,24 @@ merge_call=$(printf '%s\n' '@@' 'if OUT=$(gh api --method PUT "repos/${GITHUB_RE
   'echo "merged=true" >> "$GITHUB_OUTPUT"' 'echo "sha=$(jq -r '"'"'.sha // empty'"'"' <<< "$OUT")" >> "$GITHUB_OUTPUT"' 'exit 0' 'fi')
 if [ "$put_block" != "$(printf '%s\n%s' "$merge_call" "$merge_call")" ]; then
   bad 10 "each merge call must, on success, print its answer, write merged=true and the merge commit's sha, and exit 0 — nothing else, nothing before the hand-over"
+fi
+# And what follows its failure, from the success branch's `fi` to the loop's
+# wait: comments and plain messages aside, exactly this. Only a 409 (the head
+# moved: no merge) leaves — red after a call that may have merged (CALLED); a
+# failure other than a 4xx refusal (a 5xx, no answer) sets CALLED; a merge
+# commit is tried only when GitHub refuses squash as a method; any other failure
+# goes on to the next read, which hands a merge that answered an error to the
+# check.
+fail_block=$(awk '/^ *if OUT=\$\(gh api --method PUT / { put = 1; next }
+  put && /^              fi$/ { put = 0; on = 1; print "@@"; next }
+  on && /^            sleep "\$attempt"$/ { on = 0; next }
+  on { line = $0; sub(/^ */, "", line); print line }' "$AM" \
+  | grep -vE '^(#|$)' | grep -vE '^echo "([^"$`\\]|\$\{[A-Za-z_][A-Za-z0-9_]*(:[0-9]+:[0-9]+)?\})*"$' || true)
+on_failure=$(printf '%s\n' '@@' 'echo "$OUT"' 'case "$OUT" in' '*"(HTTP 409)"*)' 'if [ -n "${CALLED:-}" ]; then' 'exit 1' 'fi' 'exit 0 ;;' 'esac' \
+  'case "$OUT" in' '*"(HTTP 4"[0-9][0-9]")"*) ;;' '*) CALLED=1 ;;' 'esac' \
+  'if [ "$method" = squash ]; then' 'case "$OUT" in' '*"Squash merges are not allowed"*) ;;' '*) break ;;' 'esac' 'fi' 'done')
+if [ "$fail_block" != "$(printf '%s\n%s' "$on_failure" "$on_failure")" ]; then
+  bad 10 "each merge call must, on failure, leave only on a 409 (red after a call that answered a 5xx or nothing), note any failure but a 4xx refusal as a call that may have merged (CALLED), try a merge commit only when GitHub refuses squash as a method, and otherwise go on to the next read, which hands a merge that answered an error to the check — nothing else up to the loop's wait"
 fi
 # What the merge steps write to their outputs: the hand-over lines only.
 merge_outputs=$(awk -F'\t' '{ job[NR] = $1; step[NR] = $2; text[NR] = $3 }

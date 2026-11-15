@@ -619,10 +619,11 @@ jobs:
         run: |
           set -euo pipefail
           # Server-side merge via REST API — no local git needed. Try
-          # --squash first (cleanest linear history), fall back to a merge
-          # commit if squash is disabled in the repository settings. Retry on
-          # transient errors (e.g. "Pull request is in draft state" race
-          # right after the ready step above). `sha=` pins the merge to the head CI
+          # --squash first (cleanest linear history); make a merge commit only
+          # when GitHub refuses squash as a method (disabled in the repository
+          # settings). Any other failure is retried with squash (e.g. "Pull
+          # request is in draft state" race right after the ready step above),
+          # after the reads below. `sha=` pins the merge to the head CI
           # validated (AM-6): a head pushed since gets a 409 and no merge — the
           # next green run merges it. `merged=true` is what lets the head-branch
           # cleanup below run: only an actual merge sets it; `sha` (the merge
@@ -633,21 +634,26 @@ jobs:
               # Before each call, retries included (AM-7). The pull request:
               # merged already by this workflow's token — an earlier call that
               # answered an error — its merge commit goes to the check that
-              # follows; merged by hand, it is not this run's merge; retargeted
-              # since the gate, it stops. Then the merge base: the tip moves
-              # with every merge, while what this merge writes is the head's
-              # changes since its merge base with the tip, which moves when a
-              # commit of the head lands. Unchanged, the merge goes on; moved,
-              # it stops and a re-run judges it again. A rename the base branch
-              # made can still carry a change elsewhere, and the API pins the
-              # head of a merge, not its base: the check after the merge sees
-              # both (docs/conventions/auto-merge-policy.md § Residual risks).
-              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv') || STATE=""
+              # follows; merged by hand, it is not this run's merge; closed
+              # without a merge, retargeted since the gate, or with a head
+              # pushed since the validated commit, it stops. Each field read is
+              # a word, "-" when GitHub sends none: split on tabs, an empty one
+              # would shift the next ones, and a merge commit GitHub does not
+              # name reaches the check as "-", which it refuses. Then the merge
+              # base: the tip moves with every merge, while what this merge
+              # writes is the head's changes since its merge base with the tip,
+              # which moves when a commit of the head lands. Unchanged, the
+              # merge goes on; moved, it stops and a re-run judges it again. A
+              # rename the base branch made can still carry a change elsewhere,
+              # and the API pins the head of a merge, not its base: the check
+              # after the merge sees both (docs/conventions/auto-merge-policy.md
+              # § Residual risks).
+              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.state, .head.sha, .base.ref, .merged, .merge_commit_sha, .merged_by.login] | map(if . == null or . == "" then "-" else tostring end) | @tsv') || STATE=""
               if [ -z "$STATE" ]; then
                 echo "::error::PR #${PR} could not be read again before a merge call. Check whether it is merged: if not, re-run this job; if it is (an earlier call can merge and answer an error), read its merge commit — a re-run does not check it."
                 exit 1
               fi
-              IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
+              IFS=$'\t' read -r NOW_STATE NOW_HEAD NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
               if [ "$NOW_MERGED" = "true" ]; then
                 if [ "$NOW_BY" != "github-actions[bot]" ]; then
                   echo "::notice::PR #${PR} was merged by hand meanwhile: not this run's merge, so nothing is checked or cleaned up here."
@@ -658,8 +664,25 @@ jobs:
                 echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
+              if [ "$NOW_STATE" = "closed" ]; then
+                echo "::notice::PR #${PR} was closed meanwhile, not merged — left as it is."
+                exit 0
+              fi
               if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
                 echo "::notice::PR #${PR}: its base branch changed since the gate — leaving it for a hand merge."
+                exit 0
+              fi
+              # A head pushed since the validated commit is left to its own
+              # run, as a 409 would leave it: what follows reads the merge base
+              # of the judged head only. After a call that answered a 5xx or
+              # nothing (CALLED, set below), red instead: that call may have
+              # merged, and the pull request can show it late.
+              if [ "$NOW_HEAD" != "$HEAD_SHA" ]; then
+                if [ -n "${CALLED:-}" ]; then
+                  echo "::error::PR #${PR}: head moved since the validated SHA, after a merge call that answered an error — such a call can merge, and the pull request can show it late. Check whether it is merged: if github-actions[bot] merged it, read its merge commit — a re-run does not check it; if not, its new head gets its own run."
+                  exit 1
+                fi
+                echo "::notice::PR #${PR}: head moved since the validated SHA — leaving it to its own run."
                 exit 0
               fi
               NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || NOW_TIP=""
@@ -693,31 +716,68 @@ jobs:
               fi
               echo "$OUT"
               # 409 = the head moved since this SHA: the PR is no longer ours
-              # to merge, its new head gets its own run. No retry.
+              # to merge, its new head gets its own run. No retry; red after a
+              # call that may have merged (CALLED), as the read above is.
               case "$OUT" in
                 *"(HTTP 409)"*)
+                  if [ -n "${CALLED:-}" ]; then
+                    echo "::error::PR #${PR}: head moved since the validated SHA, after a merge call that answered an error — such a call can merge, and the pull request can show it late. Check whether it is merged: if github-actions[bot] merged it, read its merge commit — a re-run does not check it; if not, its new head gets its own run."
+                    exit 1
+                  fi
                   echo "::notice::PR #${PR}: head moved since the validated SHA — leaving it to its own run."
                   exit 0 ;;
               esac
+              # A refusal (an HTTP 4xx answer) merged nothing; any other failure
+              # (a 5xx, no answer at all) may have merged.
+              case "$OUT" in
+                *"(HTTP 4"[0-9][0-9]")"*) ;;
+                *) CALLED=1 ;;
+              esac
+              # A merge commit only when GitHub refuses squash as a method (the
+              # repository does not allow it); after any other failure, the next
+              # attempt reads everything again and tries squash again.
+              if [ "$method" = squash ]; then
+                case "$OUT" in
+                  *"Squash merges are not allowed"*) ;;
+                  *) break ;;
+                esac
+              fi
             done
             echo "attempt ${attempt}: merge failed, retrying in ${attempt}s"
             sleep "$attempt"
           done
           # The last call can merge and answer an error too: the pull request is
-          # read once more before the merge is called failed.
-          STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv') || STATE=""
+          # read once more before the run is called failed. Merged by anyone else,
+          # closed, or its head pushed since, it ends as it would before a call.
+          STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.state, .head.sha, .base.ref, .merged, .merge_commit_sha, .merged_by.login] | map(if . == null or . == "" then "-" else tostring end) | @tsv') || STATE=""
           if [ -z "$STATE" ]; then
             echo "::error::PR #${PR} could not be read after the last merge call. Check whether it is merged: if it is, read its merge commit — a re-run does not check it."
             exit 1
           fi
-          IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
+          IFS=$'\t' read -r NOW_STATE NOW_HEAD NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
           if [ "$NOW_MERGED" = "true" ] && [ "$NOW_BY" = "github-actions[bot]" ]; then
             echo "::notice::PR #${PR} is merged, by this workflow's token: the last call merged it and answered an error. Its merge commit is checked next."
             echo "merged=true" >> "$GITHUB_OUTPUT"
             echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "::error::Merge of #${PR} failed after 5 attempts. The PR is non-draft and can be merged manually."
+          if [ "$NOW_MERGED" = "true" ]; then
+            echo "::notice::PR #${PR} was merged by hand meanwhile: not this run's merge, so nothing is checked or cleaned up here."
+            exit 0
+          fi
+          if [ "$NOW_STATE" = "closed" ]; then
+            echo "::notice::PR #${PR} was closed meanwhile, not merged — left as it is."
+            exit 0
+          fi
+          if [ "$NOW_HEAD" != "$HEAD_SHA" ]; then
+            if [ -n "${CALLED:-}" ]; then
+              echo "::error::PR #${PR}: head moved since the validated SHA, after a merge call that answered an error — such a call can merge, and the pull request can show it late. Check whether it is merged: if github-actions[bot] merged it, read its merge commit — a re-run does not check it; if not, its new head gets its own run."
+              exit 1
+            fi
+            echo "::notice::PR #${PR}: head moved since the validated SHA — leaving it to its own run."
+            exit 0
+          fi
+          echo "::error::PR #${PR} is not shown merged by this workflow after its last merge call. A call can merge and answer an error, and the pull request can show it late: check whether it is merged. If github-actions[bot] merged it, read its merge commit — a re-run does not check it; if a person did, nothing is left to do here; if it is not merged, merge it by hand."
           exit 1
 
       # What the merge wrote, judged again by the gate's rules (AM-10). The
@@ -971,14 +1031,14 @@ jobs:
           # commit, which the check reads.
           for attempt in 1 2 3 4 5; do
             for method in squash merge; do
-              # The pull request and the merge base, read again before each
-              # call (see promote-from-ci).
-              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv') || STATE=""
+              # The pull request (its state, head and base) and the merge base,
+              # read again before each call (see promote-from-ci).
+              STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.state, .head.sha, .base.ref, .merged, .merge_commit_sha, .merged_by.login] | map(if . == null or . == "" then "-" else tostring end) | @tsv') || STATE=""
               if [ -z "$STATE" ]; then
                 echo "::error::PR #${PR} could not be read again before a merge call. Check whether it is merged: if not, re-run this job; if it is (an earlier call can merge and answer an error), read its merge commit — a re-run does not check it."
                 exit 1
               fi
-              IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
+              IFS=$'\t' read -r NOW_STATE NOW_HEAD NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
               if [ "$NOW_MERGED" = "true" ]; then
                 if [ "$NOW_BY" != "github-actions[bot]" ]; then
                   echo "::notice::PR #${PR} was merged by hand meanwhile: not this run's merge, so nothing is checked or cleaned up here."
@@ -989,8 +1049,22 @@ jobs:
                 echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
+              if [ "$NOW_STATE" = "closed" ]; then
+                echo "::notice::PR #${PR} was closed meanwhile, not merged — left as it is."
+                exit 0
+              fi
               if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then
                 echo "::notice::PR #${PR}: its base branch changed since the gate — leaving it for a hand merge."
+                exit 0
+              fi
+              # A head pushed since the validated commit is left to its own
+              # run; red after a call that may have merged (see promote-from-ci).
+              if [ "$NOW_HEAD" != "$HEAD_SHA" ]; then
+                if [ -n "${CALLED:-}" ]; then
+                  echo "::error::PR #${PR}: head moved since the validated SHA, after a merge call that answered an error — such a call can merge, and the pull request can show it late. Check whether it is merged: if github-actions[bot] merged it, read its merge commit — a re-run does not check it; if not, its new head gets its own run."
+                  exit 1
+                fi
+                echo "::notice::PR #${PR}: head moved since the validated SHA — leaving it to its own run."
                 exit 0
               fi
               NOW_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq '.object.sha') || NOW_TIP=""
@@ -1024,31 +1098,68 @@ jobs:
               fi
               echo "$OUT"
               # 409 = the head moved since this SHA: the PR is no longer ours
-              # to merge, its new head gets its own run. No retry.
+              # to merge, its new head gets its own run. No retry; red after a
+              # call that may have merged (see promote-from-ci).
               case "$OUT" in
                 *"(HTTP 409)"*)
+                  if [ -n "${CALLED:-}" ]; then
+                    echo "::error::PR #${PR}: head moved since the validated SHA, after a merge call that answered an error — such a call can merge, and the pull request can show it late. Check whether it is merged: if github-actions[bot] merged it, read its merge commit — a re-run does not check it; if not, its new head gets its own run."
+                    exit 1
+                  fi
                   echo "::notice::PR #${PR}: head moved since the validated SHA — leaving it to its own run."
                   exit 0 ;;
               esac
+              # A refusal (an HTTP 4xx answer) merged nothing; any other failure
+              # (a 5xx, no answer at all) may have merged.
+              case "$OUT" in
+                *"(HTTP 4"[0-9][0-9]")"*) ;;
+                *) CALLED=1 ;;
+              esac
+              # A merge commit only when GitHub refuses squash as a method (the
+              # repository does not allow it); after any other failure, the next
+              # attempt reads everything again and tries squash again.
+              if [ "$method" = squash ]; then
+                case "$OUT" in
+                  *"Squash merges are not allowed"*) ;;
+                  *) break ;;
+                esac
+              fi
             done
             echo "attempt ${attempt}: merge failed, retrying in ${attempt}s"
             sleep "$attempt"
           done
           # The last call can merge and answer an error too: the pull request is
-          # read once more before the merge is called failed.
-          STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv') || STATE=""
+          # read once more before the run is called failed. Merged by anyone else,
+          # closed, or its head pushed since, it ends as it would before a call.
+          STATE=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}" --jq '[.state, .head.sha, .base.ref, .merged, .merge_commit_sha, .merged_by.login] | map(if . == null or . == "" then "-" else tostring end) | @tsv') || STATE=""
           if [ -z "$STATE" ]; then
             echo "::error::PR #${PR} could not be read after the last merge call. Check whether it is merged: if it is, read its merge commit — a re-run does not check it."
             exit 1
           fi
-          IFS=$'\t' read -r NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
+          IFS=$'\t' read -r NOW_STATE NOW_HEAD NOW_BASE NOW_MERGED NOW_COMMIT NOW_BY <<< "$STATE"
           if [ "$NOW_MERGED" = "true" ] && [ "$NOW_BY" = "github-actions[bot]" ]; then
             echo "::notice::PR #${PR} is merged, by this workflow's token: the last call merged it and answered an error. Its merge commit is checked next."
             echo "merged=true" >> "$GITHUB_OUTPUT"
             echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "::error::Merge of #${PR} failed after 5 attempts. The PR is non-draft and can be merged manually."
+          if [ "$NOW_MERGED" = "true" ]; then
+            echo "::notice::PR #${PR} was merged by hand meanwhile: not this run's merge, so nothing is checked or cleaned up here."
+            exit 0
+          fi
+          if [ "$NOW_STATE" = "closed" ]; then
+            echo "::notice::PR #${PR} was closed meanwhile, not merged — left as it is."
+            exit 0
+          fi
+          if [ "$NOW_HEAD" != "$HEAD_SHA" ]; then
+            if [ -n "${CALLED:-}" ]; then
+              echo "::error::PR #${PR}: head moved since the validated SHA, after a merge call that answered an error — such a call can merge, and the pull request can show it late. Check whether it is merged: if github-actions[bot] merged it, read its merge commit — a re-run does not check it; if not, its new head gets its own run."
+              exit 1
+            fi
+            echo "::notice::PR #${PR}: head moved since the validated SHA — leaving it to its own run."
+            exit 0
+          fi
+          echo "::error::PR #${PR} is not shown merged by this workflow after its last merge call. A call can merge and answer an error, and the pull request can show it late: check whether it is merged. If github-actions[bot] merged it, read its merge commit — a re-run does not check it; if a person did, nothing is left to do here; if it is not merged, merge it by hand."
           exit 1
 
       # The same check as in promote-from-ci (comments there), with the docs
