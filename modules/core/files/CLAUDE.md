@@ -38,6 +38,8 @@ Guidance for Claude Code in the __HARNESS_PROJECT_NAME__ repository. This file h
 <!-- TODO(harness): the project's own conventions (data model invariants, API error format, naming, what must never be logged). -->
 - **CLAUDE.md stays a budgeted index**: operative rules only, under the byte budget on its `harness:budget` line (CM-1); every `docs/` path it names must exist (CM-2). A new rule is a short bullet here plus its detail file. → `docs/conventions/claude-md.md`
 - **A rule that matters is a check**: every fixed bug or review finding gets an ID, a line in `SECURITY_REVIEW.md` and a guard in `scripts/guards.d/`; one gate runs them, before a push and in CI where a workflow calls it. → `docs/conventions/local-gate.md`
+<!-- TODO(harness): name the light model for bulk agent work and the one kept for synthesis and review, in the bullet below. -->
+- **Sub-agents cost**: bulk work (research, lookups, verification, mechanical edits) goes to a light model named on each agent call. Past five agents, state their number, tokens and duration, and wait for a yes. One pass; a fix loop that has not converged after one round stops and reports. This holds for the whole session. → `docs/conventions/session-cost.md`
 <!-- harness:rows conventions -->
 
 ## Environment variables
