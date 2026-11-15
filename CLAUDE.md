@@ -56,3 +56,5 @@ The kit installs part of itself at its root (`.claude/harness.json`): `core`, `c
 ## Before pushing
 
 `node --test test/*.test.mjs` and `./scripts/security-checks.sh`, then zizmor on a rendered project and on `.github/workflows/`. A change to a guard or a workflow is also tried by hand in a scratch project: break the thing the guard protects and watch it go red.
+
+A change to a security-sensitive piece (§ Rules) and the guards that pin it is also read by an agent or a session that did not write it: the complete diff, against the piece's threat model. Its findings are fixed or answered before the push, the fix gets its own reading, and the pull request names the review that ran. → `docs/conventions/fresh-review.md`
