@@ -1142,3 +1142,307 @@ test("headroom: the gate goes red when a committed file routes sessions through 
   green("a learn block in the ignored CLAUDE.local.md", { "CLAUDE.local.md": block });
   green("a workflow naming the API key and NO_PROXY, with a shell continuation and a colour escape", { ".github/workflows/ci.yml": wf("    env:\n      ANTHROPIC_API_KEY: ${{ secrets.KEY }}\n      NO_PROXY: localhost\n") + "      - run: |\n          printf '\\x1b[32mok\\x1b[0m\\n'\n          curl -s \\\n            https://example.com\n" });
 });
+
+test("auto-merge: broken copies of the workflow turn AM-1, AM-7, AM-8 or AM-10 red; the shipped one, a documented dispatch and accepted CI names stay green", async () => {
+  if (!kit.modules.has("auto-merge")) return;
+  const pristine = tmp();
+  install(pristine, ["auto-merge"]);
+  assert.equal(run(pristine, "git", ["init", "-q", "-b", "main"]).status, 0);
+  assert.equal(run(pristine, "git", ["add", "-A"]).status, 0);
+  const file = ".github/workflows/auto-merge.yml";
+  const shipped = read(pristine, file);
+  // Every line containing `fragment` (`times` of them in the file) becomes the lines `by`, at its indentation; `skip`
+  // more lines after it are dropped. `by` = [] drops the line.
+  const edit = (text, fragment, times, by, skip = 0) => {
+    const from = text.split("\n"), to = [];
+    let n = 0;
+    for (let i = 0; i < from.length; i++) {
+      if (!from[i].includes(fragment)) { to.push(from[i]); continue; }
+      n++;
+      to.push(...[].concat(by).map((line) => from[i].match(/^ */)[0] + line));
+      i += skip;
+    }
+    assert.equal(n, times, `${JSON.stringify(fragment)}: ${n} line(s), ${times} expected`);
+    return to.join("\n");
+  };
+  // Inside every block opened by a line containing `opener`, up to its `fi`, the line `line` (trimmed) becomes `by`.
+  const inBlock = (text, opener, times, line, by) => {
+    const to = [];
+    let n = 0, open = false;
+    for (const l of text.split("\n")) {
+      if (l.includes(opener)) { open = true; n++; to.push(l); continue; }
+      if (open && l.trim() === "fi") open = false;
+      if (open && l.trim() === line) { to.push(...[].concat(by).map((b) => l.match(/^ */)[0] + b)); continue; }
+      to.push(l);
+    }
+    assert.equal(n, times, `${JSON.stringify(opener)}: ${n} block(s), ${times} expected`);
+    return to.join("\n");
+  };
+  // Every block opened by a line containing `opener` dropped, up to and with its `fi`.
+  const dropBlock = (text, opener, times) => {
+    const to = [];
+    let n = 0, open = false;
+    for (const l of text.split("\n")) {
+      if (!open && l.includes(opener)) { open = true; n++; continue; }
+      if (open) { if (l.trim() === "fi") open = false; continue; }
+      to.push(l);
+    }
+    assert.equal(n, times, `${JSON.stringify(opener)}: ${n} block(s), ${times} expected`);
+    return to.join("\n");
+  };
+  // Each copy in a project of its own, the guard run on it (a second or two each).
+  const guard = async (label, text) => {
+    const dir = tmp();
+    await fs.promises.cp(pristine, dir, { recursive: true });
+    if (text !== undefined) await fs.promises.writeFile(path.join(dir, file), text);
+    return new Promise((resolve) => {
+      const child = spawn("bash", ["scripts/guards.d/40-auto-merge.sh"], { cwd: dir, env: { ...ENV, CI: "" } });
+      let stdout = "", stderr = "";
+      child.stdout.on("data", (d) => { stdout += d; });
+      child.stderr.on("data", (d) => { stderr += d; });
+      child.on("close", (status) => resolve({ label, status, stdout, stderr }));
+    });
+  };
+  // The runs with their concurrency bounded by the processor count: the same work, without a burst of
+  // processes on a small runner.
+  const bounded = async (jobs) => {
+    const results = [];
+    let next = 0;
+    const worker = async () => { for (let i = next++; i < jobs.length; i = next++) results[i] = await jobs[i](); };
+    const concurrency = Math.min(jobs.length, Math.max(1, os.availableParallelism()));
+    await Promise.all(Array.from({ length: concurrency }, worker));
+    return results;
+  };
+  // Exactly one occurrence of `from` (with its newline) replaced by `to`.
+  const once = (text, from, to) => {
+    assert.equal(text.split(from).length, 2, `${JSON.stringify(from.slice(0, 60))}: once expected`);
+    return text.replace(from, () => to);
+  };
+  // The last occurrence of `from` replaced by `to`.
+  const last = (text, from, to) => {
+    const i = text.lastIndexOf(from);
+    assert.ok(i >= 0, `${JSON.stringify(from.slice(0, 60))}: not found`);
+    return text.slice(0, i) + to + text.slice(i + from.length);
+  };
+  const ind = (n, line) => " ".repeat(n) + line + "\n";
+  const checkName = ind(6, "- name: Check what the merge wrote") + ind(8, "id: check");
+  const checkIf = ind(8, "if: ${{ !cancelled() && steps.merge.outputs.merged == 'true' }}");
+  const shaLine = ind(16, "echo \"sha=$(jq -r '.sha // empty' <<< \"$OUT\")\" >> \"$GITHUB_OUTPUT\"");
+  const verdict = 'if [ "$WROTE_COUNT" -ge 300 ] || [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then';
+  const firstCheck = shipped.indexOf(checkName), slot = shipped.indexOf("      # Nothing is dispatched after the merge");
+  assert.ok(firstCheck > 0 && slot > firstCheck, "promote-from-ci's check step, then the dispatch slot");
+  const loopHead = ind(10, "for attempt in 1 2 3 4 5; do");
+  const ciLoop = ind(10, "# post-merge dispatch would use.") + loopHead;
+  const checkRun = ind(10, "set -euo pipefail") + ind(10, "# The commit the merge created, listed against its first parent: the");
+  const notShown = 'echo "::error::PR #${PR} is not shown merged by this workflow after its last merge call. A call can merge and answer an error, and the pull request can show it late: check whether it is merged. If github-actions[bot] merged it, read its merge commit — a re-run does not check it; if a person did, nothing is left to do here; if it is not merged, merge it by hand."';
+  const on409 = ind(18, "exit 0 ;;") + ind(14, "esac");
+  const methodsHead = loopHead + ind(12, "for method in squash merge; do");
+  const gateEnv = ind(8, "id: gate") + ind(8, "if: steps.find-pr.outputs.pr != '' && steps.signoff.outputs.ok == 'true'") + ind(8, "env:");
+  const cleanup = ind(6, "# Delete the head ref ourselves (see the header). `!cancelled()` keeps it");
+  // Every occurrence of `from` (`times` of them) replaced by `to`.
+  const every = (text, from, times, to) => {
+    assert.equal(text.split(from).length, times + 1, `${JSON.stringify(from.slice(0, 60))}: ${times} expected`);
+    return text.split(from).join(to);
+  };
+  // The CI workflow's name is a value of the installation: names the installer accepts, each rendered.
+  const named = ["Lambda function tests", "sudoers lint", "STATE machine tests", "CI MB", "PR merge base.sha lint.jq BASH_ENV", "sudo function STATE MB PUT TIP enable"].map((name) => {
+    const dir = tmp();
+    install(dir, ["auto-merge"], { given: { PROJECT_NAME: "demo-app", CI_WORKFLOW: name } });
+    return [name, read(dir, file)];
+  });
+  const sudoers = named.find(([name]) => name === "sudoers lint")[1];
+  // The dispatch § After the merge describes, written the usual ways: a step opened by its `if`, a run block, and
+  // names of its own that the gate and the merge step use too.
+  const dispatch = once(once(shipped, ind(6, "actions: read # the sign-offs: the runs of CI and of the review"), ind(6, "actions: write # the sign-offs, and the dispatch after a merge")), cleanup,
+    ind(6, "- name: Dispatch the deploy")
+    + ind(8, "if: ${{ !cancelled() && steps.merge.outputs.merged == 'true' && steps.check.outcome == 'success' }}")
+    + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "MERGE_SHA: ${{ steps.merge.outputs.sha }}")
+    + ind(8, 'run: gh workflow run deploy.yml --ref main -f merged_sha="$MERGE_SHA"') + "\n"
+    + ind(6, "- if: ${{ !cancelled() && steps.merge.outputs.merged == 'true' && steps.check.outcome == 'success' }}")
+    + ind(8, "name: Dispatch the end-to-end tests")
+    + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "MERGE_SHA: ${{ steps.merge.outputs.sha }}")
+    + ind(8, "run: |") + ind(10, "set -euo pipefail")
+    + ind(10, 'STATE=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/e2e.yml" --jq .state)')
+    + ind(10, 'TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)')
+    + ind(10, 'MB="$MERGE_SHA"')
+    + ind(10, 'if [ "$STATE" = active ] && [ "$TIP" = "$MB" ]; then gh workflow run e2e.yml --ref main -f merged_sha="$MERGE_SHA"; fi')
+    + "\n" + cleanup);
+  // A dispatch that retries in the merge loop's own words, with a message, a JSON body and a jq key of its own, and
+  // the gate's patterns named in its script: no YAML key, no definition, no merge loop.
+  const retried = once(once(shipped, ind(6, "actions: read # the sign-offs: the runs of CI and of the review"), ind(6, "actions: write # the sign-offs, and the dispatch after a merge")), cleanup,
+    ind(6, "- name: Dispatch the deploy, retried")
+    + ind(8, "if: ${{ !cancelled() && steps.merge.outputs.merged == 'true' && steps.check.outcome == 'success' }}")
+    + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "MERGE_SHA: ${{ steps.merge.outputs.sha }}")
+    + ind(8, "run: |") + ind(10, "set -euo pipefail")
+    + ind(10, 'echo "PROJECT_GATE_RE: $PROJECT_GATE_RE"')
+    + ind(10, 'HELD_TESTS="${TEST_HOLD_RE:-^$}"')
+    + ind(10, 'BODY=$(jq -n --arg k merged_sha --arg v "$MERGE_SHA" --arg h "$HELD_TESTS" \'{ref: "main", inputs: {"\\($k)": $v, held_tests: $h}}\')')
+    + ind(10, 'JSON="{\\"ref\\":\\"main\\",\\"inputs\\":{\\"merged_sha\\":\\"$MERGE_SHA\\"}}"')
+    + ind(10, "for attempt in 1 2 3 4 5; do")
+    + ind(12, 'if gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/dispatches" --input - <<< "$BODY"; then')
+    + ind(14, 'echo "::notice::Dispatched \\"deploy.yml\\": $MERGE_SHA ($JSON)"')
+    + ind(14, "exit 0")
+    + ind(12, "fi")
+    + ind(12, 'echo "attempt ${attempt}: dispatch failed, retrying in ${attempt}s"')
+    + ind(12, 'sleep "$attempt"')
+    + ind(10, "done")
+    + ind(10, "exit 1")
+    + "\n" + cleanup);
+  // The ways a head pushed since the validated commit ends: red after a call that answered a 5xx or nothing.
+  const movedRed = 'echo "::error::PR #${PR}: head moved since the validated SHA, after a merge call that answered an error — such a call can merge, and the pull request can show it late. Check whether it is merged: if github-actions[bot] merged it, read its merge commit — a re-run does not check it; if not, its new head gets its own run."';
+  const movedNotice = 'echo "::notice::PR #${PR}: head moved since the validated SHA — leaving it to its own run."';
+  const ifCalled = 'if [ -n "${CALLED:-}" ]; then';
+  const calledBlock = (n) => ind(n, ifCalled) + ind(n + 2, movedRed) + ind(n + 2, "exit 1") + ind(n, "fi");
+  const headCheck = 'if [ "$NOW_HEAD" != "$HEAD_SHA" ]; then';
+  const headBlock = (n) => ind(n, headCheck) + calledBlock(n + 2) + ind(n + 2, movedNotice) + ind(n + 2, "exit 0") + ind(n, "fi");
+  // A job-level env added after each `timeout-minutes: 10`, its lines as given.
+  const jobEnv = (...lines) => edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", ...lines]);
+  const cases = [
+    // Before each merge call: the pull request, the tip and the merge base, read again.
+    ["the merge base not compared when the tip moved", "AM-7", inBlock(shipped, 'if [ "$NOW_MB" != "$GATE_MB" ]; then', 1, "exit 0", "true")],
+    ["promote-docs' merge base check dropped", "AM-7", dropBlock(shipped, 'if [ "$NOW_MB" != "$MB" ]; then', 1)],
+    ["a failed read of the tip merges anyway", "AM-7", inBlock(shipped, 'if ! [[ "$NOW_TIP" =~ ^[0-9a-f]{40,64}$ ]]; then', 2, "exit 1", "true")],
+    ["an unreadable merge base taken as unchanged", "AM-7", inBlock(shipped, 'if ! [[ "$NOW_MB" =~ ^[0-9a-f]{40,64}$ ]]; then', 2, "exit 1", "true")],
+    ["a merge already made left unchecked", "AM-7", edit(shipped, 'echo "sha=${NOW_COMMIT}" >> "$GITHUB_OUTPUT"', 4, [])],
+    ["a merge made by hand adopted", "AM-7", inBlock(shipped, 'if [ "$NOW_BY" != "github-actions[bot]" ]; then', 2, "exit 0", "true")],
+    ["the head on the base branch taken for a moved merge base", "AM-7", edit(shipped, 'if [ "$NOW_MB" = "$HEAD_SHA" ]; then continue; fi', 2, [])],
+    ["the last call's merge never read back", "AM-7", dropBlock(shipped, 'if [ "$NOW_MERGED" = "true" ] && [ "$NOW_BY" = "github-actions[bot]" ]; then', 2)],
+    ["a merge by anyone adopted after the last call", "AM-7", edit(shipped, 'if [ "$NOW_MERGED" = "true" ] && [ "$NOW_BY" = "github-actions[bot]" ]; then', 2, 'if [ "$NOW_MERGED" = "true" ]; then')],
+    ["a failed merge ends green", "AM-7", edit(shipped, notShown, 2, [notShown, "exit 0"])],
+    ["a retarget not checked before each call", "AM-7", dropBlock(shipped, 'if [ -z "$BASE_REF" ] || [ "$NOW_BASE" != "$BASE_REF" ]; then', 2)],
+    ["a head pushed since the gate not checked before each call", "AM-7", every(shipped, headBlock(14), 2, "")],
+    // A head pushed since: red after a call that answered a 5xx or nothing (CALLED), which may have merged.
+    ["a head moved after a call that may have merged left green, before a call", "AM-7", every(shipped, calledBlock(16), 2, "")],
+    ["a head moved after a call that may have merged left green, at a 409", "AM-10", every(shipped, calledBlock(18), 2, "")],
+    ["a head moved after a call that may have merged left green, after the last call", "AM-7", every(shipped, calledBlock(12), 2, "")],
+    ["a head moved after a call that may have merged ending green", "AM-7", inBlock(shipped, ifCalled, 6, "exit 1", "exit 0")],
+    ["a head pushed after the last call called a failed merge", "AM-7", every(shipped, headBlock(10), 2, "")],
+    ["a call that answered a 5xx or nothing not noted", "AM-10", edit(shipped, "*) CALLED=1 ;;", 2, "*) ;;")],
+    ["every failed call taken for a refusal", "AM-10", edit(shipped, '*"(HTTP 4"[0-9][0-9]")"*) ;;', 2, '*"(HTTP "*) ;;')],
+    ["CALLED assigned outside its pinned lines", "AM-7", every(shipped, loopHead, 2, ind(10, 'CALLED=""') + loopHead)],
+    ["a closed pull request called anyway, or called failed after the last call", "AM-7", dropBlock(shipped, 'if [ "$NOW_STATE" = "closed" ]; then', 4)],
+    ["a hand merge called failed after the last call", "AM-7", (() => { const from = "\n" + ind(10, 'if [ "$NOW_MERGED" = "true" ]; then'); assert.equal(shipped.split(from).length, 3); return dropBlock(shipped.split(from).join("\n" + ind(10, 'if [ "$NOW_MERGED" = "by hand" ]; then')), 'if [ "$NOW_MERGED" = "by hand" ]; then', 2); })()],
+    ["an empty field shifts the next ones", "AM-7", edit(shipped, "map(if . == null or . == \"\" then \"-\" else tostring end) | @tsv'", 4, `STATE=$(gh api "repos/\${GITHUB_REPOSITORY}/pulls/\${PR}" --jq '[.state, .head.sha, .base.ref, (.merged | tostring), (.merge_commit_sha // ""), (.merged_by.login // "")] | @tsv') || STATE=""`)],
+    ["an exit between the loop's two heads", "AM-7", last(shipped, methodsHead, loopHead + ind(12, 'if [ "$attempt" -gt 1 ]; then exit 0; fi') + ind(12, "for method in squash merge; do"))],
+    ["the tip judged taken from the event", "AM-7", edit(shipped, "GATE_TIP: ${{ steps.gate.outputs.tip }}", 1, "GATE_TIP: ${{ github.event.workflow_run.head_sha }}")],
+    ["the merge base judged taken from the event", "AM-7", edit(shipped, "GATE_MB: ${{ steps.gate.outputs.merge_base }}", 1, "GATE_MB: ${{ github.event.workflow_run.head_sha }}")],
+    ["the tip not handed over by the gate", "AM-7", edit(shipped, 'echo "tip=${TIP}" >> "$GITHUB_OUTPUT"', 1, [])],
+    ["the tip judged read again before the loop", "AM-7", once(shipped, ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, 'GATE_TIP=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq \'.object.sha\')') + loopHead)],
+    ["the gate's merge base not held when missing", "AM-7", inBlock(shipped, 'if ! [[ "$MB" =~ ^[0-9a-f]{40,64}$ ]]; then', 2, "exit 0", "true")],
+    ["a string left open around the stop", "AM-7", inBlock(shipped, 'if [ "$NOW_MB" != "$GATE_MB" ]; then', 1, "exit 0", ['echo "\\"', "exit 0", 'echo "\\"'])],
+    // The range, on copies the checks of the tip were written against.
+    ["the range from base.sha", "AM-7", shipped.split("compare/${TIP}...${HEAD_SHA}\"").join("compare/${BASE_SHA}...${HEAD_SHA}\"")],
+    ["a listing of 300 files trusted when the counts agree", "AM-7", edit(shipped, 'if [ "$LISTED" -ge 300 ] || [ "$LISTED" != "$CHANGED" ]; then', 2, 'if [ "$LISTED" != "$CHANGED" ]; then')],
+    // What the merge wrote, judged again.
+    ["promote-from-ci without the check", "AM-10", shipped.slice(0, firstCheck) + shipped.slice(slot)],
+    ["a step between the merge and the check", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"), ind(6, "- name: Something else") + ind(8, "run: echo hi") + "\n" + checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"))],
+    ["an unnamed step between the merge and the check", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"), ind(6, "- run: echo hi") + "\n" + checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"))],
+    ["the check skipped when a step before it failed", "AM-10", shipped.split(checkName + checkIf).join(checkName + ind(8, "if: steps.merge.outputs.merged == 'true'"))],
+    ["the docs rule off in the docs job", "AM-10", edit(shipped, "DOCS_ONLY: 'true'", 1, "DOCS_ONLY: 'false'")],
+    ["a held path only noticed", "AM-10", inBlock(shipped, verdict, 2, "exit 1", "exit 0")],
+    ["the held paths left out of the verdict", "AM-10", edit(shipped, verdict, 2, 'if [ "$WROTE_COUNT" -ge 300 ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then')],
+    ["a listing of 300 files trusted", "AM-10", edit(shipped, verdict, 2, 'if [ "$HELD" != "0" ] || [ "$WEAKENED" != "0" ] || [ "$NON_DOCS" != "0" ]; then')],
+    ["a listing without its files taken as empty", "AM-10", edit(shipped, `if [ -z "$WROTE" ] || [ "$(jq -r '.listed' <<< "$WROTE")" != "array" ]; then`, 2, 'if [ -z "$WROTE" ]; then')],
+    ["the listing of a range that is always empty", "AM-10", shipped.split("compare/${PARENT}...${MERGED}\"").join("compare/${PARENT}...${PARENT}\"")],
+    ["another selection of weakened files", "AM-10", edit(shipped, "WROTE_SHRUNK=$(jq -r", 2, "WROTE_SHRUNK=$(jq -r '.changes[] | select(.status == \"removed\") | .filename' <<< \"$WROTE\")")],
+    ["an unnamed merge commit passes", "AM-10", inBlock(shipped, 'if ! [[ "$MERGED" =~ ^[0-9a-f]{40,64}$ ]]; then', 2, "exit 1", "exit 0")],
+    ["a commit read once, without waiting", "AM-10", edit(shipped, "for delay in 0 5 10; do", 4, "for delay in 0; do")],
+    ["an early exit 0", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, "exit 0") + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a message that leaves", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, 'echo "PR #${PR}: nothing to check" && exit 0') + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a message that runs a command", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, 'echo "checked: $(true)"') + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a string left open around the verdict's exit", "AM-10", inBlock(shipped, verdict, 2, "exit 1", ['echo "\\"', "exit 1", 'echo "\\"'])],
+    ["an expression in a comment of the check", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, `# \${{ fromJSON('"x"') }}`) + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["an expression in a comment of the merge loop", "AM-10", once(shipped, ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, `# \${{ fromJSON('"x"') }}`) + loopHead)],
+    ["promote-docs keeps the merge commit to itself", "AM-10", last(shipped, shaLine, "")],
+    ["a second sha written after the hand-over", "AM-10", last(shipped, shaLine, shaLine + ind(16, 'echo "sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"'))],
+    ["a failed check that lets the job go on", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ github.event.pull_request.number }}"), checkName + checkIf + ind(8, "continue-on-error: true") + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ github.event.pull_request.number }}"))],
+    ["a job that lets its failures go", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "continue-on-error: true"])],
+    ["a job with another shell", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "defaults:", "  run:", "    shell: sh {0}"])],
+    ["a step that sets the next ones' environment", "AM-10", edit(shipped, 'echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 1, ['echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 'echo "MERGED=${MB}" >> "$GITHUB_ENV"'])],
+    // What the text tools would not see as YAML or bash does.
+    ["a carriage return hides an exit in the check", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, "# read below\r          exit 0") + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a NEL hides an exit in the check", "AM-10", shipped.split(checkRun).join(ind(10, "set -euo pipefail") + ind(10, "# read below\u0085          exit 0") + ind(10, "# The commit the merge created, listed against its first parent: the"))],
+    ["a quoted continue-on-error key", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", '"continue-on-error": true'])],
+    ["a spaced continue-on-error key", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "continue-on-error : true"])],
+    ["an explicit key", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "? continue-on-error", ": true"])],
+    ["a quoted defaults key", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "'defaults':", "  run:", "    shell: sh {0}"])],
+    ["a bare dash step between the merge and the check", "AM-10", once(shipped, checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"), ind(6, "-") + ind(8, "name: Note") + ind(8, "run: echo hi") + "\n" + checkName + checkIf + ind(8, "env:") + ind(10, "GH_TOKEN: ${{ github.token }}") + ind(10, "PR: ${{ steps.find-pr.outputs.pr }}"))],
+    ["an anchored run block with an expression", "AM-10", once(once(shipped, ind(10, "GATE_MB: ${{ steps.gate.outputs.merge_base }}") + ind(8, "run: |"), ind(10, "GATE_MB: ${{ steps.gate.outputs.merge_base }}") + ind(8, "run: &m |")), ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, `# \${{ fromJSON('"x"') }}`) + loopHead)],
+    ["a run block opened after two spaces, with an expression", "AM-10", once(once(shipped, ind(10, "GATE_MB: ${{ steps.gate.outputs.merge_base }}") + ind(8, "run: |"), ind(10, "GATE_MB: ${{ steps.gate.outputs.merge_base }}") + ind(8, "run:  |")), ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, `# \${{ fromJSON('"x"') }}`) + loopHead)],
+    ["a run-first step with an expression", "AM-10", once(shipped, ind(6, "# Same cleanup as in promote-from-ci (reasons and guards there); the two"), ind(6, "- run: |") + ind(10, `# \${{ fromJSON('"x"') }}`) + ind(10, "echo hi") + ind(8, "name: Note") + "\n" + ind(6, "# Same cleanup as in promote-from-ci (reasons and guards there); the two"))],
+    ["BASH_ENV in a job's env", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "env:", "  BASH_ENV: /tmp/x"])],
+    ["an indirect write to the env file", "AM-10", edit(shipped, 'echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 1, ['echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 'f=GITHUB_; f+=ENV; printf "X=1\\n" >> "${!f}"'])],
+    ["a jq library file", "AM-10", edit(shipped, 'echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', 1, ['echo "merge_base=${MB}" >> "$GITHUB_OUTPUT"', "echo 'def select(f): empty;' > ~/.jq"])],
+    ["exit shadowed before the loop", "AM-10", once(shipped, ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, 'exit() { builtin exit 0; }') + loopHead)],
+    ["a merge call spelled apart", "AM-10", edit(shipped, 'gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."', 2, ['gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."', 'gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/mer""ge" -f merge_method=squash -f sha="$HEAD_SHA" > /dev/null || true'])],
+    ["a merge path continued on the next line", "AM-10", edit(shipped, 'gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."', 2, ['gh pr ready "$PR" || echo "::warning::PR #${PR}: could not mark it ready — lift draft by hand."', 'gh api --method PUT "repos/${GITHUB_REPOSITORY}/pulls/${PR}/mer\\', 'ge" -f merge_method=squash -f sha="$HEAD_SHA" > /dev/null || true'])],
+    ["the tip judged read again under a split name", "AM-10", once(shipped, ciLoop, ind(10, "# post-merge dispatch would use.") + ind(10, 'read -r GATE_T""IP < <(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${BASE_REF}" --jq \'.object.sha\')') + loopHead)],
+    ["leaving before the hand-over", "AM-10", (() => { const from = ind(16, 'echo "$OUT"') + ind(16, 'echo "merged via ${method}"'); assert.equal(shipped.split(from).length, 3); return shipped.split(from).join(ind(16, 'echo "$OUT"') + ind(16, '[ -n "$OUT" ] && exit 0') + ind(16, 'echo "merged via ${method}"')); })()],
+    ["merged=false written after the hand-over", "AM-10", last(shipped, shaLine, shaLine + ind(16, 'echo "merged=false" >> "$GITHUB_OUTPUT"'))],
+    ["a sha written under a split name", "AM-10", last(shipped, shaLine, shaLine + ind(16, 'echo "s""ha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"'))],
+    ["the check's docs rule left behind a wider docs set", "AM-10", edit(shipped, "NON_DOCS=$(grep -E -v -c '(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)' <<< \"$PATHS\" || true)", 1, "NON_DOCS=$(grep -E -v -c '(\\.md$|^docs/|^site/|^LICENSE$|^\\.gitignore$)' <<< \"$PATHS\" || true)")],
+    ["a stop on any moved tip", "AM-7", edit(shipped, 'NOW_MB=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${NOW_TIP}...${HEAD_SHA}"', 2, "exit 0")],
+    // What follows a failed merge call: only a 409 leaves, a merge commit only when squash is refused as a method.
+    ["an exit after the 409 case", "AM-10", every(shipped, on409, 2, on409 + ind(14, "exit 0"))],
+    ["any other failure leaves the 409 case", "AM-10", every(shipped, on409, 2, ind(18, "exit 0 ;;") + ind(16, "*) exit 0 ;;") + ind(14, "esac"))],
+    ["the 409 case widened to server errors", "AM-10", edit(shipped, '*"(HTTP 409)"*)', 2, '*"(HTTP 409)"*|*"(HTTP 5"*)')],
+    ["a merge commit after any failed squash", "AM-10", edit(shipped, '*"Squash merges are not allowed"*) ;;', 2, "*) ;;")],
+    ["the squash refusal not told apart", "AM-10", dropBlock(shipped, 'if [ "$method" = squash ]; then', 2)],
+    // One definition of each pattern, however its key is spelled: a job's env would shadow the workflow's.
+    ["the patterns shadowed by a job, keys double-quoted", "AM-1", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "env:", `  "CLAUDE_GATE_RE": '^$'`, `  "PROJECT_GATE_RE": '^$'`, `  "TEST_HOLD_RE": '^$'`])],
+    ["the patterns shadowed by a job, keys single-quoted", "AM-1", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "env:", `  'CLAUDE_GATE_RE': '^$'`, `  'PROJECT_GATE_RE': '^$'`, `  'TEST_HOLD_RE': '^$'`])],
+    ["the patterns shadowed by a job, keys spaced", "AM-1", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "env:", "  CLAUDE_GATE_RE : '^$'", "  PROJECT_GATE_RE : '^$'", "  TEST_HOLD_RE : '^$'"])],
+    ["the patterns shadowed by a job, in a flow mapping", "AM-1", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "env: { CLAUDE_GATE_RE: '^$', PROJECT_GATE_RE: '^$', TEST_HOLD_RE: '^$' }"])],
+    ["the test pattern shadowed by a job, key single-quoted", "AM-8", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "env:", `  'TEST_HOLD_RE': '^$'`])],
+    ["the pattern shadowed by a job, key spelled with a YAML escape", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "env:", `  "\\x43LAUDE_GATE_RE": '^$'`])],
+    ["the pattern shadowed in the gate step's env, key quoted", "AM-1", once(shipped, gateEnv, gateEnv + ind(10, `"CLAUDE_GATE_RE": '^$'`))],
+    // …wherever YAML can start a key, its `:` on the line or the next one; and the keys YAML builds another way.
+    ["the patterns shadowed by a job, explicit keys in a flow mapping, `:` on the next line", "AM-1", jobEnv("env: { ? CLAUDE_GATE_RE", "  : '^$', ? PROJECT_GATE_RE", "  : '^$', ? TEST_HOLD_RE", "  : '^$' }")],
+    ["the patterns shadowed by a job, keys in a flow mapping, `:` on the next line", "AM-1", jobEnv("env: { CLAUDE_GATE_RE", "  : '^$', PROJECT_GATE_RE", "  : '^$', TEST_HOLD_RE", "  : '^$' }")],
+    ["the test pattern shadowed by a job, a comment before its `:`", "AM-8", jobEnv("env: {", "  TEST_HOLD_RE # note", "  : '^$' }")],
+    ["the patterns shadowed by a job, keys after `$,` in a flow mapping", "AM-1", jobEnv("env: { A: $,CLAUDE_GATE_RE: '^$', B: $,PROJECT_GATE_RE: '^$', C: $,TEST_HOLD_RE: '^$' }")],
+    ["the patterns shadowed by a job, keys written as aliases", "AM-10", jobEnv("env:", "  N1: &c CLAUDE_GATE_RE", "  N2: &p PROJECT_GATE_RE", "  N3: &h TEST_HOLD_RE", "  *c : '^$'", "  *p : '^$'", "  *h : '^$'")],
+    ["the pattern shadowed by a job, an alias key in a flow mapping", "AM-10", jobEnv("env: { N1: &c CLAUDE_GATE_RE, *c : '^$' }")],
+    ["a job's shell set through keys written as aliases", "AM-10", jobEnv("env:", "  N1: &d defaults", "  N2: &s shell", "*d :", "  run:", "    *s : bash -c 'exit 0' _ {0}")],
+    ["a step's shell set through an explicit key in a flow mapping", "AM-10", once(shipped, cleanup, ind(6, "- { name: Note, run: echo hi, ? shell") + ind(8, ": 'bash -c ''exit 0'' _ {0}' }") + "\n" + cleanup)],
+    ["a key with a YAML escape after `$,` in a flow mapping", "AM-10", jobEnv(`env: { A: $,"\\x43LAUDE_GATE_RE": '^$' }`)],
+    ["a key with a YAML escape after a comment that reads as a block", "AM-10", jobEnv("env: # note: |", `  "\\x43LAUDE_GATE_RE": '^$'`)],
+    ["a key with a YAML escape after a flow scalar on two lines", "AM-10", jobEnv("env: { NOTE: 'a", "  b: |", `  ', "\\x43LAUDE_GATE_RE": '^$' }`)],
+    ["a key with an escape YAML does not know", "AM-10", jobEnv("env:", `  "CL\\AUDE_GATE_RE": '^$'`)],
+    ["a key with a YAML escape in a flow mapping, `:` on the next line", "AM-10", jobEnv(`env: { "\\x43LAUDE_GATE_RE"`, "  : '^$', B: x }")],
+    ["a key with a YAML escape in a flow mapping, a comment before its `:`", "AM-10", jobEnv(`env: { "\\x43LAUDE_GATE_RE" # note`, "  : '^$' }")],
+    // Line breaks YAML sees and the text tools do not, and a tab that would cut a line short for them.
+    ["a line separator hides a job's env behind a comment", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "# notes\u2028    env:\u2028      CLAUDE_GATE_RE: '^$'"])],
+    ["a paragraph separator hides a job's env behind a comment", "AM-10", edit(shipped, "timeout-minutes: 10", 2, ["timeout-minutes: 10", "# notes\u2029    env:\u2029      CLAUDE_GATE_RE: '^$'"])],
+    ["a tab hides the end of a line of the check", "AM-10", edit(shipped, verdict, 2, `${verdict}\ttrue; fi; if false; then`)],
+    ["a step opened by a dash and a tab between the merge and the check", "AM-10", every(shipped, checkName, 2, ind(6, "-\tname: Note") + ind(8, "run: echo hi") + "\n" + checkName)],
+    // A ${{ }} outside an if's value stays refused next to the `- if:` a step may open with.
+    ["an expression in a run line that opens a step", "AM-10", once(shipped, cleanup, ind(6, '- run: echo "${{ github.head_ref }}"') + "\n" + cleanup)],
+    ["an expression in a folded if", "AM-10", once(shipped, cleanup, ind(6, "- name: Note") + ind(8, "if: >-") + ind(10, "${{ !cancelled() }}") + ind(8, "run: echo hi") + "\n" + cleanup)],
+    // The CI workflow's name is read as a neutral word on its own three lines only.
+    ["a refused word on a line next to the CI name", "AM-10", edit(sudoers, "CI_NAME: 'sudoers lint'", 1, ["CI_NAME: 'sudoers lint'", "CI_NOTE: 'sudoers lint'"])],
+    ["a refused word after the CI name, on its line", "AM-10", edit(sudoers, "CI_NAME: 'sudoers lint'", 1, "CI_NAME: 'sudoers lint' # sudo")],
+    ["refused words on a second line in the shape of the CI name's", "AM-10", once(shipped, cleanup, ind(6, "- name: Note") + ind(8, "env:") + ind(10, "CI_NAME: 'x .jq sudo BASH_ENV'") + ind(8, "run: |") + ind(10, "set -- $CI_NAME") + ind(10, `printf 'def select(f): empty;\\n' > "$HOME/$2"`) + "\n" + cleanup)],
+    ["refused words on a second line in the shape of the CI name's, the real line respelled", "AM-10", once(once(shipped, "CI_NAME: 'CI'", 'CI_NAME: "CI"'), cleanup, ind(6, "- name: Note") + ind(8, "env:") + ind(10, "CI_NAME: 'x .jq sudo BASH_ENV'") + ind(8, "run: |") + ind(10, "set -- $CI_NAME") + ind(10, `printf 'def select(f): empty;\\n' > "$HOME/$2"`) + "\n" + cleanup)],
+    ["refused words on a second comment in the shape of the CI name's", "AM-10", edit(sudoers, "# CI: every run of a workflow named sudoers lint for this commit", 1, ["# CI: every run of a workflow named sudoers lint for this commit", "# CI: every run of a workflow named sudo x.jq BASH_ENV for this commit"])],
+  ];
+  // A project may widen its documentation set (auto-merge-policy.md § Setting it up): in every copy, the check's included.
+  const widened = shipped.split("'(\\.md$|^docs/|^LICENSE$|^\\.gitignore$)'").join("'(\\.md$|^docs/|^site/|^LICENSE$|^\\.gitignore$)'")
+    // and the project's own patterns may name anything, a jq script or a sudoers file included.
+    .replace(/^  PROJECT_GATE_RE: '.*'$/m, () => "  PROJECT_GATE_RE: '^tools/filter\\.jq$|(^|/)sudoers$'");
+  assert.notEqual(widened, shipped);
+  assert.ok(widened.includes("filter\\.jq"), "PROJECT_GATE_RE replaced");
+  const greens = [
+    ["as shipped", undefined],
+    ["a docs set widened everywhere, the project's own patterns naming a .jq file and sudoers", widened],
+    ["the dispatch of § After the merge, written the usual ways", dispatch],
+    ["a dispatch retried in the merge loop's words, with a message, a JSON body and a jq key of its own", retried],
+    ...named.map(([name, text]) => [`rendered with a CI workflow named '${name}'`, text]),
+  ];
+  const results = await bounded([...greens.map(([label, text]) => () => guard(label, text)), ...cases.map(([label, , text]) => () => guard(label, text))]);
+  for (const r of results.slice(0, greens.length)) assert.equal(r.status, 0, `${r.label}: the guard must pass\n${r.stdout}\n${r.stderr}`);
+  for (const [i, r] of results.slice(greens.length).entries()) {
+    assert.equal(r.status, 1, `${r.label}: the guard must fail\n${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, new RegExp(`FAIL\\s+${cases[i][1]}:`), `${r.label}\n${r.stdout}\n${r.stderr}`);
+  }
+});
