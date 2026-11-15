@@ -18,12 +18,16 @@
 //   ( ' ";
 // - the two comment refusals, each backing the other; without both, a comment can still not hide a line, since no
 //   value, argument or pattern takes a newline;
-// - |& (the & refusal), an unterminated quote in splitSegments (words() refuses it too);
+// - |& (the & refusal); one form passes without the check, `cat f |&>/dev/null cat` (an & before a > is read here
+//   as the start of a redirection, &>/dev/null is one), and it is harmless: zsh and bash 4 read |& then >/dev/null,
+//   bash 3 reads | then &>/dev/null, and either way only standard error moves;
+// - an unterminated quote in splitSegments (words() refuses it too);
 // - the git global-option check and the git subcommand's own-property lookup (the lookup refuses an option, and an
 //   inherited subcommand crashes the option walk, which fails closed);
 // - the escaped redirection characters (no argument class takes < or >);
 // - the readonly profile's empty config and the profile test in checkSegment, each backing the other;
-// - a cwd starting with - in the config (the `./` before it keeps it a path).
+// - a cwd starting with - in the config (the `./` before it keeps it a path);
+// - the ~ in the config's argv checks, at the start of argv[0] and of an argument (TOKEN_OK has no ~).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -73,6 +77,9 @@ const MUTANTS = [
   { what: "a parenthesis is accepted", find: "if (c === \"(\" || c === \")\" || c === \"{\" || c === \"}\") throw", replace: "if (c === \"{\" || c === \"}\") throw", test: RO_BLOCK, row: "git log -S README.md(e:'touch pwn':)" },
   { what: "a redirection may hold a quoted part", find: "if (quotedPart || !REDIRECT_OK.test(cur))", replace: "if (!REDIRECT_OK.test(cur))", test: RO_BLOCK, row: "cat f 2>'&1'" },
   { what: "an empty segment between operators is accepted", find: " else if (op !== null || nextOp === null) throw new Error(\"empty command between operators\");", replace: "", test: V_BLOCK, row: "git status |\nmake check" },
+  { what: "a backslash may end a segment", find: "if (/(\\\\*)[ \\t]*$/.exec(cur)[1].length % 2 === 1) throw new Error(TRAILING_ESCAPE);", replace: "", test: RO_BLOCK, row: "git status\\ " },
+  { what: "a backslash before the blanks that end a segment is not seen", find: "/(\\\\*)[ \\t]*$/.exec(cur)", replace: "/(\\\\*)$/.exec(cur)", test: RO_BLOCK, row: "git status\\ " },
+  { what: "a tab is not one of the blanks that end a segment", find: "/(\\\\*)[ \\t]*$/.exec(cur)", replace: "/(\\\\*) *$/.exec(cur)", test: RO_BLOCK, row: "cat CLAUDE.md\\\t" },
   { what: "a word may start with an unquoted =", find: "if (cur === \"\" && c === \"=\") throw new Error(WORD_START);", replace: "", test: RO_BLOCK, row: "cat =ls" },
   { what: "a redirection target is not anchored at its end", find: "\\/dev\\/null)$/", replace: "\\/dev\\/null)/", test: RO_BLOCK, row: "cat f 2>/dev/null/x" },
   { what: "a redirection is not anchored at its start", find: "const REDIRECT_OK = /^(", replace: "const REDIRECT_OK = /(", test: RO_BLOCK, row: "cat f >pwn2>&1" },
@@ -80,6 +87,7 @@ const MUTANTS = [
   // ---- arguments and option values
   { what: "a path may climb out with ..", find: "!/^[-\\/~$]/.test(a) && !DOTDOT.test(a) && ", replace: "!/^[-\\/~$]/.test(a) && ", test: RO_BLOCK, row: "git diff -- ../other/file" },
   { what: "a path may be absolute", find: "!/^[-\\/~$]/.test(a)", replace: "!/^[-~$]/.test(a)", test: RO_BLOCK, row: "git diff /etc/passwd" },
+  { what: "a path may start with ~", find: "!/^[-\\/~$]/.test(a)", replace: "!/^[-\\/$]/.test(a)", test: RO_BLOCK, row: "cat ~/.ssh/id_rsa" },
   { what: "a path may end in ..", find: "const DOTDOT = /(^|\\/)\\.\\.(\\/|$)/;", replace: "const DOTDOT = /(^|\\/)\\.\\.\\//;", test: RO_BLOCK, row: "ls .." },
   { what: "a path is not anchored at its end", find: "/^[\\w.\\/@:^,=+*?{}\\[\\]~!%-]+$/.test(a)", replace: "/^[\\w.\\/@:^,=+*?{}\\[\\]~!%-]+/.test(a)", test: RO_BLOCK, row: "cat .$IFS/etc/passwd" }, // bash splits the word on $IFS; zsh does not, by default
   { what: "a gate script is looked up through the prototype", find: "if (gate && Object.hasOwn(GATE_SHAPES, gate[1]))", replace: "if (gate && gate[1] in GATE_SHAPES)", test: RO_BLOCK, row: "scripts/toString" },
@@ -92,9 +100,16 @@ const MUTANTS = [
   { what: "cat reads standard input", find: "if (cmd === \"cat\" && first && r.positional.length === 0) return", replace: "if (false) return", test: RO_BLOCK, row: "cat" },
   // ---- the verification config
   { what: "config: cd may be a verification command", find: "new Set([\"cd\", \"git\", \"sudo\"])", replace: "new Set([\"git\", \"sudo\"])", test: CONFIG, row: { verify: [{ argv: ["cd", "x"] }] } },
+  { what: "config: git may be a verification command", find: "new Set([\"cd\", \"git\", \"sudo\"])", replace: "new Set([\"cd\", \"sudo\"])", test: CONFIG, row: { verify: [{ argv: ["git", "status"] }] } },
+  { what: "config: sudo may be a verification command", find: "new Set([\"cd\", \"git\", \"sudo\"])", replace: "new Set([\"cd\", \"git\"])", test: CONFIG, row: { verify: [{ argv: ["sudo", "make"] }] } },
+  { what: "config: the command may start with -", find: "if (/^[-\\/~]/.test(argv[0])", replace: "if (/^[\\/~]/.test(argv[0])", test: CONFIG, row: { verify: [{ argv: ["-x"] }] } },
+  { what: "config: the command may be an absolute path", find: "if (/^[-\\/~]/.test(argv[0])", replace: "if (/^[-~]/.test(argv[0])", test: CONFIG, row: { verify: [{ argv: ["/usr/bin/make"] }] } },
+  { what: "config: the command may be an assignment", find: " || argv[0].includes(\"=\")", replace: "", test: CONFIG, row: { verify: [{ argv: ["FOO=bar", "make"] }] } },
+  { what: "config: the command may climb out with ..", find: " || DOTDOT.test(argv[0])", replace: "", test: CONFIG, row: { verify: [{ argv: ["../x"] }] } },
   { what: "config: an argument may climb out with ..", find: "if (argv.slice(1).some((a) => DOTDOT.test(a) || ", replace: "if (argv.slice(1).some((a) => ", test: CONFIG, row: { verify: [{ argv: ["make", "../x"] }] } },
   { what: "config: an argument may be absolute", find: "DOTDOT.test(a) || /(^|=)[\\/~]/.test(a)", replace: "DOTDOT.test(a) || /(^|=)~/.test(a)", test: CONFIG, row: { verify: [{ argv: ["make", "/etc/x"] }] } },
   { what: "config: a token may hold a ;", find: "const TOKEN_OK = /^[A-Za-z0-9", replace: "const TOKEN_OK = /^[;A-Za-z0-9", test: CONFIG, row: { verify: [{ argv: ["npm", "test;rm"] }] } },
+  { what: "config: the cwd may climb out with ..", find: " || DOTDOT.test(cwd)", replace: "", test: CONFIG, row: { verify: [{ argv: ["make"], cwd: "../x" }] } },
   { what: "config: the cwd may be .", find: " || cwd === \".\")", replace: ")", test: CONFIG, row: { verify: [{ argv: ["make"], cwd: "." }] } },
   { what: "config: the cwd may hold a space", find: "const DIR_OK = /^[A-Za-z0-9._-]+", replace: "const DIR_OK = /^[A-Za-z0-9._ -]+", test: CONFIG, row: { verify: [{ argv: ["make"], cwd: "a b" }] } },
 ];
