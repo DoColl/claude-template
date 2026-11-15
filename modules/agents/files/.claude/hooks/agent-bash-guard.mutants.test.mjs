@@ -88,6 +88,7 @@ const MUTANTS = [
   { what: "a path may climb out with ..", find: "!/^[-\\/~$]/.test(a) && !DOTDOT.test(a) && ", replace: "!/^[-\\/~$]/.test(a) && ", test: RO_BLOCK, row: "git diff -- ../other/file" },
   { what: "a path may be absolute", find: "!/^[-\\/~$]/.test(a)", replace: "!/^[-~$]/.test(a)", test: RO_BLOCK, row: "git diff /etc/passwd" },
   { what: "a path may start with ~", find: "!/^[-\\/~$]/.test(a)", replace: "!/^[-\\/$]/.test(a)", test: RO_BLOCK, row: "cat ~/.ssh/id_rsa" },
+  { what: "a path may start with ..", find: "const DOTDOT = /(^|\\/)\\.\\.(\\/|$)/;", replace: "const DOTDOT = /\\/\\.\\.(\\/|$)/;", test: RO_BLOCK, row: "git diff -- ../other/file" },
   { what: "a path may end in ..", find: "const DOTDOT = /(^|\\/)\\.\\.(\\/|$)/;", replace: "const DOTDOT = /(^|\\/)\\.\\.\\//;", test: RO_BLOCK, row: "ls .." },
   { what: "a path is not anchored at its end", find: "/^[\\w.\\/@:^,=+*?{}\\[\\]~!%-]+$/.test(a)", replace: "/^[\\w.\\/@:^,=+*?{}\\[\\]~!%-]+/.test(a)", test: RO_BLOCK, row: "cat .$IFS/etc/passwd" }, // bash splits the word on $IFS; zsh does not, by default
   { what: "a gate script is looked up through the prototype", find: "if (gate && Object.hasOwn(GATE_SHAPES, gate[1]))", replace: "if (gate && gate[1] in GATE_SHAPES)", test: RO_BLOCK, row: "scripts/toString" },
@@ -108,6 +109,7 @@ const MUTANTS = [
   { what: "config: the command may climb out with ..", find: " || DOTDOT.test(argv[0])", replace: "", test: CONFIG, row: { verify: [{ argv: ["../x"] }] } },
   { what: "config: an argument may climb out with ..", find: "if (argv.slice(1).some((a) => DOTDOT.test(a) || ", replace: "if (argv.slice(1).some((a) => ", test: CONFIG, row: { verify: [{ argv: ["make", "../x"] }] } },
   { what: "config: an argument may be absolute", find: "DOTDOT.test(a) || /(^|=)[\\/~]/.test(a)", replace: "DOTDOT.test(a) || /(^|=)~/.test(a)", test: CONFIG, row: { verify: [{ argv: ["make", "/etc/x"] }] } },
+  { what: "config: an option's value may be absolute", find: "/(^|=)[\\/~]/.test(a)", replace: "/^[\\/~]/.test(a)", test: CONFIG, row: { verify: [{ argv: ["make", "--file=/etc/x"] }] } },
   { what: "config: a token may hold a ;", find: "const TOKEN_OK = /^[A-Za-z0-9", replace: "const TOKEN_OK = /^[;A-Za-z0-9", test: CONFIG, row: { verify: [{ argv: ["npm", "test;rm"] }] } },
   { what: "config: the cwd may climb out with ..", find: " || DOTDOT.test(cwd)", replace: "", test: CONFIG, row: { verify: [{ argv: ["make"], cwd: "../x" }] } },
   { what: "config: the cwd may be .", find: " || cwd === \".\")", replace: ")", test: CONFIG, row: { verify: [{ argv: ["make"], cwd: "." }] } },
