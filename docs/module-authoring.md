@@ -142,3 +142,5 @@ node --test test/*.test.mjs                                   # manifests, place
 node bin/harness.mjs init /tmp/try --modules <id>   # then, in /tmp/try:
 git init -q && git add -A && ./scripts/security-checks.sh --offline
 ```
+
+`test/factory.test.mjs` also updates `DoColl/factory-test`, a real project installed with an earlier release, and adds modules to it (`README.md` § Working on the kit). What only shows on such a project — a new guard its existing files fail, a seed `update` must keep — is caught there, not by the scratch installs; it also needs its step in the "By hand" part of the changelog fragment.

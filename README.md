@@ -220,11 +220,13 @@ Not done on purpose: `cancel-in-progress` on the CI workflow where `auto-merge` 
 ## Working on the kit
 
 ```bash
-node --test test/*.test.mjs     # unit tests, static rules on every module, end-to-end installs
+node --test test/*.test.mjs     # unit tests, static rules on every module, end-to-end installs, the test project
 node bin/release.mjs --dry-run  # the next release, from the changelog fragments in changes/
 ```
 
 `CLAUDE.md` at the root of this repository holds the rules for changing the kit; `docs/module-authoring.md` the contract for modules.
+
+**A real project, besides scratch ones.** `test/install.test.mjs` installs into empty folders; `test/factory.test.mjs` takes `DoColl/factory-test`, a small project that already runs the kit, at the commit `test/factory-test.json` pins. It updates a copy of it to the kit under test, then adds modules to it, and runs the project's gate and its own tests each time. The clone is read from `FACTORY_TEST_DIR`, else `../factory-test` next to the kit — from a git worktree, set the variable — and copied with `git archive`, never touched. Locally, a missing clone or commit skips the two tests with the reason; in CI (`CI` or `FACTORY_TEST_REQUIRED` set) it fails them, and CI checks the project out with a read-only token, `FACTORY_TEST_TOKEN`. When the test project moves to a new release of the kit, its merge commit becomes the new pin, in a pull request of the kit.
 
 **A pull request leaves the version alone.** It adds a changelog fragment, `changes/<slug>.md` — its level, the lines of its entry and its "By hand" part, in the format given at the top of `CHANGELOG.md` — and touches neither `kit.json`, `package.json`, the version in `.claude/harness.json` nor `CHANGELOG.md`. Pull requests written in parallel then never edit the same lines for their entries, and none has to be renumbered when another one merges first. The tests check every fragment, and CI fails a pull request that changes `modules/`, `lib/` or `bin/` without adding one.
 
