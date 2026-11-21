@@ -693,6 +693,81 @@ test("nothing is written through a symlink that leaves the project", () => {
   assert.ok(fs.existsSync(path.join(real, "documentation/conventions/README.md")), "a link that stays inside the project is followed");
 });
 
+// OS-1 on a CI runner: without the CLI the guard installs the version its lockfile pins, outside the project, and a
+// runner that cannot install it is red, never skipped. npm and the CLI are stand-ins here: the suite needs no network.
+test("openspec: on a runner OS-1 installs the pinned CLI, and fails where a laptop skips", () => {
+  if (!kit.modules.has("openspec")) return;
+  const dir = tmp(), bin = path.join(tmp(), "bin"), log = path.join(tmp(), "log");
+  install(dir, ["openspec"]);
+  const pin = "scripts/guards.d/46-openspec";
+  const lock = JSON.parse(read(dir, `${pin}/package-lock.json`)), manifest = JSON.parse(read(dir, `${pin}/package.json`));
+  const version = manifest.dependencies["@fission-ai/openspec"];
+  assert.match(version, /^\d+\.\d+\.\d+$/, "the CLI is pinned to an exact version");
+  assert.equal(lock.packages["node_modules/@fission-ai/openspec"].version, version, "the lockfile is the one of that version");
+  const packages = Object.entries(lock.packages).filter(([name]) => name);
+  assert.ok(packages.length > 20, "the lockfile lists the CLI's dependencies");
+  for (const [name, p] of packages) {
+    assert.match(name, /^node_modules\//, `${name}: installed under node_modules`);
+    assert.match(p.integrity ?? "", /^sha512-/, `${name}: an integrity hash`);
+    assert.match(p.resolved ?? "", /^https:\/\/registry\.npmjs\.org\//, `${name}: from the npm registry`);
+    assert.ok(!p.hasInstallScript, `${name}: no install script`);
+  }
+
+  // The guard's PATH is a directory of links to the few commands it uses: neither openspec nor npm is there until a
+  // stand-in is written, wherever this machine keeps its own.
+  const env = (extra) => ({ ...ENV, PATH: bin, CI: "", HARNESS_OFFLINE: "", NODE_TEST_CONTEXT: "", LOG: log, ...extra });
+  const guard = (extra) => run(dir, "bash", ["scripts/guards.d/46-openspec.sh"], { env: env(extra) });
+  fs.mkdirSync(bin);
+  for (const tool of ["bash", "dirname", "find", "head", "tail", "mktemp", "cp", "rm", "mkdir", "chmod"]) {
+    const found = run(dir, "bash", ["-c", `command -v ${tool}`]).stdout.trim();
+    assert.ok(path.isAbsolute(found), `${tool} is on this machine`);
+    fs.symlinkSync(found, path.join(bin, tool));
+  }
+  assert.equal(guard().status, 77, "nothing to validate yet: skipped");
+  assert.equal(guard({ CI: "true" }).status, 77, "nothing to validate yet: skipped on a runner too");
+  write(dir, "openspec/changes/demo/proposal.md", "# Demo\n");
+
+  assert.equal(guard().status, 77, "a laptop without the CLI skips");
+  let r = guard({ CI: "true" });
+  assert.equal(r.status, 1, output(r)); assert.match(output(r), /OS-1: .*npm is not there.* mandatory on a CI runner/);
+
+  write(bin, "npm", '#!/usr/bin/env bash\nprintf \'%s\\n\' "$*" > "$LOG.npm"; pwd -P > "$LOG.cwd"; cp package.json package-lock.json "$LOG.d/" || exit 3\n[ -z "${NPM_FAILS:-}" ] || { echo "npm error EINTEGRITY" >&2; exit 1; }\n[ -z "${NPM_EMPTY:-}" ] || exit 0\nmkdir -p node_modules/.bin\nprintf \'%s\\n\' \'#!/usr/bin/env bash\' \'printf "%s\\n" "telemetry=$OPENSPEC_TELEMETRY" "$*" "$PWD" > "$LOG.openspec"\' \'[ -z "${INVALID:-}" ] || { echo "change demo: no deltas"; exit 1; }\' > node_modules/.bin/openspec\nchmod +x node_modules/.bin/openspec\n', 0o755);
+  fs.mkdirSync(`${log}.d`);
+  r = guard({ CI: "true" });
+  assert.equal(r.status, 0, output(r)); assert.match(r.stdout, /OS-1: openspec validate passes/);
+  assert.equal(read(`${log}.npm`, "").trim(), "ci --ignore-scripts --no-audit --no-fund", "the lockfile is installed as it is, and no package script runs");
+  const where = read(`${log}.cwd`, "").trim();
+  assert.ok(!where.startsWith(fs.realpathSync(dir)), "the CLI is installed outside the project");
+  assert.ok(!fs.existsSync(where), "and its directory is removed afterwards");
+  for (const f of ["package.json", "package-lock.json"]) assert.equal(read(`${log}.d`, f), read(dir, `${pin}/${f}`), `${f} is the module's`);
+  assert.deepEqual(read(`${log}.openspec`, "").trim().split("\n"), ["telemetry=0", "validate --all --strict --no-interactive", fs.realpathSync(dir)], "the pinned CLI validates the project, telemetry off");
+  assert.deepEqual(walk(dir).filter((f) => f.includes("node_modules")), [], "nothing is installed in the project");
+
+  r = guard({ CI: "true", INVALID: "1" });
+  assert.equal(r.status, 1, output(r)); assert.match(output(r), /change demo: no deltas[\s\S]*OS-1: openspec validate --all --strict fails/);
+  r = guard({ CI: "true", NPM_FAILS: "1" });
+  assert.equal(r.status, 1, output(r)); assert.match(output(r), /EINTEGRITY[\s\S]*OS-1: npm ci could not install the pinned CLI.* mandatory on a CI runner/);
+  r = guard({ CI: "true", NPM_EMPTY: "1" });
+  assert.equal(r.status, 1, output(r)); assert.match(output(r), /OS-1: npm ci left no openspec command/);
+  // Offline — the push hook, on a runner too — nothing can be installed: skipped, and npm is not called.
+  fs.rmSync(`${log}.npm`);
+  r = guard({ CI: "true", HARNESS_OFFLINE: "true" });
+  assert.equal(r.status, 77, output(r)); assert.match(output(r), /OS-1: .*needs the network/);
+  assert.ok(!fs.existsSync(`${log}.npm`), "offline, npm is not called");
+  fs.writeFileSync(`${log}.npm`, "");
+  fs.renameSync(path.join(dir, pin, "package-lock.json"), path.join(dir, pin, "moved"));
+  r = guard({ CI: "true" });
+  assert.equal(r.status, 1, output(r)); assert.match(output(r), /OS-1: .*its pin .* is missing.* mandatory on a CI runner/);
+  fs.renameSync(path.join(dir, pin, "moved"), path.join(dir, pin, "package-lock.json"));
+
+  // A CLI on the PATH is the one used, on a runner as on a laptop: npm is not called.
+  fs.rmSync(`${log}.npm`);
+  write(bin, "openspec", '#!/usr/bin/env bash\nprintf \'%s\\n\' "path $*" > "$LOG.openspec"\n', 0o755);
+  for (const CI of ["", "true"]) { r = guard({ CI }); assert.equal(r.status, 0, output(r)); }
+  assert.equal(read(`${log}.openspec`, "").trim(), "path validate --all --strict --no-interactive");
+  assert.ok(!fs.existsSync(`${log}.npm`), "npm was not called");
+});
+
 test("the gate: a failing guard fails it, a skipped one does not, an empty one is an error", () => {
   const dir = tmp();
   install(dir, []);

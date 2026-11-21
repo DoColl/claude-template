@@ -1,0 +1,9 @@
+{
+  "name": "openspec-cli-pin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The OpenSpec CLI that OS-1 installs on a CI runner (docs/conventions/openspec-workflow.md). To change the version: edit it below, then run `npm install --package-lock-only --ignore-scripts` in this directory and commit both files.",
+  "dependencies": {
+    "@fission-ai/openspec": "1.10.0"
+  }
+}
