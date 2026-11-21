@@ -10,18 +10,34 @@
 #         pinned below. Triage decisions live in .github/zizmor.yml, each
 #         with its justification.
 #
-# zizmor is fetched from PyPI at an exact version (uvx, else pipx): each
-# release adds audits, so a floating install would turn the gate red with no
-# change in the repository. With `--offline` the gate stays off the network:
-# only a copy already in uv's cache is used (`uvx --offline`); pipx has no such
-# mode, so with pipx alone GA-2 is skipped offline. No tool, or nothing cached:
+# zizmor is the release archive of the pinned version for this platform,
+# checked against the sha256 recorded below before anything is unpacked
+# (scripts/fetch-pinned-release.sh): this binary decides what merges, here
+# and in CI. A pinned version because each release adds audits, and a
+# floating install would turn the gate red with no change in the repository.
+# The archive is kept in ${XDG_CACHE_HOME:-~/.cache}/harness/zizmor/<version>/
+# and checked again on every run. With `--offline` the gate stays off the
+# network and uses that cache only. A hash that does not match fails, always.
+# A platform with no pin, a download that fails, or nothing cached offline:
 # skipped on a contributor's machine, failed when $CI is set — a runner
 # without the tool must not turn the gate green. zizmor's own `--offline`
 # means "no GitHub API": the audits that need a token (impostor commits,
 # known-vulnerable actions) do not run.
 . "$(dirname "$0")/_lib.sh"
 
+# Bump: docs/conventions/security-workflow.md § Pinned scanners. Each sha256
+# is the archive's, read in the release's build provenance attestation
+# (`gh attestation verify --repo zizmorcore/zizmor`) and equal to the digest
+# GitHub shows for the asset.
 ZIZMOR_VERSION=1.31.1
+zizmor_pin() {
+  case "$1" in
+    Linux/x86_64)                 echo "x86_64-unknown-linux-gnu d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99" ;;
+    Linux/aarch64 | Linux/arm64)  echo "aarch64-unknown-linux-gnu 37eebbd5762a44f262d94875431b14a6d2402991e90a685113ea97b8b41be833" ;;
+    Darwin/arm64)                 echo "aarch64-apple-darwin ad5aa633cd56215b11e6c51d51f90c7e6b22904a75047d1215abbd422f61d698" ;;
+    Darwin/x86_64)                echo "x86_64-apple-darwin 72ae63bb85b67229c06242f04195cb43927e9fab5f43803c6434dc701a517d61" ;;
+  esac
+}
 
 # ─── GA-1 ───────────────────────────────────────────────────────────────
 if [ -d .github ]; then
@@ -71,31 +87,53 @@ if [ "$has_workflow" = false ]; then
   finish
 fi
 
-if command -v uvx >/dev/null 2>&1; then
-  if offline; then
-    set -- uvx --offline --from "zizmor==$ZIZMOR_VERSION" zizmor
-  else
-    set -- uvx --from "zizmor==$ZIZMOR_VERSION" zizmor
-  fi
-elif command -v pipx >/dev/null 2>&1; then
-  if offline; then
-    ga2_skip "pipx cannot be kept off the network (install uv, or run the gate without --offline)"
-  fi
-  set -- pipx run --spec "zizmor==$ZIZMOR_VERSION" zizmor
-else
-  ga2_skip "neither uvx nor pipx found, zizmor $ZIZMOR_VERSION cannot run"
+platform="$(uname -s)/$(uname -m)"
+pin=$(zizmor_pin "$platform")
+if [ -z "$pin" ]; then
+  ga2_skip "no zizmor $ZIZMOR_VERSION archive is pinned for $platform (docs/conventions/security-workflow.md § Pinned scanners)"
 fi
+target=${pin%% *} sha256=${pin#* }
 
-if ! "$@" --version >/dev/null 2>&1; then
-  if offline; then
-    ga2_skip "zizmor $ZIZMOR_VERSION is not in the local cache (run the gate once without --offline)"
-  else
-    ga2_skip "zizmor $ZIZMOR_VERSION could not be fetched from PyPI"
-  fi
+if [ -n "${XDG_CACHE_HOME:-}" ]; then
+  cache=$XDG_CACHE_HOME/harness/zizmor/$ZIZMOR_VERSION
+elif [ -n "${HOME:-}" ]; then
+  cache=$HOME/.cache/harness/zizmor/$ZIZMOR_VERSION
+else
+  cache=""
+fi
+fetch_offline=""
+offline && fetch_offline=1
+
+bin=$(mktemp -d)
+trap 'rm -rf "$bin"' EXIT
+rc=0
+FETCH_PINNED_CACHE=$cache FETCH_PINNED_OFFLINE=$fetch_offline \
+  bash "$(dirname "$0")/../fetch-pinned-release.sh" zizmorcore/zizmor "v$ZIZMOR_VERSION" \
+  "zizmor-$target.tar.gz" "$sha256" zizmor "$bin" || rc=$?
+case "$rc" in
+  0) ;;
+  3)
+    fail "GA-2: the zizmor $ZIZMOR_VERSION archive for $target does not match its pinned sha256 (above) — a substituted or damaged archive, or a wrong pin; nothing was run"
+    finish
+    ;;
+  4)
+    if offline; then
+      ga2_skip "zizmor $ZIZMOR_VERSION is not in the local cache (run the gate once without --offline)"
+    fi
+    ga2_skip "zizmor $ZIZMOR_VERSION could not be downloaded from its GitHub release"
+    ;;
+  *)
+    fail "GA-2: zizmor $ZIZMOR_VERSION could not be installed (fetch-pinned-release.sh exit $rc, see above)"
+    finish
+    ;;
+esac
+
+if ! "$bin/zizmor" --version >/dev/null 2>&1; then
+  ga2_skip "the pinned zizmor $ZIZMOR_VERSION ($target) does not run on this machine"
 fi
 
 rc=0
-"$@" --offline .github/workflows/ || rc=$?
+"$bin/zizmor" --offline .github/workflows/ || rc=$?
 case "$rc" in
   0) ok "GA-2: zizmor $ZIZMOR_VERSION reports nothing" ;;
   10|11|12|13|14) fail "GA-2: zizmor $ZIZMOR_VERSION reports findings (above) — fix them, or record the triage in .github/zizmor.yml with its justification" ;;

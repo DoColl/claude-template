@@ -1,6 +1,6 @@
 # The security workflow: two tiers, pinned scanners
 
-**Rule (CLAUDE.md § Security workflow):** `.github/workflows/security.yml` has an enforcing tier that blocks merges (gitleaks over the full history, then `./scripts/security-checks.sh`) and an advisory tier that only logs (Semgrep, Trivy, a Syft SBOM) and runs on standalone triggers. Every scanner binary the workflow downloads is a pinned release verified by sha256; zizmor, which the gate runs, is pinned to an exact version on PyPI, without a hash. All are bumped by hand with the procedure below.
+**Rule (CLAUDE.md § Security workflow):** `.github/workflows/security.yml` has an enforcing tier that blocks merges (gitleaks over the full history, then `./scripts/security-checks.sh`) and an advisory tier that only logs (Semgrep, Trivy, a Syft SBOM) and runs on standalone triggers. Every scanner binary the workflow and the gate download is a pinned release verified by sha256, zizmor included. All are bumped by hand with the procedure below.
 
 ## Status
 
@@ -72,12 +72,12 @@ The concurrency group carries `github.workflow`, so a standalone run and the one
 | Tool | Where the pin lives | Verified at pinning time by |
 |---|---|---|
 | gitleaks | `security.yml`, job `enforcing`, step `env:` (version + sha256) | no signature published: the hash is cross-checked between the release's checksums file and the digest GitHub computes for the asset |
-| zizmor | `ZIZMOR_VERSION` in `scripts/guards.d/30-github-actions.sh` | PyPI, exact `==` version |
+| zizmor | `scripts/guards.d/30-github-actions.sh`: `ZIZMOR_VERSION`, and one sha256 per platform in `zizmor_pin` (Linux x64 and arm64, macOS arm64 and x64) | the release's build provenance attestation (`gh attestation verify`, signer: the project's release workflow at the tag), cross-checked with the digest GitHub computes for each asset |
 | Trivy | `security.yml`, job `trivy`, step `env:` | `cosign verify-blob` on the checksums file |
 | Syft | `security.yml`, job `sbom`, step `env:` | `cosign verify-blob` on the checksums file, plus the source commit |
 | Semgrep | `security.yml`, job `semgrep`, container image digest | the digest itself |
 
-`scripts/fetch-pinned-release.sh` downloads a release archive, refuses to unpack it unless the sha256 matches, and extracts the one binary. Dependabot follows none of these pins: bump them by hand, during the periodic audit or when a release fixes something that concerns you.
+`scripts/fetch-pinned-release.sh` downloads a release archive, refuses to unpack it unless the sha256 matches, and extracts the one binary. GA-2 also keeps the archive in `${XDG_CACHE_HOME:-~/.cache}/harness/zizmor/<version>/`, so that the gate can run `--offline`; the cached archive is checked against the pin on every run, like a download. A hash that does not match fails, on a laptop as on a runner; it is never a skip. Dependabot follows none of these pins: bump them by hand, during the periodic audit or when a release fixes something that concerns you.
 
 Rules for a bump:
 
@@ -125,7 +125,22 @@ gh api "repos/gitleaks/gitleaks/releases/tags/v$V" \
   --jq ".assets[] | select(.name==\"gitleaks_${V}_linux_x64.tar.gz\") | .digest"   # sha256:<the same hash>
 ```
 
-zizmor: change `ZIZMOR_VERSION` in the guard — the one place, read by the gate here and in CI.
+zizmor (the gate's own binary, one archive per platform; a signed build provenance attestation names every archive's sha256, and must match the digest GitHub shows):
+
+```bash
+V=1.31.1
+d=$(mktemp -d) && cd "$d"
+for t in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin; do
+  gh release download "v$V" -R zizmorcore/zizmor -p "zizmor-$t.tar.gz"
+  gh attestation verify "zizmor-$t.tar.gz" --repo zizmorcore/zizmor \
+    --signer-workflow zizmorcore/zizmor/.github/workflows/release-binaries.yml \
+    --source-ref "refs/tags/v$V" >/dev/null && echo "verified  $t"
+  shasum -a 256 "zizmor-$t.tar.gz"                                      # → the hash in zizmor_pin
+done
+gh api "repos/zizmorcore/zizmor/releases/tags/v$V" --jq '.assets[] | "\(.digest)  \(.name)"'   # the same hashes
+```
+
+Then change `ZIZMOR_VERSION` and the four lines of `zizmor_pin` in `scripts/guards.d/30-github-actions.sh`, in one commit — the one place, read by the gate here and in CI. A version changed without its hashes fails GA-2 everywhere: the archives of the new version do not match.
 
 Semgrep: resolve the tag you want to its digest and replace the `image:` line, keeping the tag and the date in the comment above it:
 

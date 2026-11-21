@@ -38,18 +38,18 @@ A finding is fixed. When it cannot be — the trigger is the design, the action 
 ### Running it
 
 ```bash
-./scripts/security-checks.sh --offline    # GA-1 always; GA-2 from uv's cache, without touching the network
-./scripts/security-checks.sh              # fetches the pinned zizmor on first use (uvx, else pipx)
+./scripts/security-checks.sh --offline    # GA-1 always; GA-2 from the cached archive, without touching the network
+./scripts/security-checks.sh              # downloads the pinned zizmor archive on first use, checks its sha256, caches it
 ```
 
-Offline, GA-2 runs only if `uvx` is installed and the pinned version is already in its cache; with `pipx` alone it is skipped, because pipx cannot be told to stay off the network.
+GA-2 takes the release archive of `ZIZMOR_VERSION` for the machine's platform (Linux x64 or arm64, macOS arm64 or x64), checks it against the sha256 pinned beside the version and only then unpacks the binary, into a temporary directory removed at the end of the run. The archive is kept in `${XDG_CACHE_HOME:-~/.cache}/harness/zizmor/<version>/` and checked again on every run: offline, GA-2 runs from there, and is skipped when nothing is cached. No Python tool is involved.
 
-zizmor runs with its own `--offline` flag in both places: no GitHub token, so the audits that query the API (impostor commits, known-vulnerable actions) do not run. The pinned version is `ZIZMOR_VERSION` in the guard; bumping it is a deliberate change followed by a triage of what the new version reports (`docs/conventions/security-workflow.md` § Pinned scanners).
+zizmor runs with its own `--offline` flag in both places: no GitHub token, so the audits that query the API (impostor commits, known-vulnerable actions) do not run. The pinned version is `ZIZMOR_VERSION` in the guard, with one sha256 per platform in `zizmor_pin`; bumping them is a deliberate change followed by a triage of what the new version reports (`docs/conventions/security-workflow.md` § Pinned scanners).
 
 ## Checks
 
 - **GA-1** — every non-local `uses:` under `.github/` names a 40-char SHA or a sha256 digest. Pure grep: it runs everywhere, with no tool.
-- **GA-2** — zizmor at the pinned version reports nothing on `.github/workflows/`. Skipped on a machine with neither `uvx` nor `pipx`, and offline without a cached copy; a failure on a CI runner, where it is mandatory.
+- **GA-2** — zizmor at the pinned version reports nothing on `.github/workflows/`. Fails when the archive does not match its pinned sha256, on any machine. Skipped on a platform with no pinned archive, when the download fails, and offline without a cached archive; a failure on a CI runner in each of those cases, since it is mandatory there.
 
 Both are in `scripts/guards.d/30-github-actions.sh`.
 

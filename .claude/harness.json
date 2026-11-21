@@ -134,7 +134,7 @@
     },
     ".github/workflows/security.yml": {
       "module": "ci-security",
-      "sha256": "a4e1977e5a4ca684d49bb9749862947988a8be72e3413b2fd1e09df1bc71c2c7"
+      "sha256": "c22d06cd4c2db42e0ddcc73176592aefb3631d520cbf7ae65342d376de0473b5"
     },
     ".github/zizmor.yml": {
       "module": "ci-security",
@@ -146,19 +146,19 @@
     },
     "docs/conventions/github-actions-rules.md": {
       "module": "ci-security",
-      "sha256": "8b1bed7627c618b5d84f0c35db49c14eccb4fec53004c05474b5422eff70d891"
+      "sha256": "fd986441d0cc6bc2c2cf9358672969af31eb180dbf45bfd3a4211b84bcf59c53"
     },
     "docs/conventions/security-workflow.md": {
       "module": "ci-security",
-      "sha256": "a220ae429dd9bac2bd96f561d2c65bb5fa0364ed02a58ee7f0cf0387520a03fe"
+      "sha256": "ca97e8549d3d3253ab95e844ef7a06d0901ea3f658a490266a70dca8a51b190b"
     },
     "scripts/fetch-pinned-release.sh": {
       "module": "ci-security",
-      "sha256": "f1a6eefd702bdf073ed51cd842eb0726acc1cea209d2d1e31b0f7c11b4d22c44"
+      "sha256": "728b5710ad42f6e406907a446ec40f369c380d5fa9bd30968edf39763310ba01"
     },
     "scripts/guards.d/30-github-actions.sh": {
       "module": "ci-security",
-      "sha256": "02082c990ef2e299bc2e0a9384da2bd17d51ca3c6a00c3e75e6482cc3a2148a4"
+      "sha256": "f25eb8d55d8c7447704330137fe32b27692d4ce715b52795ed92ac3d398a6804"
     },
     ".github/workflows/ready-on-green.yml": {
       "module": "ready-on-green",

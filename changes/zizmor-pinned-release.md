@@ -1,0 +1,7 @@
+bump: minor
+
+- `ci-security`: GA-2 no longer installs zizmor from PyPI by version alone. It downloads the release archive of the pinned version for the machine's platform (Linux x64 or arm64, macOS arm64 or x64), checks it against a sha256 pinned beside the version, and only then unpacks the binary. The four hashes were read in the release's signed build provenance (`gh attestation verify`) and match GitHub's asset digests; `docs/conventions/security-workflow.md` § Pinned scanners gives the procedure to bump them. uv and pipx are no longer needed.
+- `ci-security`: a hash that does not match fails GA-2 on every machine; it is never a skip. A platform with no pinned archive, a failed download or `--offline` with nothing cached is still skipped on a laptop and fails when `$CI` is set.
+- `ci-security`: the archive is kept in `${XDG_CACHE_HOME:-~/.cache}/harness/zizmor/<version>/` and checked again on every run, so `--offline` runs GA-2 from there. `scripts/fetch-pinned-release.sh` gains that cache (`FETCH_PINNED_CACHE`, `FETCH_PINNED_OFFLINE`), distinct exit codes for a mismatch (3) and an unavailable archive (4), and falls back on `shasum -a 256` where `sha256sum` is absent.
+
+By hand: run `./scripts/security-checks.sh` once with the network, so that the next `--offline` run finds zizmor in the cache. A uv cache of zizmor from earlier runs is no longer used; delete it if you like (`uv cache clean zizmor`).

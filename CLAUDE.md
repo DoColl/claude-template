@@ -19,7 +19,7 @@ Guidance for Claude Code when working **on the kit itself**. (The `CLAUDE.md` a 
 node --test test/*.test.mjs                     # everything; needs git and bash, no network; factory.test.mjs reads FACTORY_TEST_DIR or ../factory-test, skipped when absent (required in CI)
 node bin/harness.mjs list             # the modules
 node bin/harness.mjs init /tmp/try --modules <id>   # then, in /tmp/try: git init -q && git add -A && ./scripts/security-checks.sh --offline
-uvx --from 'zizmor==1.31.1' zizmor --offline <rendered project>/.github/workflows/   # or: pipx run --spec 'zizmor==1.31.1' zizmor …
+./scripts/guards.d/30-github-actions.sh   # zizmor (GA-2): the archive pinned by sha256; at the root, and in a rendered project after git init -q && git add -A
 node bin/release.mjs --dry-run        # the next release, from changes/; without --dry-run it writes it
 ```
 
@@ -51,7 +51,7 @@ The kit installs part of itself at its root (`.claude/harness.json`): `core`, `c
 - **Eco-design**: `eco-design.yml` audits every pull request with green-claude at the commit pinned in `scripts/eco-design.config.json` (ED-1..3). A finding is a candidate: fix it, or record it in `.green-claude/decisions.md` with its reason, reviewed like a derogation. The rules never outrank this file, security or the request. → `docs/conventions/eco-design.md`
 <!-- harness:rows conventions -->
 
-`.github/workflows/security.yml` has two tiers. **Enforcing** (blocks merges; every run, including the one CI calls first): gitleaks over the full history, then `./scripts/security-checks.sh` — the same gate as on a laptop. **Advisory** (log-only; weekly cron and manual dispatch): Semgrep, Trivy, a Syft SBOM. Scanner binaries are pinned releases verified by sha256 (`scripts/fetch-pinned-release.sh`); zizmor is pinned to an exact PyPI version, without a hash. Never `curl … | sh`, never a bump without the procedure. → `docs/conventions/security-workflow.md`
+`.github/workflows/security.yml` has two tiers. **Enforcing** (blocks merges; every run, including the one CI calls first): gitleaks over the full history, then `./scripts/security-checks.sh` — the same gate as on a laptop. **Advisory** (log-only; weekly cron and manual dispatch): Semgrep, Trivy, a Syft SBOM. Scanner binaries, zizmor included, are pinned releases verified by sha256 (`scripts/fetch-pinned-release.sh`). Never `curl … | sh`, never a bump without the procedure. → `docs/conventions/security-workflow.md`
 
 <!-- harness:slot security-workflow -->
 ## Before pushing
