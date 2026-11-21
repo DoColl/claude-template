@@ -114,6 +114,24 @@ jobs:
           # step compares the merge commit with the base it was built on.
           fetch-depth: 2
 
+      # test/factory.test.mjs runs the kit on DoColl/factory-test, a private
+      # project that already has it, at the commit test/factory-test.json
+      # pins. Read with a fine-grained token limited to that repository,
+      # Contents read-only (FACTORY_TEST_TOKEN, an Actions and a Dependabot
+      # secret), never kept in the checkout. Without it the checkout fails:
+      # the test is required in CI, never skipped.
+      - name: The factory-test commit the tests pin
+        id: factory
+        run: echo "commit=$(node -p 'require("./test/factory-test.json").commit')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: DoColl/factory-test
+          ref: ${{ steps.factory.outputs.commit }}
+          token: ${{ secrets.FACTORY_TEST_TOKEN }}
+          path: factory-test
+          persist-credentials: false
+
       # The test files are named, never the directory: an older Node takes a
       # bare directory argument for a module to run and fails.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -122,6 +140,8 @@ jobs:
           package-manager-cache: false
 
       - name: Installer tests on the oldest supported Node (20)
+        env:
+          FACTORY_TEST_DIR: ${{ github.workspace }}/factory-test
         run: node --test test/*.test.mjs
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -130,6 +150,8 @@ jobs:
           package-manager-cache: false
 
       - name: Installer tests on a current Node (24)
+        env:
+          FACTORY_TEST_DIR: ${{ github.workspace }}/factory-test
         run: node --test test/*.test.mjs
 
       - name: Render every module into a scratch project
