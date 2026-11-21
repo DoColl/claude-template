@@ -292,6 +292,34 @@ test("ci-security: zizmor is pinned by sha256, one archive per platform, as its 
   }
 });
 
+// The guard is the one place zizmor is pinned: a second install (a package index, an action, an image) or a second
+// ZIZMOR_VERSION would not follow a bump of the guard and would run without a hash. Every tracked text file of the kit
+// is read, modules and the root copies alike; the changelog keeps its history, and the tests name the forms they forbid.
+test("ci-security: zizmor is installed and pinned nowhere but the GA-2 guard", () => {
+  const guards = new Set(["scripts/guards.d/30-github-actions.sh", "modules/ci-security/files/scripts/guards.d/30-github-actions.sh"]);
+  const elsewhere = [
+    [/zizmor(==|@)/, "a version pin on a package"],
+    [/\b(uvx|pipx|pip3? install|uv (tool|pip) install|cargo b?install|brew install|conda install)\b.*\bzizmor\b/, "an install from a package manager"],
+    [/zizmorcore\/zizmor-action|ghcr\.io\/zizmorcore\//, "the zizmor action or its image"],
+  ];
+  const ls = spawnSync("git", ["-C", KIT_ROOT, "ls-files", "-z"], { encoding: "utf8" });
+  assert.equal(ls.status, 0, `git ls-files: ${ls.stderr}`);
+  const files = ls.stdout.split("\0").filter((f) => f && f !== "CHANGELOG.md" && !/^(changes|test)\//.test(f));
+  assert.ok(files.includes("scripts/guards.d/30-github-actions.sh") && files.includes(".github/workflows/ci.yml"), "the scan reads the kit's tracked files");
+  const found = [];
+  for (const rel of files) {
+    const abs = path.join(KIT_ROOT, rel);
+    if (!fs.lstatSync(abs, { throwIfNoEntry: false })?.isFile()) continue;
+    const text = fs.readFileSync(abs, "utf8");
+    if (text.includes("\0")) continue;
+    text.split("\n").forEach((line, i) => {
+      for (const [re, what] of elsewhere) if (re.test(line)) found.push(`${rel}:${i + 1}: ${what}`);
+      if (/\bZIZMOR_VERSION=/.test(line) && !guards.has(rel)) found.push(`${rel}:${i + 1}: a second ZIZMOR_VERSION`);
+    });
+  }
+  assert.deepEqual(found, [], "zizmor comes from scripts/guards.d/30-github-actions.sh only (docs/conventions/security-workflow.md § Pinned scanners)");
+});
+
 // What the kit ships to be run or read — its scripts and what they read, hooks, instruction files, scanner configs —
 // decides what the gate, CI and every session do. A pull request that changes one is judged by a CI that runs or
 // reads the changed file, so the unattended merge holds it (CLAUDE_GATE_RE) and a rework never writes it
