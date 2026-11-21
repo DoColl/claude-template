@@ -2,6 +2,7 @@
 // Needs git and bash. The gate runs offline, and with CI unset so a guard whose tool is missing skips.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -2045,4 +2046,102 @@ test("auto-merge: the merge steps, replayed on git histories, hold or merge as t
   }
   // Every scenario that went wrong, not the first one only: a broken step shows which histories it lets through.
   assert.equal(wrong.length, 0, `${wrong.length} replay(s) went wrong:\n\n${wrong.join("\n\n")}`);
+});
+
+// GA-2 runs zizmor from its release archive, checked against a sha256 pinned per platform, kept in a cache for
+// --offline runs. No network here: a stand-in archive goes into the cache, and the pins are rewritten to its hash
+// where a row needs them to match. The path through the guard is the one the real archive takes.
+test("ci-security: GA-2 runs zizmor only from an archive that matches its pinned sha256", (t) => {
+  if (!kit.modules.has("ci-security")) return;
+  const GUARD = "scripts/guards.d/30-github-actions.sh";
+  const pristine = tmp();
+  install(pristine, ["ci-security"]);
+  const guard = read(pristine, GUARD);
+  const PIN = /(echo "[a-z0-9_-]+ )[0-9a-f]{64}"/g;
+  const targets = [...guard.matchAll(/echo "([a-z0-9_-]+) [0-9a-f]{64}"/g)].map((m) => m[1]).sort();
+  assert.deepEqual(targets, ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"], "one pin per platform the gate runs on");
+  const version = /^ZIZMOR_VERSION=(\S+)$/m.exec(guard)[1];
+
+  // The stand-in says it ran, and exits with ZIZMOR_STAND_IN_RC on an audit.
+  const stage = tmp();
+  write(stage, "zizmor", '#!/bin/sh\n[ "$1" = --version ] && exit 0\necho "stand-in zizmor ran: $*"\nexit "${ZIZMOR_STAND_IN_RC:-0}"\n', 0o755);
+  const archive = path.join(stage, "stand-in.tar.gz");
+  assert.equal(run(stage, "tar", ["-czf", archive, "zizmor"]).status, 0, "tar");
+  const hash = crypto.createHash("sha256").update(fs.readFileSync(archive)).digest("hex");
+  const cache = () => {
+    const root = tmp("harness-cache-");
+    const dir = path.join(root, "harness/zizmor", version);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const target of targets) fs.copyFileSync(archive, path.join(dir, `zizmor-${target}.tar.gz`));
+    return root;
+  };
+  const project = (pin) => {
+    const dir = tmp();
+    fs.cpSync(pristine, dir, { recursive: true });
+    if (pin) write(dir, GUARD, guard.replace(PIN, `$1${pin}"`));
+    assert.equal(run(dir, "git", ["init", "-q", "-b", "main"]).status, 0);
+    assert.equal(run(dir, "git", ["add", "-A"]).status, 0);
+    return dir;
+  };
+  const gateIn = (dir, xdg, env = {}) => run(dir, "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "", XDG_CACHE_HOME: xdg, ...env } });
+  const ran = /stand-in zizmor ran: --offline \.github\/workflows\//;
+
+  let r = gateIn(project(hash), cache());
+  assert.equal(r.status, 0, `pins equal to the cached archive: green\n${output(r)}`);
+  assert.match(r.stdout, /ok\s+GA-2: zizmor \S+ reports nothing/, output(r));
+  assert.match(r.stdout, ran, "the binary unpacked from the archive is the one that ran");
+
+  r = gateIn(project(hash), cache(), { ZIZMOR_STAND_IN_RC: "13" });
+  assert.equal(r.status, 1, `zizmor reports findings: red\n${output(r)}`);
+  assert.match(r.stderr, /FAIL\s+GA-2: zizmor \S+ reports findings/, output(r));
+
+  // One character changed in the pin, the pin of the kit against a substituted archive: red, never skipped, and
+  // nothing from the archive runs. Locally (CI unset), where a missing tool only skips.
+  const flipped = (hash[0] === "0" ? "1" : "0") + hash.slice(1);
+  for (const [label, pin] of [["one character of the pin changed", flipped], ["the kit's pins, a substituted archive in the cache", null]]) {
+    r = gateIn(project(pin), cache());
+    assert.equal(r.status, 1, `${label}: red\n${output(r)}`);
+    assert.match(r.stderr, /FAIL\s+GA-2: the zizmor \S+ archive for \S+ does not match its pinned sha256/, `${label}\n${output(r)}`);
+    assert.doesNotMatch(output(r), /skip\s+GA-2|skipped: 30-github-actions/, `${label}: a mismatch is never a skip`);
+    assert.doesNotMatch(r.stdout, ran, `${label}: nothing from the archive runs`);
+  }
+
+  // Offline with nothing cached, and a platform with no pin: skipped on a laptop, red on a runner.
+  const empty = tmp("harness-cache-");
+  const shim = tmp("harness-uname-");
+  write(shim, "uname", '#!/bin/sh\ncase "$1" in -s) echo Plan9 ;; -m) echo mips ;; *) PATH=/usr/bin:/bin exec uname "$@" ;; esac\n', 0o755);
+  const unpinned = { PATH: `${shim}${path.delimiter}${ENV.PATH}` };
+  for (const [label, xdg, env, reason] of [["offline, nothing cached", empty, {}, /not in the local cache/], ["a platform with no pinned archive", cache(), unpinned, /no zizmor \S+ archive is pinned for Plan9\/mips/]]) {
+    r = gateIn(project(hash), xdg, env);
+    assert.equal(r.status, 0, `${label}, CI unset: skipped\n${output(r)}`);
+    assert.match(r.stdout, /skip\s+GA-2: /, `${label}\n${output(r)}`);
+    assert.match(output(r), reason, label);
+    r = gateIn(project(hash), xdg, { ...env, CI: "true" });
+    assert.equal(r.status, 1, `${label}, CI set: red\n${output(r)}`);
+    assert.match(r.stderr, /FAIL\s+GA-2: .*mandatory on a CI runner/, `${label}\n${output(r)}`);
+  }
+  assert.deepEqual(fs.readdirSync(empty), [], "offline, nothing is written to the cache");
+
+  // fetch-pinned-release.sh on a machine without sha256sum (older macOS): shasum -a 256 checks the archive.
+  const which = (tool) => run(stage, "bash", ["-c", `command -v ${tool}`]).stdout.trim();
+  const shasum = which("shasum");
+  if (!shasum) { t.diagnostic("shasum is not installed: the fallback is not exercised"); return; }
+  const tools = tmp("harness-tools-");
+  for (const tool of ["cut", "grep", "mktemp", "rm", "cp", "mkdir", "tar", "gzip", "perl", "shasum"]) {
+    const where = which(tool);
+    if (where) fs.symlinkSync(where, path.join(tools, tool));
+  }
+  const bash = which("bash");
+  const fetch = (pin) => {
+    const dest = tmp();
+    const res = run(pristine, bash, ["scripts/fetch-pinned-release.sh", "zizmorcore/zizmor", `v${version}`, `zizmor-${targets[0]}.tar.gz`, pin, "zizmor", dest],
+      { env: { PATH: tools, FETCH_PINNED_CACHE: path.join(cache(), "harness/zizmor", version), FETCH_PINNED_OFFLINE: "1" } });
+    return { res, unpacked: fs.existsSync(path.join(dest, "zizmor")) };
+  };
+  let f = fetch(hash);
+  assert.equal(f.res.status, 0, `shasum fallback, matching pin\n${f.res.stderr}`);
+  assert.ok(f.unpacked, "the member is unpacked");
+  f = fetch(flipped);
+  assert.equal(f.res.status, 3, `shasum fallback, pin off by one character: exit 3\n${f.res.stderr}`);
+  assert.ok(!f.unpacked, "nothing is unpacked");
 });

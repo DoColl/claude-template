@@ -23,9 +23,9 @@ name: Security
 # (scripts/fetch-pinned-release.sh) — never an install
 # script or a binary fetched from a moving ref (`curl …/install.sh | sh`):
 # whoever controls that ref then decides what runs here. How to bump a pin:
-# docs/conventions/security-workflow.md § Pinned scanners. One exception:
-# zizmor, which the gate runs, is pinned to an exact version on PyPI, without
-# a hash (scripts/guards.d/30-github-actions.sh).
+# docs/conventions/security-workflow.md § Pinned scanners. zizmor, which the
+# gate runs, is installed the same way, with one sha256 per platform
+# (scripts/guards.d/30-github-actions.sh).
 #
 # Meant to be called from the project's CI workflow as its FIRST job on every
 # pull request and push to the default branch, documentation-only ones

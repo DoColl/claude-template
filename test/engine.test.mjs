@@ -272,6 +272,26 @@ test("CI runs on every pull request with no path filter, and every merge waits f
   assert.doesNotMatch(review, /\n  pull_request(_target)?:/, "claude-review.yml is never started by a pull request");
 });
 
+// zizmor decides what merges: GA-2 runs it from a release archive with a sha256 pinned per platform, never from a
+// package index by version alone. The bump procedure names the same version, and no text left says otherwise.
+test("ci-security: zizmor is pinned by sha256, one archive per platform, as its bump procedure says", () => {
+  const dir = kit.modules.get("ci-security").dir;
+  const guard = read(dir, "files/scripts/guards.d/30-github-actions.sh");
+  const version = /^ZIZMOR_VERSION=(\d+\.\d+\.\d+)$/m.exec(guard)?.[1];
+  assert.ok(version, "ZIZMOR_VERSION is an exact version");
+  const pins = new Map([...guard.matchAll(/^ +([A-Za-z]+\/[a-z0-9_]+(?: \| [A-Za-z]+\/[a-z0-9_]+)*)\) +echo "([a-z0-9_-]+) ([^"]*)" ;;$/gm)].map((m) => [m[2], { platforms: m[1], sha256: m[3] }]));
+  assert.deepEqual([...pins.keys()].sort(), ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"]);
+  for (const [target, { sha256 }] of pins) assert.match(sha256, /^[0-9a-f]{64}$/, `${target}: a sha256`);
+  assert.equal(new Set([...pins.values()].map((p) => p.sha256)).size, pins.size, "one archive, one hash");
+  assert.match(pins.get("x86_64-unknown-linux-gnu").platforms, /^Linux\/x86_64$/, "the CI runner");
+  assert.doesNotMatch(guard, /\b(uvx|pipx|pip install)\b|zizmor==/, "no install from PyPI left");
+  const page = read(dir, "files/docs/conventions/security-workflow.md");
+  assert.match(page, new RegExp(`\\nV=${version.replaceAll(".", "\\.")}\\nd=\\$\\(mktemp -d\\)[^]*?gh attestation verify "zizmor-`), "the bump procedure verifies the attestation of the pinned version");
+  for (const [rel, text] of [["security.yml", read(dir, "files/.github/workflows/security.yml")], ["security-workflow.md", page], ["the CLAUDE.md fragment", read(dir, "fragments/CLAUDE.md/security-workflow.frag")]]) {
+    assert.doesNotMatch(text, /zizmor[^.]*(PyPI|without a hash)/i, `${rel}: zizmor is no longer described as a PyPI pin`);
+  }
+});
+
 // What the kit ships to be run or read — its scripts and what they read, hooks, instruction files, scanner configs —
 // decides what the gate, CI and every session do. A pull request that changes one is judged by a CI that runs or
 // reads the changed file, so the unattended merge holds it (CLAUDE_GATE_RE) and a rework never writes it

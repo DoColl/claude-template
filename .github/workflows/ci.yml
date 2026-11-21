@@ -157,12 +157,16 @@ jobs:
       - name: Render every module into a scratch project
         run: node bin/harness.mjs init "$RUNNER_TEMP/rendered" --all
 
-      # Pinned to an exact version: each zizmor release adds audits, so a
-      # floating one would turn this job red without any change here.
-      - name: zizmor — shipped workflows and this one, no finding at any severity
+      # The GA-2 guard of the rendered project: the zizmor release archive
+      # pinned by sha256 in modules/ci-security, the same binary as the gate's,
+      # mandatory here since CI is set. This repository's own workflows go
+      # through the same guard in security.yml.
+      - name: zizmor — shipped workflows, no finding at any severity
         run: |
-          pipx run --spec 'zizmor==1.31.1' zizmor --offline "$RUNNER_TEMP/rendered/.github/workflows/"
-          pipx run --spec 'zizmor==1.31.1' zizmor --offline .github/workflows/
+          cd "$RUNNER_TEMP/rendered"
+          git init -q
+          git add -A
+          bash scripts/guards.d/30-github-actions.sh
 
       # A pull request that changes what the kit ships or runs (modules/, lib/,
       # bin/) adds its changelog fragment, changes/<slug>.md, which
