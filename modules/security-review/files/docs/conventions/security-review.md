@@ -17,6 +17,17 @@
 - **The chain** — by tier (`docs/conventions/review-tiers.md`). Tier 1, documentation and the wording of instructions: no pass. Tier 2, harness code that runs or a change to what a session may do: `security-reviewer` → `/security-review`. Tier 3, application code in a sensitive area: `security-reviewer` → `/project-security-review` → `/security-review` → `/code-review` → `/simplify` when the fixes added code. The gate runs in every tier. The agent's findings feed the passes after it; they never replace them. Each pass runs once, on the complete diff.
 - **The findings policy** — CLAUDE.md § Findings policy. Every finding is fixed before merge or carries a derogation written in the Derogations table of `SECURITY_REVIEW.md`.
 
+## Running `/security-review` in a fresh container
+
+The built-in `/security-review` reads the diff of the branch against `origin/HEAD`. A fresh clone in an ephemeral container (a cloud session, a CI-like sandbox) often has no `origin/HEAD`, and the diff command then fails with a usage error; the diff must also be committed, since a working tree alone gives it nothing to compare. Before running it:
+
+- Set the remote's default branch: `git remote set-head origin <default-branch>` (after a `git fetch origin <default-branch>`), or `git remote set-head origin --auto` where the remote answers. Check with `git symbolic-ref refs/remotes/origin/HEAD`.
+- Commit the change first. The pass reads commits; the commit is local, so this does not push anything.
+
+When the pass cannot run, say so in the pull request and do not stand another pass in for it silently: the chain names each pass on purpose (§ The pieces), and the agent's reading never replaces the built-in one. The kit ships no hook that sets `origin/HEAD`; a project whose sessions start in fresh containers may add one to its own session-start hook.
+
+Seen once, reported from a project that installed the kit, and reproduced in a fresh container (`origin/HEAD` unset, `git diff origin/HEAD...` failing); the fix above has not been run through `/security-review` itself.
+
 ## Scope: what was already reviewed in the kit
 
 The harness files are privileged code, and their review belongs where they are written: in the kit, whose README says what that review covered and what it did not. Reading them again in every project that installs them costs the most and finds the least: an installation is dozens of files, nearly all of them byte-for-byte what the kit shipped.
