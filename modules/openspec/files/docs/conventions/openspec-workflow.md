@@ -14,7 +14,11 @@ Checked since, with the same version, in a scratch project rendered from the kit
 - OS-1 itself on a change with no delta: red while the change only says so in its proposal, green once its `.openspec.yaml` has `skip_specs: true`; the change then archives without `--skip-specs`, and the CLI refuses that line on a change that has delta specs.
 - A hand edit of a generated command survives a plain `openspec update` and is undone by `openspec update --force`.
 
-Not exercised: OS-1 on a CI runner (the kit installs no CLI there, so the guard skips), and any later version of the CLI — the generated commands change with it.
+Checked since, in a scratch project rendered from the kit, on a laptop with `CI` set and no CLI on the `PATH`:
+
+- OS-1 installs the pinned CLI from the npm registry with `npm ci --ignore-scripts`, validates with it — green on a spec alone, red on a change that was only scaffolded — and leaves nothing in the project (Node 26, npm 11). The same project without `CI` skips.
+
+Not exercised: OS-1 on a hosted CI runner (the kit's tests run that path with stand-ins for npm and the CLI, without the network), and any later version of the CLI — the generated commands change with it.
 
 ## Why
 
@@ -32,11 +36,11 @@ OpenSpec separates two things that plans mix. The **specs** describe what the sy
 - **Generated files**: `.claude/commands/opsx/**` and `.claude/skills/openspec-*/**` come from `openspec init` and `openspec update`. They are committed so that a clone has the commands; they are never edited by hand: `openspec update` rewrites them once they come from another CLI version or the profile changed, `openspec update --force` at any time, and either silently undoes the edit.
 - **With the agents module**: a task group in `tasks.md` is the unit handed to `implementer`. `verifier` validates the OpenSpec files by running the gate (`scripts/security-checks.sh --offline`), where OS-1 runs `openspec validate` with telemetry off. Do not add the bare command to the Bash guard's verification config: that config lists nothing that reaches the network, the bare command does (§ The CLI and the network), and the guard's environment prefixes include neither switch; the gate already runs it the safe way.
 - **Behavioural conventions** in `docs/conventions/` are the natural source for the first capability specs. When a spec absorbs one, the convention file can go — after everything that names it has been repointed: its `CLAUDE.md` bullet (CM-2 fails on a path that no longer exists), its row in `docs/conventions/README.md`, and any other list of the project that holds the path (a table of files merged by hand, a guard, a review skill). Where the page is referenced from places you would rather not touch, keep it as a short page that states the rule in one line and points at the spec.
-- **Pin the CLI.** Install a fixed version, in CI as on laptops, and bump it deliberately: the generated commands change with it.
+- **Pin the CLI.** Install a fixed version, in CI as on laptops, and bump it deliberately: the generated commands change with it. The version a runner gets is the one `scripts/guards.d/46-openspec/` pins: a `package.json` naming the CLI at an exact version, and the `package-lock.json` npm wrote for it, with the integrity hash of every dependency. To change it, edit the version in that `package.json`, run `npm install --package-lock-only --ignore-scripts` in that directory, commit both files, install the same version on laptops and run `openspec update`. Never edit the lockfile by hand.
 
 ### The CLI and the network
 
-At 1.10.0 every command sends a usage event — the command's name, the CLI's version and a random identifier the CLI creates on its first run and keeps in its global configuration, so that a machine's events can be linked — to the tool's telemetry endpoint, unless `OPENSPEC_TELEMETRY=0` or `DO_NOT_TRACK=1` is set, `CI` holds a true value, or the CLI's global configuration says `telemetry.enabled false`. `openspec update` also asks the npm registry for a newer version, under the same switches (and `OPENSPEC_NO_UPDATE_CHECK`). OS-1 runs `openspec validate` with `OPENSPEC_TELEMETRY=0`. To keep a laptop quiet, set one of the variables in the shell's profile or the setting in the CLI's configuration: both live outside the repository, and the kit cannot check them.
+At 1.10.0 every command sends a usage event — the command's name, the CLI's version and a random identifier the CLI creates on its first run and keeps in its global configuration, so that a machine's events can be linked — to the tool's telemetry endpoint, unless `OPENSPEC_TELEMETRY=0` or `DO_NOT_TRACK=1` is set, `CI` holds a true value, or the CLI's global configuration says `telemetry.enabled false`. `openspec update` also asks the npm registry for a newer version, under the same switches (and `OPENSPEC_NO_UPDATE_CHECK`). OS-1 runs `openspec validate` with `OPENSPEC_TELEMETRY=0`. On a CI runner without the CLI, OS-1 also downloads the pinned packages from the npm registry (§ Checks). To keep a laptop quiet, set one of the variables in the shell's profile or the setting in the CLI's configuration: both live outside the repository, and the kit cannot check them.
 
 ### What the generated files pre-approve
 
@@ -53,7 +57,9 @@ Not observed in a session: what this section says of Claude Code comes from its 
 
 ## Checks
 
-- **OS-1** (`scripts/guards.d/46-openspec.sh`) — `openspec validate --all --strict --no-interactive` passes. Skipped when the CLI is not installed or when there is no spec and no change yet.
+- **OS-1** (`scripts/guards.d/46-openspec.sh`) — `openspec validate --all --strict --no-interactive` passes. Skipped when there is no spec and no change yet. Without the CLI on the `PATH`, it is skipped on a laptop and mandatory on a CI runner (`CI` set): there the guard copies its pin (`scripts/guards.d/46-openspec/`) to a temporary directory outside the project, runs `npm ci --ignore-scripts` in it, validates with that binary and removes the directory. It fails, and does not skip, when the pin is missing, npm is not there or the install fails. With `--offline` — the push hook, on a runner too — it skips: the run CI enforces is the one without it. A CLI already on the runner's `PATH` is used as it is: whoever installs one there keeps it at the pinned version.
+
+The runner needs npm, the npm registry, and a Node the pinned packages accept: the CLI asks for 20.19.0 or later, and at this pin the prompt library it depends on for 22.22.2 or later — on an older Node npm warns and installs, and that combination has not been run.
 
 Neither the sync nor the archive has a mechanical check. A change left open after its work merged shows up as a directory under `openspec/changes/` that nobody is working on; a change archived without its sync shows up nowhere, except as specs that no longer match the code.
 
@@ -67,3 +73,4 @@ Neither the sync nor the archive has a mechanical check. A change left open afte
 - Installed with the kit.
 - After the first installation in a project, with CLI 1.10.0: the page named four of the six generated commands, said that archiving merges the deltas (it can be done without) and that `openspec update` regenerates the generated files (only once they are out of date, or with `--force`), asked for an absorbed convention page to be deleted without a word on what else names it, and said the validation command had never been run on an empty project. All corrected from what was observed.
 - After a security review of an installed project: the next step that added `openspec validate` to the verifier's config would have put a call to the CLI's telemetry in that list; the verifier runs the gate instead. The pre-approval the generated files carry is stated. Both read in the CLI's package (§ Sources), not observed in a session.
+- After the same review: OS-1 skipped wherever the CLI was missing, and nothing installs one on a runner, so the check only ran on a laptop that happened to have it. The module now pins the CLI in a lockfile, and on a runner OS-1 installs it and fails when it cannot.

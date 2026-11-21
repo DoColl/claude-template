@@ -7,6 +7,7 @@
   "requires": ["core"],
   "postInstall": [
     "Install the OpenSpec CLI at a pinned version (the convention was written against @fission-ai/openspec 1.10.0) and run `openspec init --tools claude` in the project: the non-interactive form.",
+    "Keep that version equal to the one scripts/guards.d/46-openspec/package.json names: it is the CLI OS-1 installs on a CI runner that has none, with `npm ci`, and there OS-1 fails instead of skipping. The runner needs npm and the npm registry (docs/conventions/openspec-workflow.md § Checks).",
     "Read docs/conventions/openspec-workflow.md § What the generated files pre-approve before committing what it generates: each generated file lets a session run any `openspec` subcommand without a prompt, `feedback` (a public issue, through gh) and `config` included.",
     "Commit what it generates — six commands under .claude/commands/opsx/ (propose, explore, apply, update, sync, archive) and six skills under .claude/skills/openspec-* — and never hand-edit those files: `openspec update` rewrites them after a CLI upgrade, `openspec update --force` at any time.",
     "A change with no delta (tooling, documentation) declares `skip_specs: true` in its .openspec.yaml: without it, `openspec validate` and so OS-1 reject the change.",

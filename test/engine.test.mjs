@@ -227,6 +227,10 @@ test("guards follow the contract and scripts are executable", () => {
       assert.match(src, /^#!\/usr\/bin\/env bash\n/, `${id}: ${rel} starts with #!/usr/bin/env bash`);
       assert.match(src, /^\. "\$\(dirname "\$0"\)\/_lib\.sh"$/m, `${id}: ${rel} sources _lib.sh`);
       assert.match(src, /^finish$/m, `${id}: ${rel} ends with finish`);
+    } else if (/^scripts\/guards\.d\/[0-9][0-9]-[a-z0-9-]+\//.test(rel)) {
+      // What a guard pins or reads: a directory named after it. The gate runs NN-name.sh only, and the path is held with the guard's.
+      const guard = `${rel.split("/").slice(0, 3).join("/")}.sh`;
+      assert.ok(fs.existsSync(path.join(mod.dir, "files", guard)), `${id}: ${rel} — a directory under guards.d/ is named after a guard of the same module, and ${guard} is not one`);
     } else if (rel.startsWith("scripts/guards.d/") && rel !== "scripts/guards.d/_lib.sh") assert.fail(`${id}: ${rel} — guards are named NN-name.sh`);
     if (rel.startsWith(".githooks/") || /^scripts\/[^/]+\.sh$/.test(rel) || /^#!/.test(read(abs).slice(0, 2))) assert.ok(executable, `${id}: ${rel} must be executable`);
   }
