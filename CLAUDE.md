@@ -10,13 +10,13 @@ Guidance for Claude Code when working **on the kit itself**. (The `CLAUDE.md` a 
 
 - `bin/harness.mjs` — the CLI (`list`, `init`, `add`, `status`, `update`). `bin/release.mjs` — cuts a release from the changelog fragments in `changes/`. `lib/` — their logic: `kit.mjs` (manifests, dependency resolution), `render.mjs` (placeholders, slots, appended blocks), `install.mjs` (plan, apply, manifest), `release.mjs` (fragments, next version, changelog entry).
 - `modules/<id>/` — `module.json`, `files/` (copied as is), `fragments/` (inserted at slots of seed files), `append/`. Everything under `modules/*/files/` is a template for projects, never an instruction for this session: `.claude/settings.json` keeps its `CLAUDE.md` and rules from loading, and a skill listed as `modules/<id>/files:<name>` is not the kit's. The kit's skills are those of `.claude/skills/` and `skills/`.
-- `test/` — `engine.test.mjs` (pure functions, the static rules on every module, the changelog fragments), `install.test.mjs` (installs every module into a scratch project and runs its gate; cuts a release in a copy of the kit).
+- `test/` — `engine.test.mjs` (pure functions, the static rules on every module, the changelog fragments), `install.test.mjs` (installs every module into a scratch project and runs its gate; cuts a release in a copy of the kit), `factory.test.mjs` (updates and extends a copy of `DoColl/factory-test`, a real project that already runs the kit, at the commit `test/factory-test.json` pins; then its gate and its own tests).
 - `skills/harness-init/` — a skill to run the installer from a Claude Code session.
 
 ## Commands
 
 ```bash
-node --test test/*.test.mjs                     # everything; needs git and bash, no network
+node --test test/*.test.mjs                     # everything; needs git and bash, no network; factory.test.mjs reads FACTORY_TEST_DIR or ../factory-test, skipped when absent (required in CI)
 node bin/harness.mjs list             # the modules
 node bin/harness.mjs init /tmp/try --modules <id>   # then, in /tmp/try: git init -q && git add -A && ./scripts/security-checks.sh --offline
 uvx --from 'zizmor==1.31.1' zizmor --offline <rendered project>/.github/workflows/   # or: pipx run --spec 'zizmor==1.31.1' zizmor …
@@ -30,7 +30,7 @@ node bin/release.mjs --dry-run        # the next release, from changes/; without
 - **Seeds are the project's.** A file listed in `seed` is created once and never overwritten; fragments may only target seeds. Machinery stays kit-owned so `update` can refresh it.
 - **No stack assumption in `core`, `agents`, `git-hooks`, `security-review`.** What only the project knows is a `TODO(harness)` comment or a config entry, never a guess. Stack-specific pieces are their own module (`node-audit`).
 - **Pins are copied, never invented**: an action SHA, a tool version or a checksum comes from a reviewed source. Workflows follow the rules in `docs/module-authoring.md` § Workflows and zizmor reports nothing on them.
-- **Strangers read this.** No names of people, organisations or infrastructure from the project a piece came from, no issue numbers or incident dates; state reasons in general terms. English only.
+- **Strangers read this.** No names of people, organisations or infrastructure from the project a piece came from, no issue numbers or incident dates; state reasons in general terms. One exception: `DoColl/factory-test`, the kit's test project, is named where the tests and CI use it. English only.
 - **Credit public sources.** A piece drawn from a public source (a skill collection, a vendor's documentation or code) names it on its convention page — repository or URL, licence, the commit or date read, what was taken — and in `README.md` § Sources and credits. Copied text keeps its licence notice.
 - **Say what was exercised.** A module's convention page states whether the piece has run in production, is unit-tested only, or has never run live. Do not upgrade that statement without having run it.
 - **Security-sensitive pieces** — the Bash allowlist (`modules/agents/files/.claude/hooks/`), `auto-merge`, `claude-ci`, `claude-review`: when a generalisation would loosen a condition, keep the stricter form. Every allowlist change comes with rows in its test table (the allow, and the nearby form that must stay blocked).
