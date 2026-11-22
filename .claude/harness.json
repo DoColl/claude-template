@@ -178,7 +178,7 @@
     },
     "docs/conventions/weekly-digest.md": {
       "module": "weekly-digest",
-      "sha256": "523a4ca78551035c784be0e066d6622a9e95a67bc4acf7df53e5cf536eccdde0"
+      "sha256": "a55b93bce51d30d5bfceb174ad2fe46ad32813e2bf554f9261b0d1c3b1c20af7"
     },
     "scripts/guards.d/42-weekly-digest.sh": {
       "module": "weekly-digest",
@@ -190,7 +190,7 @@
     },
     "scripts/weekly-digest.mjs": {
       "module": "weekly-digest",
-      "sha256": "bd8ae8565004e0376be8e9318ee2811dcb56d63627ac76181441f882947a2f82"
+      "sha256": "b8db1fe7a698d29fd0e6450446db52e0dc2ceb1830e0336d1e9c229b90eeab55"
     },
     "scripts/weekly-digest.test.mjs": {
       "module": "weekly-digest",
