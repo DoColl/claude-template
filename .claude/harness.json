@@ -62,7 +62,7 @@
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",
-      "sha256": "f8b56f9338f63dfa424ec836b3eb0fbb095b7a21acb9010ab5390c2f8b8a0462"
+      "sha256": "cea09c1aa9a4025158970dcc3a0fbd4549235b7c6fb3d5e12c1ff9660df8d24e"
     },
     "docs/conventions/session-cost.md": {
       "module": "core",
@@ -82,7 +82,7 @@
     },
     "scripts/guards.d/12-review-record.sh": {
       "module": "core",
-      "sha256": "3e8592869648fd725cdd23601d5ae3f2391f5313c1a60b2227cd3474e6ae302c"
+      "sha256": "9d0b5482908f70a1525b08d600b7ff10c4db5f343d3497e636c7384f48a4498c"
     },
     "scripts/guards.d/50-project.sh": {
       "module": "core",

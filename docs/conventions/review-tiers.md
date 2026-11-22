@@ -32,6 +32,7 @@ Which tier a diff falls in is a judgement. What is mechanical is the gate, and i
   - **Inputs.** `PR_BODY_FILE` (a file holding the description) or `PR_BODY`, and `PR_HEAD_SHA`. With neither `PR_BODY_FILE` nor `PR_HEAD_SHA` set — a run on a laptop, a push, a schedule — the guard skips. Without `PR_HEAD_SHA` it compares with `git rev-parse HEAD`; on a pull request CI checks out a merge commit, so set it.
   - **The description is untrusted.** It reaches the guard through `env:` or a file, never inside a `run:` script, and the guard prints none of it.
   - **Wiring.** With `ci-security`, `security.yml` sets `PR_BODY` and `PR_HEAD_SHA` on its gate step from the pull request's event, and a CI workflow that listens to `edited` (the `ci-workflow` skeleton does) reruns it when the description changes. A re-run of an old run reads the description as it was then. A project with its own gate step does the same: two lines of `env:`.
+  - **Environment.** `PR_BODY` is inherited by every guard the gate runs: a guard must not print its environment or run under `set -x`, or the description would be printed with workflow commands live. The runner's limit on one environment string (128 KB) is also a limit on the description; a longer one fails the step, on that author's own pull request.
   - **Not checked.** That the passes ran, or that the tier is the right one. A record can also name the head and be false.
 
 ## History

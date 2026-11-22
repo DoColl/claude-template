@@ -43,10 +43,10 @@ case "$head" in *[!0-9a-f]* | "") fail "RR-1: PR_HEAD_SHA is not a commit hash";
 # carriage returns removed (a description edited on the web has CRLF). Fenced
 # code is not special-cased: a heading shown inside a fence ends the section.
 section=$(printf '%s\n' "$body" | tr -d '\r' | awk '
-  /^##[ \t]+[Rr]eview [Rr]ecord[ \t]*$/ { on = 1; next }
-  on && /^##?[ \t]/ { exit }
+  /^##[[:space:]]+[Rr]eview [Rr]ecord[[:space:]]*$/ { on = 1; next }
+  on && /^##?[[:space:]]/ { exit }
   on { print }')
-found=$(printf '%s\n' "$body" | tr -d '\r' | grep -c -E '^##[ \t]+[Rr]eview [Rr]ecord[ \t]*$' || true)
+found=$(printf '%s\n' "$body" | tr -d '\r' | grep -c -E '^##[[:space:]]+[Rr]eview [Rr]ecord[[:space:]]*$' || true)
 
 problem=""
 if [ "$found" -eq 0 ]; then
