@@ -139,17 +139,21 @@ jobs:
           node-version: 20
           package-manager-cache: false
 
-      - name: Installer tests on the oldest supported Node (20)
-        env:
-          FACTORY_TEST_DIR: ${{ github.workspace }}/factory-test
-        run: node --test test/*.test.mjs
+      # Node 20 runs the pure-Node tests and renders every module; the install
+      # tests, which spawn bash and git for minutes on two cores, run once, on
+      # Node 24 below. What they check is the guards' shell, not the Node version,
+      # and running the whole suite twice took half of every pull request's run.
+      - name: Engine tests and a full render on the oldest supported Node (20)
+        run: |
+          node --test test/engine.test.mjs
+          node bin/harness.mjs init "$RUNNER_TEMP/rendered-node20" --all
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           package-manager-cache: false
 
-      - name: Installer tests on a current Node (24)
+      - name: All tests on a current Node (24)
         env:
           FACTORY_TEST_DIR: ${{ github.workspace }}/factory-test
         run: node --test test/*.test.mjs
