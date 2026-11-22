@@ -112,8 +112,17 @@ jobs:
       # every contributor's machine: nothing to keep in sync between the two.
       # On a runner ($CI set) a guard whose tool is missing fails instead of
       # skipping.
+      #
+      # PR_BODY and PR_HEAD_SHA feed the review-record guard (RR-1): the
+      # description is untrusted text, so it goes through `env:` only and the
+      # guard never prints it. On a push or a schedule both are empty and the
+      # guard skips. The head is the pull request's, not the merge commit this
+      # job checked out.
       - name: Gate (scripts/security-checks.sh)
         if: ${{ !cancelled() }}
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: ./scripts/security-checks.sh
 
   # ─── Advisory (do not block merges) ────────────────────────────────────

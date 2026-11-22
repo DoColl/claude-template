@@ -58,11 +58,11 @@
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
-      "sha256": "b3dba09d6390842151050b5e9a9683cffef4852b7d47cd4443912fc4626e47b8"
+      "sha256": "2b2fce0a1f870aa664745d04b4beefad6f810c9ab0e41f3e8164f06fa20603fd"
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",
-      "sha256": "f8103b39ce122c263b8427b6364696508614bb7b37a37fbc1a51720eca3ee5cc"
+      "sha256": "f8b56f9338f63dfa424ec836b3eb0fbb095b7a21acb9010ab5390c2f8b8a0462"
     },
     "docs/conventions/session-cost.md": {
       "module": "core",
@@ -79,6 +79,10 @@
     "scripts/guards.d/10-conflict-markers.sh": {
       "module": "core",
       "sha256": "d68cca8dc66792f295d775464e53eb3c28f31dce5ff2ff7b2434ce9cf0f8e1d1"
+    },
+    "scripts/guards.d/12-review-record.sh": {
+      "module": "core",
+      "sha256": "3e8592869648fd725cdd23601d5ae3f2391f5313c1a60b2227cd3474e6ae302c"
     },
     "scripts/guards.d/50-project.sh": {
       "module": "core",
@@ -134,7 +138,7 @@
     },
     ".github/workflows/security.yml": {
       "module": "ci-security",
-      "sha256": "e6093eb2f607070e6a28e720b25432bf6a0661387b92da286a50f00d63693e30"
+      "sha256": "98a7d6583178b041f2931b44362bc351306f525f3dfa3208545e4329fbd48a8e"
     },
     ".github/zizmor.yml": {
       "module": "ci-security",
