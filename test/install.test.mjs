@@ -790,7 +790,7 @@ test("the gate: a failing guard fails it, a skipped one does not, an empty one i
   assert.ok(!fs.existsSync(path.join(dir, "PWNED")), "the depth is never evaluated");
   assert.equal(run(dir, "bash", ["scripts/security-checks.sh", "--offline"], { env: { ...ENV, CI: "", HARNESS_GATE_DEPTH: "3" } }).status, 1, "a fourth level is refused");
   write(dir, "scripts/guards.d/97-skipped.sh", "#!/usr/bin/env bash\nexit 77\n", 0o755);
-  let r = gate(dir); assert.equal(r.status, 0, output(r)); assert.match(r.stdout, /skipped: 97-skipped/);
+  let r = gate(dir); assert.equal(r.status, 0, output(r)); assert.match(r.stdout, /skipped: (12-review-record )?97-skipped/);
   write(dir, "scripts/guards.d/98-broken.sh", "#!/usr/bin/env bash\nexit 1\n", 0o755);
   r = gate(dir); assert.equal(r.status, 1); assert.match(r.stderr, /FAILED: 98-broken/);
   assert.equal(gate(dir, "--everything").status, 2, "an unknown flag is a usage error, not a pass");
@@ -2119,4 +2119,44 @@ test("ci-security: GA-2 runs zizmor only from an archive that matches its pinned
   f = fetch(flipped);
   assert.equal(f.res.status, 3, `shasum fallback, pin off by one character: exit 3\n${f.res.stderr}`);
   assert.ok(!f.unpacked, "nothing is unpacked");
+});
+
+// The review record of a pull request description (RR-1): advisory, skipped when no description is given, and
+// red only when REVIEW_RECORD=enforce is set. The description is read from a file or from PR_BODY, never printed.
+test("RR-1: a pull request description without a current review record is noted, and refused when enforced", () => {
+  const dir = tmp();
+  install(dir, []);
+  const head = "0123456789abcdef0123456789abcdef01234567";
+  const rr = (env) => run(dir, "bash", ["scripts/guards.d/12-review-record.sh"], { env: { ...ENV, PR_BODY_FILE: "", PR_BODY: "", PR_HEAD_SHA: "", REVIEW_RECORD: "", ...env } });
+  assert.equal(rr({}).status, 77, "no description given: skipped, so a laptop run stays green");
+  const good = `## Summary\n\nx\n\n## Review record\r\n\r\nTier 2. Security pass on ${head.slice(0, 9)}: no findings.\r\n\r\n## Notes\n`;
+  const cases = [
+    [good, "a record that names the head (CRLF included)"],
+  ];
+  const bad = [
+    ["Nothing here.\n", /no `## Review record` section/, "no section"],
+    [`## Review record\n\nTier 2, head fedcba987654.\n`, /does not name the current head/, "a stale head"],
+    [`## Review record\n\n## Notes\nhead ${head}\n`, /does not name the current head/, "a head named after the section ended"],
+    [`## Review record\n\nhead abc123\n`, /does not name the current head/, "a token under seven characters"],
+  ];
+  const file = path.join(dir, "pr-body.md");
+  for (const [body, why] of cases) {
+    fs.writeFileSync(file, body);
+    for (const env of [{ PR_BODY_FILE: file, PR_HEAD_SHA: head, REVIEW_RECORD: "enforce" }, { PR_BODY: body, PR_HEAD_SHA: head, REVIEW_RECORD: "enforce" }]) {
+      const r = rr(env); assert.equal(r.status, 0, `${why}: ${output(r)}`); assert.match(r.stdout, /RR-1: the review record names the head/);
+    }
+  }
+  for (const [body, re, why] of bad) {
+    fs.writeFileSync(file, body);
+    let r = rr({ PR_BODY_FILE: file, PR_HEAD_SHA: head });
+    assert.equal(r.status, 0, `${why}: advisory by default`); assert.match(r.stdout, re); assert.match(r.stdout, /advisory/);
+    r = rr({ PR_BODY_FILE: file, PR_HEAD_SHA: head, REVIEW_RECORD: "enforce" });
+    assert.equal(r.status, 1, `${why}: refused when enforced`); assert.match(r.stderr, re);
+    assert.doesNotMatch(output(r), /Tier 2|abc123/, "the description is never printed");
+    r = rr({ PR_BODY: body, PR_HEAD_SHA: head, REVIEW_RECORD: "enforce" });
+    assert.equal(r.status, 1, `${why}: the same from PR_BODY`);
+  }
+  assert.equal(rr({ PR_HEAD_SHA: head, REVIEW_RECORD: "enforce" }).status, 1, "a pull request with an empty description has no record");
+  assert.equal(rr({ PR_BODY_FILE: path.join(dir, "missing.md") }).status, 1, "a named file that does not exist is an error");
+  assert.equal(rr({ PR_HEAD_SHA: "zz", PR_BODY: good }).status, 1, "a head that is not a hash is an error");
 });

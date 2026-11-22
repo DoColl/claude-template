@@ -61,6 +61,7 @@ Status: written for the kit. Its closing form ran once, at the end of a session 
 The gate checks itself only in the obvious way: with no guard to run, it fails rather than report success.
 
 - **CF-1** — no tracked text file holds a line that starts with a git conflict marker (`scripts/guards.d/10-conflict-markers.sh`, § Conflict markers).
+- **RR-1** (advisory) — the pull request description has a `## Review record` section that names the head the pull request has now; skipped unless a description is given (`scripts/guards.d/12-review-record.sh`, `docs/conventions/review-tiers.md` § Checks).
 - **HD-1** (advisory) — the kit-owned files that differ from the hash recorded in `.claude/harness.json` (`scripts/guards.d/91-harness-drift.sh`).
 
 ## History
