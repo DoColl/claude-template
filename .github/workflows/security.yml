@@ -149,10 +149,19 @@ jobs:
       # The trailing `||` guarantees the check stays green (it is advisory).
       - name: Run Semgrep (results in log only)
         run: |
+          # The report quotes the repository's own lines: workflow commands
+          # are off while it prints, under a token the report cannot know.
+          token=$(cat /proc/sys/kernel/random/uuid)
+          echo "::stop-commands::${token}"
+          status=0
           semgrep scan \
             --config p/owasp-top-ten \
             --metrics=off \
-            || echo "::warning::Semgrep produced findings or errored — see step output above."
+            || status=$?
+          echo "::${token}::"
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::Semgrep produced findings or errored — see step output above."
+          fi
 
   # Trivy — single scanner covering three angles the enforcing tier misses:
   #   vuln     → dependency CVEs, read from the lockfiles it recognises
@@ -182,11 +191,20 @@ jobs:
             "trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" "$TRIVY_SHA256" trivy "$RUNNER_TEMP/bin"
       - name: Scan filesystem (results in log only)
         run: |
+          # The report quotes the repository's own lines: workflow commands
+          # are off while it prints, under a token the report cannot know.
+          token=$(cat /proc/sys/kernel/random/uuid)
+          echo "::stop-commands::${token}"
+          status=0
           "$RUNNER_TEMP/bin/trivy" fs \
             --scanners vuln,misconfig,secret \
             --severity HIGH,CRITICAL \
             --no-progress --exit-code 0 . \
-            || echo "::warning::Trivy scan errored — see step output above."
+            || status=$?
+          echo "::${token}::"
+          if [ "$status" -ne 0 ]; then
+            echo "::warning::Trivy scan errored — see step output above."
+          fi
 
   # Syft — CycloneDX SBOM of the whole repository, uploaded as a build artifact
   # so supply-chain provenance is auditable. Advisory: SBOM generation never

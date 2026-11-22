@@ -126,6 +126,7 @@ Tests a guard runs ship with the module, next to the code they test. Always name
 - `persist-credentials: false` on every checkout unless the job pushes.
 - No `${{ … }}` inside `run:` — pass values through `env:`.
 - A tool is installed from a pinned release verified by checksum, never `curl … | sh`.
+- A step that prints text it does not control (a scanner report, a remote host's output, a file's content, an issue or pull request title) turns workflow commands off around it: `::stop-commands::<token>` before, `::<token>::` after, with a random token per run and the resume on the failure path too, ahead of the step's own `::warning::`. Otherwise that text can forge or hide annotations. `eco-design`'s report is the model; `test/engine.test.mjs` names the steps that must do it.
 - zizmor reports nothing on the rendered workflow, at any severity; an unfixable finding is silenced in `.github/zizmor.yml` with its justification.
 
 ## Credits

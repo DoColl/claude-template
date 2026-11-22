@@ -56,7 +56,7 @@ git add -A && ./scripts/security-checks.sh --offline
 node <kit>/bin/harness.mjs status .
 ```
 
-The gate that runs is the project's if `scripts/security-checks.sh` was adopted, the kit's otherwise. A red guard after adoption usually means a kit guard reading a project file it does not understand: report it, do not edit the guard.
+The gate that runs is the project's if `scripts/security-checks.sh` was adopted, the kit's otherwise. A red guard after adoption usually means a kit guard reading a project file it does not understand: report it, do not edit the guard. One case to expect: an instruction file the project already had, adopted as `CLAUDE.md`, has no `harness:budget <bytes>` line, so CM-1 is red until the project adds one (a comment line is enough, `docs/conventions/claude-md.md`).
 
 ## 5. Hand over
 
