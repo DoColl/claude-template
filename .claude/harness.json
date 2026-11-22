@@ -22,7 +22,7 @@
   "files": {
     ".claude/skills/retro/SKILL.md": {
       "module": "core",
-      "sha256": "dc3209cd1eafe229666f91c76fbeaf747537c2c6479f9338568b580f567f3275"
+      "sha256": "051d764a3e01e29f4bfe91b0107a09a202ab781a63824327f5c10ddaddb8f81d"
     },
     ".gitleaks.toml": {
       "module": "core",
