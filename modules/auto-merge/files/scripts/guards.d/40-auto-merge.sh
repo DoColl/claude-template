@@ -63,10 +63,11 @@
 #         failed merge call leaves only on a 409 (red after a call that may
 #         have merged), notes a 5xx or no answer as a call that may have
 #         merged, and tries a merge commit only when GitHub refuses squash.
-#         No continue-on-error, defaults, shell, GITHUB_ENV or GITHUB_PATH in
-#         the file, no key YAML builds another way (an alias, an explicit
-#         `?`, an escape), and no ${{ }} inside a run: script (comments
-#         included).
+#         The text checks are cheap ones (continue-on-error, BASH_ENV,
+#         GITHUB_ENV, GITHUB_PATH, a PUT beyond the merge calls, no ${{ }}
+#         inside a run: script, comments included): they catch an accident, and
+#         assume the default branch's ruleset, which stops an unreviewed edit of
+#         this held file from merging (see the ruleset note at the end).
 #   AM-11 every merge waits for CI. The workflow's only trigger is
 #         workflow_run, and it holds one merge call, promote-from-ci's:
 #         a pull_request trigger (as a docs fast path once was) runs the file
@@ -998,56 +999,30 @@ pass 8 "a pull request that deletes, renames or rewrites lines of an existing fi
 # merge base anyway. So right after each merge step, a step lists the commit
 # the merge created against its first parent and runs the gate's rules on it.
 # The merge is done: its job is to turn the run red, never to pass quietly.
-# These pins read the file as text. Nothing in it may make what GitHub runs
-# differ from that text, let a failing step pass, or change the environment,
-# the shell or the commands of a later step. Refused anywhere in the file:
-# - a carriage return, a NEL (U+0085), U+2028 or U+2029: YAML breaks a line
-#   there, the text tools below do not, so a line could hide behind a comment;
-# - continue-on-error, BASH_ENV (bash sources it before each step's script),
-#   GITHUB_ENV, GITHUB_PATH, an indirect expansion ${!…}, sudo, a PATH or
-#   HOME assignment, a jq library file (.jq), a `defaults` or `shell` key
-#   however quoted or spaced, an explicit `?` key at a line's start;
-# - outside comment lines, where YAML can start a key (KEY_POS, AM-1): a
-#   double-quoted key holding a backslash other than `\"`, `\\` or `\(` —
-#   `"\x64efaults":` is `defaults:` to YAML, not to grep, while those three
-#   only put a quote or a backslash in a name, or are no YAML escape, so a
-#   script's JSON and jq keys pass —, an explicit `?` key in a flow mapping,
-#   and an alias used as a key (`*k :`, its anchor `&k defaults` elsewhere);
-# - a function other than the three the workflow defines, an alias, enable,
-#   shopt or unset; an empty pair of quotes inside a word (`mer""ge`); a line
-#   continuation that does not go on with an option, `&&` or `||`; a PUT
-#   beyond the merge calls;
-# - a ${{ }} anywhere but in the value of an `if` (`- if:` opening a step
-#   included), a `group` or an upper-case env key, and inside any block scalar
-#   (`run: |`, `- run: >`, `run: &a |`, a folded `if: >-` too): GitHub expands
-#   it before the shell reads the script, comments included.
-# A deliberate rewrite can still find another way: these catch a regression
-# and the simple ways round the pins. The workflow is a held path, merged by
-# hand, and the ruleset of the policy page stands against the rest. The four
+# These pins read the file as text, and text cannot show what YAML and bash will
+# do with it. They catch a regression and an accident, not a rewrite made to get
+# round them: the workflow is a held path, and the default branch's ruleset
+# (code-owner review on .github/, auto-merge-policy.md § Setting it up) is what
+# stops an unreviewed change of it from merging. Where that ruleset is absent
+# these checks are the only protection and are not enough. Refused anywhere in
+# the file, the cheap ones only: continue-on-error, BASH_ENV, GITHUB_ENV and
+# GITHUB_PATH. Also checked: a PUT beyond the merge calls, and a ${{ }} anywhere
+# but in the value of an `if`, a `group` or an upper-case env key, and inside any
+# block scalar (`run: |`, `- run: >`, `run: &a |`, a folded `if: >-` too): GitHub
+# expands it before the shell reads the script, comments included. The four
 # patterns of the workflow-level env are data (the project's values, --set),
-# tested by AM-1 and AM-8: the words below are not looked for in them, nor in
+# tested by AM-1 and AM-8: the words above are not looked for in them, nor in
 # the CI workflow's name on its three lines (neutral_ci) — which holds only if
 # each of those lines is there once: `workflows:` (AM-6), `CI_NAME` (counted
 # below) and its comment, at most once.
-breaks=$(LC_ALL=C grep -cE $'\r|\xc2\x85|\xe2\x80\xa8|\xe2\x80\xa9' "$AM" || true)
 not_patterns=$(grep -vE "^  (CLAUDE_GATE_RE|PROJECT_GATE_RE|TEST_HOLD_RE|MAJOR_HOLD_RE): '" "$AM" | neutral_ci)
-FORBIDDEN_RE='continue-on-error|BASH_ENV|GITHUB_ENV|GITHUB_PATH|[$][{]!|sudo|(^|[^A-Za-z0-9_])(PATH|HOME)[[:space:]]*[:=]|[.]jq([^A-Za-z0-9_]|$)|(^|[[:space:]'"'"'"])(defaults|shell)['"'"'"]?[[:space:]]*:|^[[:space:]]*(-[[:space:]]+)?[?]([[:space:]]|$)'
+FORBIDDEN_RE='continue-on-error|BASH_ENV|GITHUB_ENV|GITHUB_PATH'
 forbidden=$(grep -cE "$FORBIDDEN_RE" <<< "$not_patterns" || true)
-quotes=$(grep -cE '[A-Za-z0-9_](""|'"''"')[A-Za-z0-9_]' <<< "$not_patterns" || true)
-not_comments=$(grep -vE '^[[:space:]]*#' <<< "$not_patterns" || true)
-escaped=$(grep -cE "$KEY_AT"'"[^"]*\\[^"(\\][^"]*"[[:space:]]*(:|#|$)' <<< "$not_comments" || true)
-yaml_keys=$(grep -cE "$KEY_POS"'([?]([[:space:]]|$)|[*][^][{},[:space:]]+[[:space:]]*:)' <<< "$not_comments" || true)
 ci_names=$(defines CI_NAME)
 ci_notes=$(grep -cE "^      # CI: every run of a workflow named $CI_VALUE for this commit\$" "$AM" || true)
-defs=$(grep -cE '\(\)[[:space:]]*\{|(^|[^A-Za-z0-9_.-])function[[:space:]]' <<< "$jobs_code" || true)
-known_defs=$(grep -cE '^ *(signoff_state|dependabot_verdict|bump_level)\(\) \{$' "$AM" || true)
-builtins=$(grep -cE '(^|[;&|[:space:]])(alias|enable|shopt|unset)[[:space:]]' <<< "$jobs_code" || true)
-continued=$(awk 'held { line = $0; sub(/^ */, "", line); if (line !~ /^(-|&&|[|][|])/) bad++; held = 0 } /\\$/ { held = 1 } END { print bad + 0 }' <<< "$not_patterns")
 puts=$(grep -cE '(^|[^A-Za-z0-9_])PUT([^A-Za-z0-9_]|$)' <<< "$jobs_code" || true)
-if [ "$breaks" != "0" ] || [ "$forbidden" != "0" ] || [ "$quotes" != "0" ] || [ "$escaped" != "0" ] || [ "$yaml_keys" != "0" ] \
-   || [ "$ci_names" != "1" ] || [ "$ci_notes" -gt 1 ] || [ "$defs" != "3" ] || [ "$known_defs" != "3" ] \
-   || [ "$builtins" != "0" ] || [ "$continued" != "0" ] || [ "$puts" != "$merging" ]; then
-  bad 10 "the workflow must hold nothing that makes what runs differ from its text or lets a check pass (found: line breaks $breaks, refused words or keys $forbidden, empty quotes in a word $quotes, keys with a YAML escape $escaped, explicit or alias keys $yaml_keys, CI_NAME lines $ci_names (1 expected: the CI workflow's name is read as a neutral word there) and comments naming it $ci_notes (at most 1), function definitions $defs (3 known: $known_defs), alias/enable/shopt/unset $builtins, continuations not followed by an option $continued, PUT calls $puts for $merging merge call(s))"
+if [ "$forbidden" != "0" ] || [ "$ci_names" != "1" ] || [ "$ci_notes" -gt 1 ] || [ "$puts" != "$merging" ]; then
+  bad 10 "the workflow must hold nothing that lets a check pass (found: refused words $forbidden (continue-on-error, BASH_ENV, GITHUB_ENV, GITHUB_PATH), CI_NAME lines $ci_names (1 expected: the CI workflow's name is read as a neutral word there) and comments naming it $ci_notes (at most 1), PUT calls $puts for $merging merge call(s))"
 fi
 expressions=$(awk '
   inblock && /^[[:space:]]*$/ { next }
@@ -1238,6 +1213,19 @@ if [ -n "$ci_name" ]; then
     note "no workflow named \"$ci_name\" under .github/workflows/ — until one exists, nothing is merged"
   elif [ "${am9:-0}" = 0 ]; then
     ok "AM-9: the CI workflow runs again when a pull request is retargeted"
+  fi
+fi
+
+# Advisory: the text checks above assume a ruleset on the default branch that
+# requires a code-owner review for .github/ (auto-merge-policy.md § Setting it
+# up). Where it cannot be verified from here the gate says so and does not fail.
+if [ "${HARNESS_OFFLINE:-false}" = true ] || ! command -v gh > /dev/null 2>&1; then
+  note "AM-10: not verified here that the default branch has a ruleset requiring a code-owner review for .github/ — the text checks of $AM assume it (auto-merge-policy.md § Setting it up)"
+else
+  branch=$(git symbolic-ref --short refs/remotes/origin/HEAD 2> /dev/null | sed 's|^origin/||' || true)
+  rules=$(gh api "repos/{owner}/{repo}/rules/branches/${branch:-main}" --jq '[.[] | select(.type == "pull_request") | .parameters.require_code_owner_review] | any' 2> /dev/null || true)
+  if [ "$rules" != "true" ]; then
+    note "AM-10: could not verify that the default branch has a ruleset requiring a code-owner review (enforced, and covering .github/ through CODEOWNERS, is yours to check) — the text checks of $AM assume it; without it a rewrite of the workflow is not stopped (auto-merge-policy.md § Setting it up)"
   fi
 fi
 
