@@ -1,5 +1,0 @@
-bump: minor
-
-auto-merge: AM-10 keeps its cheap text checks (`continue-on-error`, `BASH_ENV`, `GITHUB_ENV`, `GITHUB_PATH`, a `PUT` beyond the merge calls, no `${{ }}` in a run script) and drops the refusals that tried to read what YAML and bash will do: the refused-word list, escaped, alias, explicit and quoted keys, line breaks, function, builtin, continuation and empty-quote counts, with their broken copies. The pins of AM-1, AM-7, AM-8 and the check after each merge stay. The text checks now assume the default branch's ruleset (code-owner review on `.github/`), a prerequisite of the module; the guard notes, without failing, where it cannot verify one. The policy page's § Setting it up, § Residual risks and § Checks say so. Settles the residuals of the escaped-key and alias-key checks.
-
-By hand: where auto-merge is installed, make sure the default branch has the ruleset (code-owner review on `.github/`, no bypass for GitHub Actions): the checks no longer stand in for it (docs/conventions/auto-merge-policy.md § Setting it up).
