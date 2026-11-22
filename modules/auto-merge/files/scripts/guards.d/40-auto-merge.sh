@@ -127,7 +127,10 @@ else
   # entry), CLAUDE.md / CLAUDE.local.md / AGENTS.md anywhere, case variants (a
   # case-insensitive file system folds them), the git hooks directory, a
   # project MCP config, the other files a Claude CI action reads as
-  # configuration, and what runs Claude in CI or enforces all this.
+  # configuration, an OpenSpec config and its schemas at any depth (the
+  # workflows hand them to a session as instructions) and a bare openspec
+  # entry (a symlink would bring both along), and what runs Claude in CI or
+  # enforces all this. The rest of openspec/ merges on green CI.
   for p in CLAUDE.md claude.md sub/CLAUDE.md CLAUDE.local.md \
            AGENTS.md agents.md sub/AGENTS.md docs/Agents.md \
            .claude/agents/x.md sub/.Claude/agents/x.md sub/.claude \
@@ -149,6 +152,8 @@ else
            scripts/fetch-pinned-release.sh .gitleaks.toml .gitleaksignore \
            .gitleaks.json .GITLEAKS.JSON zizmor.yml zizmor.yaml \
            .npmrc packages/api/.npmrc \
+           openspec/config.yaml sub/openspec/config.yaml OpenSpec/Config.YML \
+           openspec/schemas/x/schema.yaml sub/openspec/schemas openspec sub/OpenSpec \
            .github/zizmor.yml .github/zizmor.yaml scripts/auto-merge-paths.txt \
            SECURITY_REVIEW.md SECURITY_REVIEW_2026-11.md security_review.md \
            docs/conventions/auto-merge-policy.md docs/conventions/new-rule.md \
@@ -170,6 +175,9 @@ else
            src/.gitleaks.toml .gitleaks.toml.md docs/zizmor.yml .github/zizmor.md \
            src/.gitleaks.json .gitleaks.json.md src/zizmor.yml zizmor.yml.md \
            .npmrc.example docs/npmrc.md \
+           openspec/changes/x/tasks.md openspec/specs/x/spec.md docs/openspec-notes.md \
+           openspec/config.yaml.md openspec/configx.yaml openspec/schemasx/a.yaml \
+           openspec.md bin/openspec-cli src/openspecs/config.yaml \
            scripts/auto-merge-paths.txt.md SECURITY.md docs/SECURITY_REVIEW.md \
            SECURITY_REVIEW.md.txt; do
     if grep -qiE "$RE" <<< "$p"; then bad 1 "non-gated path matched by CLAUDE_GATE_RE: $p"; fi
