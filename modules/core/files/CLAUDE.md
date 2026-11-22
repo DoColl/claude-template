@@ -72,7 +72,7 @@ Instruction files are executed by every session: in doubt between tiers 1 and 2,
 
 ### Findings policy
 
-Every finding raised by a review pass, by the gate or by CI is fixed before the change is merged. The only exception is an explicit, motivated derogation from the project owner, recorded in the Derogations table of `SECURITY_REVIEW.md` (which finding, why not now, who decided, the review date) and named in the pull request. A rejected finding needs a stated reason. Once fixed, a finding gets its ID, its line in `SECURITY_REVIEW.md` and its guard.
+Every finding raised by a review pass, by the gate or by CI is fixed before the change is merged. The only exception is an explicit, motivated derogation from the project owner, recorded in the Derogations table of `SECURITY_REVIEW.md` (which finding, why not now, who decided, the review date) and named in the pull request. A rejected finding needs a stated reason. Once fixed, a finding gets its ID, its line in `SECURITY_REVIEW.md` and its guard. When a finding is not specific to this project and the kit has no rule or check for its class, also draft an issue for the kit (`/retro` step 5).
 
 ### Conventions for new code
 
