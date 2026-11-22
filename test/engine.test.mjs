@@ -540,3 +540,25 @@ test("setVersion changes the version alone and keeps the file's layout", () => {
   assert.throws(() => setVersion(pkg, "0.7.0", "0.9.0", "package.json"), /package\.json says version 0\.8\.0/);
   assert.throws(() => setVersion('{ "engines": { "version": "0.8.0" }, "version": "0.8.0" }', "0.8.0", "0.9.0", "x.json"), /could not be changed alone/, "the first match is not the top-level key");
 });
+
+// A line that starts with `::` is a workflow command. A step that prints text it does not control turns them off
+// around it (docs/module-authoring.md § Workflows). The steps below print a scanner's report or titles from outside;
+// eco-design's own test covers its script.
+test("steps that print outside text turn workflow commands off, and back on before their own annotation", () => {
+  const security = read(kit.modules.get("ci-security").dir, "files/.github/workflows/security.yml");
+  for (const step of ["Run Semgrep (results in log only)", "Scan filesystem (results in log only)"]) {
+    const at = security.indexOf(`- name: ${step}`);
+    assert.ok(at > 0, `${step}: the step exists`);
+    const body = security.slice(at, security.indexOf("\n      - ", at + 10) > 0 ? security.indexOf("\n      - ", at + 10) : undefined);
+    const stop = body.indexOf('echo "::stop-commands::${token}"');
+    const resume = body.indexOf('echo "::${token}::"');
+    const warn = body.indexOf('echo "::warning::');
+    assert.match(body, /token=\$\(cat \/proc\/sys\/kernel\/random\/uuid\)/, `${step}: a random token per run`);
+    assert.ok(stop > 0 && resume > stop, `${step}: commands off, then back on`);
+    assert.ok(warn > resume, `${step}: its own annotation comes after the resume`);
+    assert.doesNotMatch(body, /\|\| echo "::warning::/, `${step}: no annotation chained to the scanner, where it would be silenced`);
+  }
+  const digest = read(kit.modules.get("weekly-digest").dir, "files/scripts/weekly-digest.mjs");
+  assert.match(digest, /console\.log\(`::stop-commands::\$\{stop\}\\n\$\{digest\.markdown\}\\n::\$\{stop\}::`\)/, "the digest prints its titles with workflow commands off");
+  assert.match(digest, /const stop = randomUUID\(\)/, "under a random token");
+});

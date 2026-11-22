@@ -20,6 +20,7 @@
 import { readFileSync, readdirSync, appendFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import config from './weekly-digest.config.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -570,7 +571,9 @@ async function main() {
   const gh = client(token, repo);
   const now = new Date();
   const digest = buildDigest(await collect(gh, repo, now));
-  console.log(digest.markdown);
+  // Titles come from outside: workflow commands are off while they print.
+  const stop = randomUUID();
+  console.log(`::stop-commands::${stop}\n${digest.markdown}\n::${stop}::`);
   if (summary) appendFileSync(summary, `${digest.markdown}\n`);
   if (!dryRun) await publish(gh, repo.split('/')[0], digest, now);
 }
