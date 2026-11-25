@@ -8,7 +8,7 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { loadKit, listModules, resolveSelection, PHASES } from "../lib/kit.mjs";
 import { byHandBetween } from "../lib/changelog.mjs";
-import { buildPlan, applyPlan, summarize, readManifest, resolveValues, pendingWork, drift, selector, kitVersion, MANIFEST } from "../lib/install.mjs";
+import { buildPlan, applyPlan, buildRemoval, applyRemoval, summarize, readManifest, resolveValues, pendingWork, drift, selector, kitVersion, MANIFEST } from "../lib/install.mjs";
 
 const USAGE = `claude-template — a modular Claude Code harness for a project
 
@@ -20,6 +20,7 @@ const USAGE = `claude-template — a modular Claude Code harness for a project
   node bin/harness.mjs show <dir> <file>          print the kit's version of a file, to compare
   node bin/harness.mjs status <dir>               what is installed, what drifted, what is left to write
   node bin/harness.mjs update <dir> [options]     refresh the kit-owned files left untouched
+  node bin/harness.mjs remove <dir> --modules a,b take modules out of an initialised project
 
 Options for init / add / adopt:
   --modules a,b    module ids (what they require is added; "core" always is)
@@ -57,6 +58,16 @@ Option for adopt:
   --decline-fragments  record the sections that have no slot in the project's
                    instruction files as declined: they are not proposed again
                    (remove a key from "declined" in the manifest to undo)
+
+remove deletes the files of the modules named that are still as installed,
+takes their sections out of the instruction files and their blocks out of
+.gitignore, and drops them from the manifest. What the project wrote stays and
+is listed: a kit file edited here (--force deletes it too), a project-owned
+file that was filled in, a section that was reworded. It refuses a module that
+another installed one requires unless both are named, and "core". What a module
+had you set up outside the files (repository settings, secrets, labels, git
+configuration) is yours to undo. --dry-run shows the plan; exit 2 when
+something of the kit's is left to remove by hand.
 
 Without --modules or --all, init asks which modules to install when run in a
 terminal. Running init again is safe: files already in place are left alone.`;
@@ -236,6 +247,32 @@ function update(kit, dir, opt) {
   return s.conflicts.length ? 2 : 0;
 }
 
+function remove(kit, dir, opt) {
+  const target = requireDir(dir);
+  if (!readManifest(target)) throw new Usage(`${target} is not initialised (no ${MANIFEST})`);
+  if (opt.all) throw new Usage("remove takes --modules: name what goes");
+  for (const k of ["set", "only", "check", "merge", "decline-fragments"]) if (opt[k]) throw new Usage(`--${k} does not go with \`remove\``);
+  const moduleIds = (opt.modules ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!moduleIds.length) throw new Usage("remove expects --modules <ids>");
+  const plan = buildRemoval({ kit, target, moduleIds, force: Boolean(opt.force) });
+  const dryRun = Boolean(opt["dry-run"]);
+  const verb = dryRun ? "would be " : "";
+  out(`${kit.name} ${kit.version} → ${plan.target}${dryRun ? "  (dry run, nothing written)" : ""}`);
+  out(`removed: ${plan.gone.join(", ")}`);
+  out(`modules: ${plan.remaining.join(", ")}`);
+  const line = (label, items) => { if (items.length) { out(`\n${label} (${items.length})`); for (const i of items) out(`  ${i}`); } };
+  line(`${verb}deleted`, plan.deleted);
+  line(`sections ${verb}taken out`, plan.fragmentsRemoved);
+  line(`blocks ${verb}taken out`, plan.blocksRemoved);
+  line("kept — project-owned files that were filled in; delete them if they are of no use", plan.keptSeeds);
+  line("LEFT IN PLACE — kit files edited here; delete them by hand, or re-run with --force", plan.keptEdited);
+  line("sections NOT taken out — not found as they were inserted; remove them by hand", plan.fragmentsLeft.map((f) => `${f.target}  (${f.source ?? f.key})`));
+  line("blocks NOT taken out — edited here; remove them by hand, or re-run with --force", plan.blocksLeft);
+  out("\nWhat these modules had you set up outside the files (repository settings, secrets, labels, git configuration) is yours to undo: their convention pages say what that was.");
+  if (!dryRun) applyRemoval(plan);
+  return plan.keptEdited.length || plan.fragmentsLeft.length || plan.blocksLeft.length ? 2 : 0;
+}
+
 function show(kit, dir, file, opt) {
   const target = requireDir(dir);
   if (!file) throw new Usage("show expects <dir> <file>");
@@ -284,6 +321,7 @@ async function main(argv) {
     case "init": case "add": case "adopt": return install(kit, cmd, dir, opt);
     case "show": return show(kit, dir, extra.shift(), opt);
     case "update": return update(kit, dir, opt);
+    case "remove": return remove(kit, dir, opt);
     case "status": return status(kit, dir, opt);
     default: throw new Usage(`unknown command "${cmd}"`);
   }

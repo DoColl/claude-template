@@ -10,7 +10,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { entries as changelogEntries, byHandBetween } from "../lib/changelog.mjs";
 import { nextVersion } from "../lib/release.mjs";
 import { loadKit, listModules, KIT_ROOT } from "../lib/kit.mjs";
-import { buildPlan, applyPlan, summarize, readManifest, drift, walk, MANIFEST } from "../lib/install.mjs";
+import { buildPlan, applyPlan, buildRemoval, applyRemoval, summarize, readManifest, drift, walk, MANIFEST } from "../lib/install.mjs";
 
 const kit = loadKit();
 const CLI = path.join(KIT_ROOT, "bin/harness.mjs");
@@ -404,6 +404,116 @@ test("update removes what the kit no longer ships when it is untouched, and only
   fs.writeFileSync(path.join(dir, MANIFEST), JSON.stringify(m, null, 2));
   assert.throws(() => buildPlan({ kit: v2, target: dir, mode: "update" }), /outside the project/);
   assert.ok(fs.existsSync(outside));
+});
+
+// What a project looks like, manifest included: every file but git's.
+const tree = (dir) => Object.fromEntries(walk(dir).filter((rel) => !rel.startsWith(".git/")).map((rel) => [rel, read(dir, rel)]));
+
+for (const id of ALL.filter((m) => !kit.modules.get(m).required)) {
+  test(`remove ${id}: an untouched project ends as if the module had never been installed`, () => {
+    // with it go the modules that require it, named in the same run
+    const going = ALL.filter((m) => { const seen = new Set(); const needs = (x) => x === id || (!seen.has(x) && (seen.add(x), (kit.modules.get(x).requires ?? []).some(needs))); return needs(m); });
+    const dir = tmp(), fresh = tmp();
+    install(dir, ALL);
+    const plan = buildRemoval({ kit, target: dir, moduleIds: going });
+    assert.deepEqual([plan.keptSeeds, plan.keptEdited, plan.fragmentsLeft, plan.blocksLeft], [[], [], [], []]);
+    applyRemoval(plan);
+    install(fresh, ALL.filter((m) => !going.includes(m)));
+    assert.deepEqual(tree(dir), tree(fresh));
+  });
+}
+
+test("remove deletes nothing the project wrote, names what it leaves, and refuses a module another one stands on", () => {
+  if (!["agents", "security-review", "headroom", "node-audit"].every((m) => kit.modules.has(m))) return;
+  const dir = tmp();
+  install(dir, ["agents", "security-review", "headroom", "node-audit"]);
+  const before = tree(dir);
+  // refusals: nothing is written
+  const needed = cli("remove", dir, "--modules", "agents"); assert.equal(needed.status, 1); assert.match(needed.stderr, /security-review requires agents.*--modules agents,security-review/);
+  assert.match(cli("remove", dir, "--modules", "core").stderr, /core is always installed/);
+  assert.match(cli("remove", dir, "--modules", "auto-merge").stderr, /auto-merge is not installed here/);
+  assert.match(cli("remove", dir).stderr, /expects --modules/);
+  assert.match(cli("remove", dir, "--all").stderr, /name what goes/);
+  assert.match(cli("remove", tmp(), "--modules", "agents").stderr, /is not initialised/);
+  assert.deepEqual(tree(dir), before);
+
+  // what the project wrote: a kit file edited, a seed filled in, a section reworded, a line of its own in a block
+  const scribble = (d) => {
+    fs.appendFileSync(path.join(d, "scripts/guards.d/48-headroom.sh"), "# ours\n");
+    fs.appendFileSync(path.join(d, "scripts/audit-allowlist.json"), "\n");
+    write(d, "CLAUDE.md", read(d, "CLAUDE.md").replace("- **Headroom**", "- **Headroom, here**"));
+    write(d, ".gitignore", read(d, ".gitignore").replace("# <<< claude-template:headroom", "ours/\n# <<< claude-template:headroom"));
+  };
+  scribble(dir);
+  const edited = tree(dir);
+  const dry = cli("remove", dir, "--modules", "headroom,node-audit", "--dry-run");
+  assert.equal(dry.status, 2, output(dry)); assert.match(dry.stdout, /dry run, nothing written/); assert.deepEqual(tree(dir), edited);
+  const r = cli("remove", dir, "--modules", "headroom,node-audit");
+  assert.equal(r.status, 2, output(r));
+  assert.match(r.stdout, /kept — project-owned[^\n]*\n  scripts\/audit-allowlist\.json/);
+  assert.match(r.stdout, /LEFT IN PLACE[^\n]*\n  scripts\/guards\.d\/48-headroom\.sh/);
+  assert.match(r.stdout, /sections NOT taken out[^\n]*\n  CLAUDE\.md  \(modules\/headroom\/fragments\/CLAUDE\.md\/conventions\.frag\)/);
+  assert.match(r.stdout, /blocks NOT taken out[^\n]*\n  \.gitignore  \(# >>> claude-template:headroom\)/);
+  for (const rel of ["scripts/guards.d/48-headroom.sh", "scripts/audit-allowlist.json", ".gitignore"]) assert.equal(read(dir, rel), edited[rel], rel);
+  assert.match(read(dir, "CLAUDE.md"), /Headroom, here/); assert.doesNotMatch(read(dir, "CLAUDE.md"), /npm audit gate/);
+  assert.ok(!fs.existsSync(path.join(dir, "docs/conventions/headroom.md")) && !fs.existsSync(path.join(dir, "scripts/audit-gate.mjs")), "the untouched files are gone");
+  const m = readManifest(dir);
+  assert.deepEqual(m.modules, ["core", "agents", "security-review"]);
+  assert.ok(!Object.values(m.files).some((f) => ["headroom", "node-audit"].includes(f.module)) && !m.fragments.some((k) => /^(headroom|node-audit):/.test(k)));
+  assert.deepEqual(drift(dir, m), { modified: [], missing: [] });
+  // the same module again: what was left is found as it is, and the project's lines survive
+  assert.equal(cli("add", dir, "--modules", "headroom").status, 2, "the edited guard is now a file of the project's at a kit path");
+
+  // --force: the edited kit file and the edited block go too; a filled seed and a reworded section never do
+  const forced = tmp();
+  install(forced, ["headroom", "node-audit"]);
+  scribble(forced);
+  const f = cli("remove", forced, "--modules", "headroom,node-audit", "--force");
+  assert.equal(f.status, 2, output(f));
+  assert.ok(!fs.existsSync(path.join(forced, "scripts/guards.d/48-headroom.sh")));
+  assert.doesNotMatch(read(forced, ".gitignore"), /headroom|ours/);
+  assert.ok(fs.existsSync(path.join(forced, "scripts/audit-allowlist.json")));
+  assert.match(read(forced, "CLAUDE.md"), /Headroom, here/);
+  // the section left behind points at a page that is gone: the gate names it until it is reworded or removed
+  const g = gate(forced); assert.equal(g.status, 1, output(g)); assert.match(output(g), /CM-2: CLAUDE\.md points to docs\/conventions\/headroom\.md/);
+  write(forced, "CLAUDE.md", read(forced, "CLAUDE.md").split("\n").filter((l) => !l.includes("Headroom, here")).join("\n"));
+  const green = gate(forced); assert.equal(green.status, 0, output(green));
+});
+
+// The paths remove deletes come from the manifest, a file of the project: a cloned repository can name anything there.
+test("remove deletes nothing outside the project, whatever the manifest names", () => {
+  if (!kit.modules.has("headroom")) return;
+  const sha = (text) => crypto.createHash("sha256").update(text).digest("hex");
+  const outside = tmp("harness-outside-");
+  write(outside, "victim.txt", "keep\n");
+  const cases = {
+    "a path that climbs out": (dir) => path.relative(dir, path.join(outside, "victim.txt")).split(path.sep).join("/"),
+    "a directory symlink": (dir) => { fs.symlinkSync(outside, path.join(dir, "linked"), "dir"); return "linked/victim.txt"; },
+  };
+  for (const [label, rel] of Object.entries(cases)) {
+    const dir = tmp();
+    install(dir, ["headroom"]);
+    const m = readManifest(dir);
+    m.files[rel(dir)] = { module: "headroom", sha256: sha("keep\n") };
+    write(dir, MANIFEST, JSON.stringify(m));
+    const before = [read(dir, MANIFEST), walk(path.join(dir, "docs")), walk(path.join(dir, "scripts")), read(dir, "CLAUDE.md"), read(dir, ".gitignore")];
+    for (const extra of [[], ["--force"]]) {
+      const r = cli("remove", dir, "--modules", "headroom", ...extra);
+      assert.equal(r.status, 1, `${label}: ${output(r)}`); assert.match(r.stderr, /resolves outside the project/, label);
+    }
+    assert.equal(read(outside, "victim.txt"), "keep\n", label);
+    assert.deepEqual([read(dir, MANIFEST), walk(path.join(dir, "docs")), walk(path.join(dir, "scripts")), read(dir, "CLAUDE.md"), read(dir, ".gitignore")], before, `${label}: the removal is refused as a whole`);
+  }
+  // a link to a file is not a file of the kit's: it stays, and so does what it points at
+  const dir = tmp();
+  install(dir, ["headroom"]);
+  const m = readManifest(dir);
+  fs.symlinkSync(path.join(outside, "victim.txt"), path.join(dir, "link.txt"));
+  m.files["link.txt"] = { module: "headroom", sha256: sha("keep\n") };
+  write(dir, MANIFEST, JSON.stringify(m));
+  const r = cli("remove", dir, "--modules", "headroom", "--force");
+  assert.equal(r.status, 2, output(r)); assert.match(r.stdout, /LEFT IN PLACE[^\n]*\n  link\.txt/);
+  assert.equal(read(outside, "victim.txt"), "keep\n");
 });
 
 test("the manifest names the commit of the kit's checkout, and versions agree across the kit", () => {

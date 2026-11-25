@@ -51,9 +51,12 @@ node /path/to/claude-template/bin/harness.mjs update . --modules agents     # on
 node /path/to/claude-template/bin/harness.mjs update . --only scripts/guards.d   # or one file, or one directory
 node /path/to/claude-template/bin/harness.mjs update . --merge              # merge a kit file you edited with the kit's new version
 node /path/to/claude-template/bin/harness.mjs update . --set TEST_HOLD_RE='(^|/)tests?/'   # change a setting of the installation
+node /path/to/claude-template/bin/harness.mjs remove . --modules headroom --dry-run   # take a module out; without --dry-run it writes
 ```
 
 Running `init` again is safe: files already in place are left alone.
+
+`remove` is the reverse of `add` for what the manifest recorded: it deletes the module's files that are still as installed, takes its sections out of `CLAUDE.md` and the other instruction files, its block out of `.gitignore`, and drops it from the manifest. It deletes nothing the project wrote. A kit file edited in the project stays (`--force` deletes it too), a project-owned file that was filled in stays, and a section that was reworded is left where it is; each is listed, and the command exits 2 when something of the kit's is left to remove by hand. A section left behind that points at a deleted page turns CM-2 red, so run the gate afterwards. A module that another installed one requires goes only with it, both named in the same run, and `core` never goes. What a module had you set up outside the files — a ruleset, a secret, a label, `core.hooksPath` — is yours to undo. The command is covered by the kit's tests, where removing any module from an untouched project gives the files of a project that never had it; it has not been run on a real project.
 
 A repository that already has its own hooks, guards or workflows at the paths the kit writes takes `adopt` instead of `init`:
 
