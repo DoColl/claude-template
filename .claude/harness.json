@@ -58,7 +58,7 @@
     },
     "docs/conventions/local-gate.md": {
       "module": "core",
-      "sha256": "2b2fce0a1f870aa664745d04b4beefad6f810c9ab0e41f3e8164f06fa20603fd"
+      "sha256": "575bf2877bdc72708a863ee54324ff6745dfe2ad657785fcd729a641fe9bc1af"
     },
     "docs/conventions/review-tiers.md": {
       "module": "core",
