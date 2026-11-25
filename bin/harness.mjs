@@ -8,6 +8,7 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { loadKit, listModules, resolveSelection, PHASES } from "../lib/kit.mjs";
 import { byHandBetween } from "../lib/changelog.mjs";
+import { readFragments, FRAGMENTS } from "../lib/release.mjs";
 import { buildPlan, applyPlan, buildRemoval, applyRemoval, summarize, readManifest, resolveValues, pendingWork, drift, selector, kitVersion, MANIFEST } from "../lib/install.mjs";
 
 const USAGE = `claude-template — a modular Claude Code harness for a project
@@ -233,6 +234,23 @@ function update(kit, dir, opt) {
   if (steps.length) {
     out(`\nBY HAND — not done by \`update\`, from CHANGELOG.md (${steps.length} version(s) crossed; check each one)`);
     for (const e of steps) out(`  ${e.version}  ${e.byHand.replace(/\n+/g, "\n          ")}`);
+  }
+  // A kit ahead of its last release: fragments wait in changes/. The files are
+  // those of the checkout, the version is still the last release's, and the
+  // By hand steps of the fragments are in no changelog entry yet. Said here,
+  // with the steps; not counted as "behind" either. The kit updating its own
+  // root is where fragments are written: nothing to say there.
+  if (fs.realpathSync(target) !== fs.realpathSync(kit.root)) {
+    let waiting = [], unread = "";
+    try { waiting = readFragments(kit.root); } catch (e) { unread = e.message; }
+    if (waiting.length || unread) {
+      const commit = kit.commit ? `the files are those of commit ${kit.commit.slice(0, 7)}, which the manifest records beside that version` : "the files are those of this copy of the kit, which the manifest's version does not name";
+      out(`\nUNRELEASED — this kit is ahead of its release ${kit.version}: ${unread ? "" : `${waiting.length} `}changelog fragment(s) wait in ${FRAGMENTS}/; ${commit}. Their By hand steps are in no CHANGELOG.md entry yet; the update that crosses their release lists them again`);
+      for (const f of waiting.filter((f) => !f.nothing)) out(`  ${f.file}  ${f.byHand.replace(/\n+/g, "\n          ")}`);
+      const nothing = waiting.filter((f) => f.nothing).map((f) => f.file);
+      if (nothing.length) out(`  nothing by hand: ${nothing.join(", ")}`);
+      if (unread) out(`  not read as fragments, open them:\n    ${unread.replace(/\n/g, "\n    ")}`);
+    }
   }
   if (opt.check) {
     const behind = s.created.length + s.updated.length + s.merged.length + s.appended.length + s.fragmentsInserted.length + s.removed.length + s.conflicts.length + s.dropped.length;

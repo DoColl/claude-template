@@ -14,7 +14,7 @@ node <kit>/bin/harness.mjs status .
 node <kit>/bin/harness.mjs update . --check        # writes nothing; exit 3 when behind
 ```
 
-`update` ends its report, `--check` included, with the "BY HAND" steps of the versions it crosses, taken from `<kit>/CHANGELOG.md`: what no update does. Read the entries themselves for the rest of what changed.
+`update` ends its report, `--check` included, with the "BY HAND" steps of the versions it crosses, taken from `<kit>/CHANGELOG.md`: what no update does. Read the entries themselves for the rest of what changed. When the kit is a checkout ahead of its last release, the report adds an "UNRELEASED" part: the changelog fragments waiting in `<kit>/changes/`, with their "By hand" steps, which no changelog entry carries yet. The manifest then records the last release's version beside the commit the files came from; say so to the user, and prefer a release tag for a project that is not the kit's own test.
 
 ## 2. Choose the scope with the user
 

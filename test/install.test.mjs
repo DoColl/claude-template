@@ -735,6 +735,22 @@ test("update lists the By hand steps of the versions it crosses, until the manif
   assert.match(up().stdout, /BY HAND/, "shown by the update that crosses the version");
   const after = up("--check"); assert.equal(after.status, 0); assert.doesNotMatch(after.stdout, /BY HAND/, "and not once the manifest names it");
   assert.deepEqual(byHandBetween(kitCopy(), "1.0.0", "9.9.9"), [], "a kit without a changelog has no step to show");
+
+  // The kit ahead of its release: fragments wait in changes/. Their steps are in no changelog entry, so the report
+  // names them, on a dry run and on a real one, and says the version recorded is the last release's.
+  assert.doesNotMatch(after.stdout, /UNRELEASED/, "no fragment waiting: nothing is said");
+  write(root, "changes/drop-filter.md", "bump: minor\n\n- A change.\n\nBy hand: remove the path filter\nfrom the CI workflow.\n");
+  write(root, "changes/quiet.md", "bump: patch\n\n- Another.\n\nBy hand: nothing.\n");
+  for (const args of [["--dry-run"], ["--check"], []]) {
+    const r = up(...args); assert.equal(r.status, 0, output(r));
+    assert.match(r.stdout, /UNRELEASED — this kit is ahead of its release 1\.2\.0: 2 changelog fragment\(s\) wait in changes\/[^\n]*\n  changes\/drop-filter\.md  By hand: remove the path filter\n +from the CI workflow\.\n  nothing by hand: changes\/quiet\.md\n/, `update ${args.join(" ")}`);
+  }
+  assert.equal(readManifest(dir).kit.version, "1.2.0", "the version recorded stays the last release's");
+  write(root, "changes/broken.md", "no bump line\n");
+  const broken = up("--check"); assert.equal(broken.status, 0, output(broken));
+  assert.match(broken.stdout, /UNRELEASED[^\n]*\n  not read as fragments, open them:\n    changes\/broken\.md: /, "a fragment that does not parse is named, and stops nothing");
+  const own = cli("update", KIT_ROOT, "--dry-run"); assert.match(own.stdout, /dry run, nothing written/, output(own));
+  assert.doesNotMatch(own.stdout, /UNRELEASED/, "the kit updating its own root: the fragments there are its work in progress");
 });
 
 // A version that changed nothing a project installs still moves the manifest: until `update` writes it, the
