@@ -9,7 +9,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { loadKit, resolveSelection, listModules, PHASES, KIT_ROOT } from "../lib/kit.mjs";
 import { walk } from "../lib/install.mjs";
-import { render, tokensIn, insertAtSlot, slotsIn, appendBlock } from "../lib/render.mjs";
+import { render, tokensIn, insertAtSlot, removeFromSlot, slotsIn, appendBlock, removeBlock } from "../lib/render.mjs";
 import { parseEntries } from "../lib/changelog.mjs";
 import { LEVELS, parseFragment, readFragments, highestLevel, nextVersion, composeEntry, insertEntry, setVersion } from "../lib/release.mjs";
 
@@ -38,6 +38,38 @@ test("insertAtSlot does not confuse a slot with one whose name it prefixes", () 
   assert.equal(insertAtSlot(doc, "conventions", "- x"), "<!-- harness:rows conventions-index -->\n- x\n<!-- harness:rows conventions -->\n");
   assert.deepEqual(slotsIn(doc), ["conventions-index", "conventions"]);
   assert.equal(insertAtSlot("# harness:slot a\n", "a", "x: 1"), "x: 1\n\n# harness:slot a\n", "any comment syntax");
+});
+
+test("removeFromSlot undoes insertAtSlot, and guesses nothing when the lines are not as inserted", () => {
+  const doc = "# T\n<!-- harness:slot intro -->\n| a |\n|---|\n<!-- harness:rows table -->\nend\n";
+  for (const [slot, frag] of [["intro", "para\n\nmore\n"], ["table", "| 1 |\n| 2 |\n"]]) {
+    const first = insertAtSlot(doc, slot, frag), second = insertAtSlot(first, slot, "other");
+    assert.equal(removeFromSlot(first, slot, frag), doc, slot);
+    assert.equal(removeFromSlot(second, slot, frag), insertAtSlot(doc, slot, "other"), `${slot}: the fragment inserted after it stays`);
+    assert.equal(removeFromSlot(first.replace("| 1 |", "| one |").replace("para", "Para"), slot, frag), null, `${slot}: reworded`);
+    assert.equal(removeFromSlot(insertAtSlot(first, slot, frag), slot, frag), null, `${slot}: found twice`);
+  }
+  assert.equal(removeFromSlot(doc, "intro", "para"), null, "never inserted");
+  // the marker is gone: the blank line after the block goes only when one stands above it
+  assert.equal(removeFromSlot("a\n\npara\n\nb\n", "intro", "para"), "a\n\nb\n");
+  assert.equal(removeFromSlot("a\npara\n\nb\n", "intro", "para"), "a\n\nb\n");
+  assert.throws(() => removeFromSlot(doc, "Bad Name", "x"));
+});
+
+test("removeBlock undoes appendBlock, and leaves an edited block alone unless forced", () => {
+  for (const before of ["", "a\n", "a", "a\n\n"]) {
+    const { text } = appendBlock(before, "m", "x\ny\n");
+    const back = removeBlock(text, "m", "x\ny\n");
+    assert.equal(back.changed, true);
+    assert.equal(back.text.replace(/\n*$/, ""), before.replace(/\n*$/, ""), JSON.stringify(before));
+  }
+  const two = appendBlock(appendBlock("a\n", "m", "x").text, "m:rules", "y").text;
+  assert.equal(removeBlock(two, "m", "x").text, appendBlock("a\n", "m:rules", "y").text, "the block of another marker stays");
+  assert.deepEqual(removeBlock("a\n", "m", "x"), { text: "a\n", changed: false });
+  const edited = appendBlock("a\n", "m", "x").text.replace("\nx\n", "\nx\nmine\n");
+  assert.equal(removeBlock(edited, "m", "x"), null);
+  assert.equal(removeBlock(edited, "m", "x", true).text, "a\n");
+  assert.equal(removeBlock("# >>> m\nx\n", "m", "x", true), null, "no closing line: nothing is cut");
 });
 
 test("appendBlock appends once, whatever the file ends with", () => {

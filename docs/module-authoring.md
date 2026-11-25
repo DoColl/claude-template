@@ -70,6 +70,8 @@ A comment line at the left margin ends a Markdown list or table. A `rows` marker
 
 Fragments may only target seed files. If the target file belongs to a module that is not installed, the fragment waits; if the slot line has been removed from the project's file, the installer says so and the fragment is pasted by hand.
 
+`remove` takes a fragment out again by looking for its lines as they were inserted, rendered with the recorded values: found once, they go; reworded or found twice, they stay and are named. So a fragment's lines must not also appear in the skeleton it goes into, and a module is removed cleanly only if everything it writes is a file, a fragment or an appended block: what a `postInstall` step has the project set up elsewhere is not undone. A test removes every module from a project that holds them all and compares the result with a project that never had it.
+
 Slots provided by `core`:
 
 | File | Slot | Kind | For |
