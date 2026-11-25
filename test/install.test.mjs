@@ -34,6 +34,37 @@ function gate(dir, ...args) {
 }
 const output = (r) => `${r.stdout}\n${r.stderr}`;
 
+// A directory of links to a few commands, given to a guard as its whole PATH. Each command is linked from a place
+// where it works alone: some sessions put a stand-in first on PATH — an `rm` that refuses, or one that hands over to
+// the next `rm` on PATH and finds none in such a directory. So every place PATH names is tried, and for a command
+// with a probe the first copy that does its job is the one linked. Returns the names with no working copy.
+const PROBES = {
+  rm: (exe) => {
+    const dir = tmp("harness-probe-"), file = path.join(dir, "file"), bin = path.join(dir, "bin");
+    fs.writeFileSync(file, ""); fs.mkdirSync(bin); fs.symlinkSync(exe, path.join(bin, "rm"));
+    spawnSync(path.join(bin, "rm"), [file], { env: { PATH: bin } });
+    const deleted = !fs.existsSync(file);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return deleted;
+  },
+};
+function linkTools(bin, tools) {
+  const missing = [];
+  for (const tool of tools) {
+    const places = run(os.tmpdir(), "bash", ["-c", `type -aP ${tool}`]).stdout.split("\n").filter((p) => path.isAbsolute(p));
+    const found = places.find((p) => !PROBES[tool] || PROBES[tool](p));
+    if (found) fs.symlinkSync(found, path.join(bin, tool)); else missing.push(tool);
+  }
+  return missing;
+}
+// On a CI runner every command is there and works: a missing one is a failure. Elsewhere, a machine where no `rm`
+// deletes says so and the test is skipped, rather than failing on an assertion that is not about the change.
+function noWorkingRm(t, missing) {
+  if (process.env.CI || !missing.includes("rm")) return false;
+  t.skip("no rm on this machine's PATH deletes a file when it is run alone: the guard cannot be exercised here");
+  return true;
+}
+
 // What a session loads of CLAUDE.md: the file without its block-level HTML comments. Same narrow definition as CM-1
 // (a comment opening at column 0, outside a code fence, whose closing --> ends its line), written a second time here
 // on purpose: the test below compares the two.
@@ -806,7 +837,7 @@ test("nothing is written through a symlink that leaves the project", () => {
 
 // OS-1 on a CI runner: without the CLI the guard installs the version its lockfile pins, outside the project, and a
 // runner that cannot install it is red, never skipped. npm and the CLI are stand-ins here: the suite needs no network.
-test("openspec: on a runner OS-1 installs the pinned CLI, and fails where a laptop skips", () => {
+test("openspec: on a runner OS-1 installs the pinned CLI, and fails where a laptop skips", (t) => {
   if (!kit.modules.has("openspec")) return;
   const dir = tmp(), bin = path.join(tmp(), "bin"), log = path.join(tmp(), "log");
   install(dir, ["openspec"]);
@@ -829,11 +860,9 @@ test("openspec: on a runner OS-1 installs the pinned CLI, and fails where a lapt
   const env = (extra) => ({ ...ENV, PATH: bin, CI: "", HARNESS_OFFLINE: "", NODE_TEST_CONTEXT: "", LOG: log, ...extra });
   const guard = (extra) => run(dir, "bash", ["scripts/guards.d/46-openspec.sh"], { env: env(extra) });
   fs.mkdirSync(bin);
-  for (const tool of ["bash", "dirname", "find", "head", "tail", "mktemp", "cp", "rm", "mkdir", "chmod"]) {
-    const found = run(dir, "bash", ["-c", `command -v ${tool}`]).stdout.trim();
-    assert.ok(path.isAbsolute(found), `${tool} is on this machine`);
-    fs.symlinkSync(found, path.join(bin, tool));
-  }
+  const missing = linkTools(bin, ["bash", "dirname", "find", "head", "tail", "mktemp", "cp", "rm", "mkdir", "chmod"]);
+  if (noWorkingRm(t, missing)) return;
+  assert.deepEqual(missing, [], "the commands the guard uses are on this machine");
   assert.equal(guard().status, 77, "nothing to validate yet: skipped");
   assert.equal(guard({ CI: "true" }).status, 77, "nothing to validate yet: skipped on a runner too");
   write(dir, "openspec/changes/demo/proposal.md", "# Demo\n");
@@ -2212,10 +2241,7 @@ test("ci-security: GA-2 runs zizmor only from an archive that matches its pinned
   const shasum = which("shasum");
   if (!shasum) { t.diagnostic("shasum is not installed: the fallback is not exercised"); return; }
   const tools = tmp("harness-tools-");
-  for (const tool of ["cut", "grep", "mktemp", "rm", "cp", "mkdir", "tar", "gzip", "perl", "shasum"]) {
-    const where = which(tool);
-    if (where) fs.symlinkSync(where, path.join(tools, tool));
-  }
+  if (noWorkingRm(t, linkTools(tools, ["cut", "grep", "mktemp", "rm", "cp", "mkdir", "tar", "gzip", "perl", "shasum"]))) return;
   const bash = which("bash");
   const fetch = (pin) => {
     const dest = tmp();
