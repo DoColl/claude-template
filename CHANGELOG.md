@@ -16,6 +16,13 @@ The first line is the level, `patch`, `minor` or `major`. After a blank line com
 
 Each entry says what an installed project has to do beyond `update`. Seeds are never rewritten: a change to a skeleton is listed under "By hand" for the projects that want it.
 
+## 0.12.0
+
+- New command `remove <dir> --modules a,b`: takes modules out of an installed project. It deletes their files that are still as installed, takes their sections out of the instruction files and their blocks out of `.gitignore`, and drops them from the manifest; a kit file edited in the project (unless `--force`), a project-owned file that was filled in and a reworded section stay and are listed, with exit 2. It refuses `core`, and a module another installed one requires unless both are named. `--dry-run` shows the plan.
+- `auto-merge`: the status in its policy page and in the README now records the live run with `PROJECT_GATE_RE` set, a test line removed and an enforced ruleset; `MAJOR_HOLD_RE` with a non-default value is still not exercised.
+
+By hand: nothing.
+
 ## 0.11.0
 
 - New value of the installation, `LIGHT_RUNNER` (`ubuntu-slim` by default): the runner label of the short jobs that need only bash, git, jq, the GitHub CLI and Node.js. GitHub bills every job rounded up to the minute, and on a private repository most of the bill of such jobs is rounding; the one-CPU runner costs less per minute. On it: `auto-merge`'s `promote-from-ci`, `ready-on-green`, the weekly digest, the `eco-design` audit (its timeout down from 30 to 15 minutes, that runner's limit) and the CI skeleton's `changes` job.
